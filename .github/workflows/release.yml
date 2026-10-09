@@ -1,0 +1,81 @@
+# Builds OpenAdmiral.app for Apple Silicon and Intel (one universal binary) and
+# attaches the .dmg to a draft GitHub release: review it, then publish.
+#
+#   git tag v0.1.0 && git push origin v0.1.0     # or run it by hand from the Actions tab
+#
+# Signing: without an Apple Developer ID the app is ad-hoc signed, so macOS asks
+# people to confirm the first launch (right-click → Open, or System Settings →
+# Privacy & Security → Open Anyway). To sign and notarize, add these repository
+# secrets and the step below picks them up: APPLE_CERTIFICATE (base64 .p12),
+# APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD
+# (app-specific password) and APPLE_TEAM_ID.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      HAS_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+
+      - name: Use the Developer ID when there is one
+        if: ${{ env.HAS_CERT == 'true' }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
+            echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+          } >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ad-hoc ("-") unless the step above set a real identity.
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY || '-' }}
+        with:
+          projectPath: app
+          tagName: v__VERSION__
+          releaseName: OpenAdmiral v__VERSION__
+          releaseBody: |
+            Download the **.dmg** below (Apple Silicon and Intel), open it and drag OpenAdmiral to Applications.
+
+            Then add the plugin in Claude Code:
+            ```
+            /plugin marketplace add OpenAdmiral/openadmiral
+            /plugin install openadmiral@openadmiral
+            ```
+          releaseDraft: true
+          args: --target universal-apple-darwin --bundles app,dmg

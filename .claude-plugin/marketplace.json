@@ -1,0 +1,11 @@
+{
+  "name": "openadmiral",
+  "owner": { "name": "OpenAdmiral" },
+  "plugins": [
+    {
+      "name": "openadmiral",
+      "source": "./plugin",
+      "description": "Publishes each Claude Code session's live state and tracked delegations for the OpenAdmiral app."
+    }
+  ]
+}

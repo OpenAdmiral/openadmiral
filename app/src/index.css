@@ -1,0 +1,190 @@
+@import "tailwindcss";
+@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@xterm/xterm/css/xterm.css";
+
+/* static: emit every token, including those only read through var() (the chart series). */
+@theme static {
+  --font-sans: "Outfit Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-brand-50: #edf2ff;
+  --color-brand-100: #dce7ff;
+  --color-brand-200: #bad0ff;
+  --color-brand-300: #94b8ff;
+  --color-brand-400: #5c8bff;
+  --color-brand-500: #1258ff;
+  --color-brand-600: #0241e3;
+  --color-brand-700: #0235c0;
+  --color-brand-800: #082d9e;
+  --color-brand-900: #0d2a7c;
+  --color-brand-950: #071847;
+
+  /* Surfaces: the sidebar sits on the window's vibrancy (tinted in light mode so
+     it reads as a deliberate surface, not flat grey); the rest is opaque.
+     Light: warm neutrals, inks dark enough that secondary text stays readable. */
+  --color-canvas: #ffffff;
+  --color-panel: #f5f4f0;
+  --color-sidebar: rgb(238 235 229 / 0.82);
+  --color-line: rgb(41 37 36 / 0.10);
+  --color-line-strong: rgb(41 37 36 / 0.17);
+  --color-ink: #17181c;
+  --color-ink-2: #3f4350;
+  --color-ink-3: #6b6f7b;
+  /* The terminal card is dark in both appearances: Claude Code draws with its own theme. */
+  --color-term: #15171c;
+
+  /* Categorical series, fixed order (dataviz reference palette, validated on
+     #ffffff and #121418): slot n always paints the nth entity, never cycled. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+  --color-series-5: #e87ba4;
+  --color-series-6: #008300;
+  --color-series-7: #4a3aa7;
+  --color-series-other: #b4b8bf;
+
+  --animate-breathe: breathe 1.6s ease-in-out infinite;
+  --animate-ring: ring 1.8s ease-out infinite;
+  --animate-spin-slow: spin 1.6s linear infinite;
+  --animate-nudge: nudge 2.2s ease-in-out infinite;
+
+  @keyframes breathe {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.55; transform: scale(0.82); }
+  }
+  /* Needs you: a gentle ring of the bell, then a rest. */
+  @keyframes nudge {
+    0%, 55%, 100% { transform: rotate(0) scale(1); opacity: 1; }
+    10% { transform: rotate(-14deg) scale(1.12); }
+    20% { transform: rotate(12deg) scale(1.12); }
+    30% { transform: rotate(-8deg) scale(1.06); }
+    40% { transform: rotate(0) scale(1); opacity: 0.75; }
+  }
+  @keyframes ring {
+    0% { transform: scale(0.8); opacity: 0.7; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #121418;
+    --color-panel: #17191e;
+    --color-sidebar: transparent;
+    --color-term: #121418;
+    --color-line: rgb(255 255 255 / 0.07);
+    --color-line-strong: rgb(255 255 255 / 0.12);
+    --color-ink: #eef0f4;
+    --color-ink-2: #a3a9b6;
+    --color-ink-3: #6b7280;
+    --color-series-1: #3987e5;
+    --color-series-2: #d95926;
+    --color-series-3: #199e70;
+    --color-series-4: #c98500;
+    --color-series-5: #d55181;
+    --color-series-6: #008300;
+    --color-series-7: #9085e9;
+    --color-series-other: #5b616b;
+  }
+}
+
+/* font-medium is 400 in BlueSky: emphasis is font-semibold. */
+.font-medium { font-weight: 400; }
+
+html, body, #root {
+  height: 100%;
+  background: transparent;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Preview snapshots (OPENADMIRAL_SHOT) do not capture the window's vibrancy:
+   a solid stand-in so the sidebar reads as it does on screen. */
+html[data-shot] { background: #e9e8e6; }
+@media (prefers-color-scheme: dark) {
+  html[data-shot] { background: #24252a; }
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+  font-feature-settings: "ss01";
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+.selectable { user-select: text; cursor: text; }
+
+/* Quiet scrollbars, as macOS draws overlay ones. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+.xterm { box-sizing: border-box; padding: 14px 4px 10px 16px; height: 100%; }
+
+/* With the sidebar down to its rail, the traffic lights sit over the main pane:
+   each view's first header steps aside for them. */
+main > div > div > header:first-child { transition: padding-left 200ms ease-out; }
+main[data-rail] > div > div > header:first-child { padding-left: 64px; }
+@media (prefers-reduced-motion: reduce) { main > div > div > header:first-child { transition: none; } }
+.xterm .xterm-viewport { background: transparent !important; }
+
+/* Replies in the Conversation panel: model markdown at panel size. */
+.admiral-md > * + * { margin-top: 0.5em; }
+.admiral-md h1, .admiral-md h2, .admiral-md h3, .admiral-md h4 { font-weight: 600; color: var(--color-ink); font-size: 12.5px; margin-top: 0.8em; }
+.admiral-md strong { font-weight: 600; color: var(--color-ink); }
+.admiral-md ul { list-style: disc; padding-left: 1.1em; }
+.admiral-md ol { list-style: decimal; padding-left: 1.3em; }
+.admiral-md li + li { margin-top: 0.15em; }
+.admiral-md a { color: var(--color-brand-600); text-decoration: underline; text-underline-offset: 2px; }
+.admiral-md code { font-family: var(--font-mono); font-size: 10.5px; background: var(--color-line); border-radius: 4px; padding: 0.05em 0.3em; }
+.admiral-md pre { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+.admiral-md pre code { background: none; padding: 0; }
+.admiral-md table { width: 100%; border-collapse: collapse; font-size: 11px; display: block; overflow-x: auto; }
+.admiral-md th, .admiral-md td { border-bottom: 1px solid var(--color-line); padding: 3px 6px; text-align: left; vertical-align: top; }
+.admiral-md th { font-weight: 600; color: var(--color-ink); }
+.admiral-md blockquote { border-left: 2px solid var(--color-line-strong); padding-left: 8px; color: var(--color-ink-3); }
+@media (prefers-color-scheme: dark) { .admiral-md a { color: var(--color-brand-400); } }
+
+/* Transparency shows as a quiet checkerboard behind images. */
+.admiral-checker {
+  background-color: var(--color-panel);
+  background-image: linear-gradient(45deg, var(--color-line) 25%, transparent 25%), linear-gradient(-45deg, var(--color-line) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-line) 75%), linear-gradient(-45deg, transparent 75%, var(--color-line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Markdown artifacts read as a document, BlueSky type scale. */
+.admiral-doc h1 { font-size: 24px; font-weight: 600; color: var(--color-ink); letter-spacing: -0.01em; margin-top: 0; }
+.admiral-doc h2 { font-size: 18px; margin-top: 1.4em; }
+.admiral-doc h3 { font-size: 15px; margin-top: 1.2em; }
+.admiral-doc > * + * { margin-top: 0.8em; }
+.admiral-doc code { font-size: 12px; }
+.admiral-doc table { font-size: 13px; display: table; }
+.admiral-mermaid svg { max-width: 100%; height: auto; }
+
+/* Code highlighting (highlight.js classes), light and dark. */
+.hljs-keyword, .hljs-built_in, .hljs-type { color: #8250df; }
+.hljs-string, .hljs-attr { color: #0a3069; }
+.hljs-number, .hljs-literal { color: #0550ae; }
+.hljs-comment { color: #6e7781; font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: #953800; }
+.hljs-variable, .hljs-params { color: #24292f; }
+@media (prefers-color-scheme: dark) {
+  .hljs-keyword, .hljs-built_in, .hljs-type { color: #d2a8ff; }
+  .hljs-string, .hljs-attr { color: #a5d6ff; }
+  .hljs-number, .hljs-literal { color: #79c0ff; }
+  .hljs-comment { color: #8b949e; }
+  .hljs-title, .hljs-title.function_ { color: #ffa657; }
+  .hljs-variable, .hljs-params { color: #e6edf3; }
+}

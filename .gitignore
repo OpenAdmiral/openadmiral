@@ -1,0 +1,7 @@
+.DS_Store
+node_modules
+
+# Claude Code: local settings, worktrees, agent memory and instructions
+.claude/
+CLAUDE.md
+CLAUDE.local.md
