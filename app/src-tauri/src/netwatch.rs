@@ -188,16 +188,13 @@ fn should_join(offline_for: Option<Duration>, since_last: Option<Duration>, on_h
     !on_hotspot && offline_for.is_some_and(|d| d >= JOIN_AFTER) && since_last.is_none_or(|d| d >= JOIN_EVERY)
 }
 
-/// Joins a Wi-Fi network. Without a saved password macOS uses the one it already
-/// knows (a network this Mac has joined before).
+/// Joins a Wi-Fi network with the password saved in the Keychain (macOS's own copy of
+/// a hotspot's password is usually in iCloud Keychain, which networksetup cannot use).
 fn join(device: &str, ssid: &str) -> Result<(), String> {
-    let password = password(ssid);
+    let password = password(ssid).ok_or("Save the network's password first (Backup network → Change).")?;
     // The password goes on networksetup's command line (the only way it takes one):
     // visible to this user's own `ps` for the second it runs.
-    let mut args = vec!["-setairportnetwork", device, ssid];
-    if let Some(p) = password.as_deref() {
-        args.push(p);
-    }
+    let args = ["-setairportnetwork", device, ssid, &password];
     let out = std::process::Command::new("/usr/sbin/networksetup").args(&args).output().map_err(|e| e.to_string())?;
     // networksetup exits 0 even when it fails; it only says so.
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).trim().to_string();

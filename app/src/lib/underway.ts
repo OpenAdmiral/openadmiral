@@ -29,6 +29,8 @@ export type UnderwayState = {
   settings: UnderwaySettings;
   helper: "missing" | "approval" | "ready" | "unavailable" | null;
   helperError: string | null;
+  /** The backup network's password is saved in the Keychain (it never reaches the UI). */
+  backupPassword: boolean;
   battery: { ac: boolean; percent: number | null; charging: boolean; remainingMin: number | null };
   lidClosed: boolean;
   lowPower: boolean;

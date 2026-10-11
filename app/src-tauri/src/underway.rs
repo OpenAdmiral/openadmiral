@@ -125,6 +125,8 @@ pub struct Inputs {
     pub working: usize,
     pub work_ahead: bool,
     pub last_work: Option<i64>,
+    /// The backup network's password is in the Keychain.
+    pub backup_password: bool,
 }
 
 /// Why Underway turned itself off.
@@ -151,6 +153,8 @@ pub struct State {
     pub settings: Settings,
     pub helper: Option<HelperState>,
     pub helper_error: Option<String>,
+    /// The backup network's password is saved (it is never sent to the UI).
+    pub backup_password: bool,
     pub battery: Battery,
     pub lid_closed: bool,
     pub low_power: bool,
@@ -233,6 +237,8 @@ pub fn evaluate(i: &Inputs, s: &Settings, now: i64) -> (State, Option<Stop>) {
     }
     if i.net.iphone_usb {
         check("backup", Level::Ok, "Backup: iPhone connected by cable".into());
+    } else if let Some(ssid) = s.backup_ssid.as_ref().filter(|_| !i.backup_password) {
+        check("backup", Level::Warn, format!("Backup: {ssid} needs its password"));
     } else if let Some(ssid) = &s.backup_ssid {
         check("backup", Level::Ok, format!("Backup: {ssid}"));
     } else if !i.net.hotspot {
@@ -297,6 +303,7 @@ pub fn evaluate(i: &Inputs, s: &Settings, now: i64) -> (State, Option<Stop>) {
         settings: Settings { enabled, ..s.clone() },
         helper: i.helper,
         helper_error: i.helper_error.clone(),
+        backup_password: i.backup_password,
         battery: i.battery.clone(),
         lid_closed: i.lid_closed,
         low_power: i.low_power,
@@ -531,6 +538,7 @@ fn preview_inputs(kind: &str, now: i64) -> (Inputs, Settings) {
         helper: Some(if kind == "blocked" { HelperState::Approval } else { HelperState::Ready }),
         net: Net { online: true, via: Some("Wi-Fi".into()), ..Default::default() },
         working: 3,
+        backup_password: true,
         ..Default::default()
     };
     match kind {
@@ -601,6 +609,7 @@ impl Underway {
             working,
             work_ahead,
             last_work: inner.last_work,
+            backup_password: inner.settings.backup_ssid.as_deref().is_some_and(|ssid| crate::netwatch::password(ssid).is_some()),
         }
     }
 
@@ -781,8 +790,16 @@ pub fn underway_backup(app: AppHandle, ssid: String, password: Option<String>) -
     if let Some(old) = old.filter(|o| *o != ssid) {
         let _ = crate::netwatch::save_password(&old, None);
     }
+    let password = password.filter(|p| !p.is_empty());
     if !ssid.is_empty() && !crate::preview() {
-        crate::netwatch::save_password(&ssid, password.as_deref())?;
+        match password.as_deref() {
+            Some(p) => crate::netwatch::save_password(&ssid, Some(p))?,
+            // Keeping the network as it is: its saved password stays.
+            None if crate::netwatch::password(&ssid).is_some() => {}
+            // macOS's own copy of a hotspot password usually lives in iCloud Keychain,
+            // where joining from here cannot use it: always ask for it.
+            None => return Err("Enter the network's password (on the iPhone: Settings → Personal Hotspot → Wi-Fi Password).".into()),
+        }
     }
     u.update(&app, |s| s.backup_ssid = (!ssid.is_empty()).then_some(ssid));
     Ok(refresh(&app))
@@ -822,6 +839,7 @@ mod tests {
             helper: Some(HelperState::Ready),
             net: Net { online: true, via: Some("Wi-Fi".into()), ..Default::default() },
             working: 2,
+            backup_password: true,
             ..Default::default()
         };
         let s = Settings { enabled: true, enabled_at: Some(0), backup_ssid: Some("Phone".into()), ..Default::default() };
@@ -889,6 +907,15 @@ mod tests {
         let (st, _) = evaluate(&i, &s, 1000);
         assert_eq!(st.mode, Mode::Blocked);
         assert_eq!(st.detail, "Waiting for your approval in System Settings → Login Items");
+    }
+
+    #[test]
+    fn a_backup_without_its_password_is_flagged() {
+        let (mut i, s) = base();
+        i.backup_password = false;
+        let (st, _) = evaluate(&i, &s, 1000);
+        let backup = st.checks.iter().find(|c| c.id == "backup").unwrap();
+        assert_eq!((backup.level, backup.label.as_str()), (Level::Warn, "Backup: Phone needs its password"));
     }
 
     #[test]

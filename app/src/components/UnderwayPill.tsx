@@ -197,6 +197,8 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
   useEffect(() => {
     if (editing) invoke<string[]>("underway_networks").then(setKnown, () => {});
   }, [editing]);
+  // A new network always needs its password; the saved one stays when only re-saving.
+  const needsPassword = !s.backupPassword || ssid.trim() !== s.settings.backupSsid;
   if (!editing) {
     return (
       <Row label="Backup network" hint={s.settings.backupSsid ?? (s.net.iphoneUsb ? "iPhone by cable" : "None")}>
@@ -215,8 +217,8 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
     >
       <p className="text-[12.5px] font-semibold text-ink">Backup network</p>
       <p className="mt-0.5 text-[11.5px] leading-snug text-ink-3">
-        Joined when the connection is gone for 20 seconds. Use your iPhone&apos;s hotspot and keep Personal Hotspot → Allow Others to Join on. Plugging the iPhone in with a cable needs no
-        setup at all.
+        Joined when the connection is gone for 20 seconds. Use your iPhone&apos;s hotspot with Personal Hotspot → Allow Others to Join on; its password is on that same screen.
+        Plugging the iPhone in with a cable needs no setup at all.
       </p>
       <input
         value={ssid}
@@ -254,13 +256,18 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         type="password"
-        placeholder="Password (empty if this Mac has joined it before)"
+        placeholder={needsPassword ? "Password" : "Password (leave empty to keep the saved one)"}
+        required={needsPassword}
         aria-label="Password"
         className="mt-1.5 w-full rounded-md border border-line-strong bg-canvas px-2.5 py-1.5 text-xs text-ink focus:border-brand-500 focus:outline-none"
       />
       <p className="mt-1 text-[11px] text-ink-3">The password is kept in your Keychain.</p>
       <div className="mt-2 flex gap-2">
-        <button type="submit" className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700">
+        <button
+          type="submit"
+          disabled={!ssid.trim() || (needsPassword && !password)}
+          className="rounded-md bg-brand-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-700 disabled:cursor-default disabled:opacity-50"
+        >
           Save
         </button>
         {s.settings.backupSsid && (
