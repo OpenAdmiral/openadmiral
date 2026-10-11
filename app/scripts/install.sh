@@ -60,7 +60,9 @@ if pgrep -f "$DEST/Contents/MacOS/" >/dev/null; then
     LOG="$HOME/Library/Logs/OpenAdmiral/install.log"
     mkdir -p "${LOG:h}"
     echo "$(date '+%F %T') waiting for OpenAdmiral to quit (watcher $$)" >>"$LOG"
-    nohup /bin/zsh -c '
+    # Its own session (setsid via perl, which macOS always has): a watcher started from
+    # a tool that kills its whole process group when it finishes must outlive it.
+    nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' /bin/zsh -c '
       for i in {1..43200}; do pgrep -f "$1/Contents/MacOS/" >/dev/null || break; sleep 1; done
       echo "$(date "+%F %T") quit seen"
       pgrep -f "$1/Contents/MacOS/" >/dev/null && { echo "still running after 12 h: gave up"; exit 0; }
