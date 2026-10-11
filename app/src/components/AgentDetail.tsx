@@ -77,6 +77,9 @@ type Props = {
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
 };
 
+/** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
+const HANDLED_FOCUS = new Set<string>();
+
 export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming }: Props) {
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -107,10 +110,10 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
     return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview, probe, attached, agent.id]);
-  // A focus request is one-shot. The view stays mounted across agents, so coming back to this
-  // agent hands the same request in again: remember which ones were handled and skip them.
-  const handledFocus = useRef(new Set<string>());
-  const freshFocus = (id: string) => !handledFocus.current.has(id) && !!handledFocus.current.add(id);
+  // A focus request is one-shot, but coming back to this agent hands the same request in
+  // again, and the view is mounted anew for every agent (App keys it by agent): remember the
+  // handled ones outside the component and skip them.
+  const freshFocus = (id: string) => !HANDLED_FOCUS.has(`${agent.id}:${id}`) && !!HANDLED_FOCUS.add(`${agent.id}:${id}`);
   useEffect(() => {
     if (!turnFocus || !freshFocus(`turn:${turnFocus.at}`)) return;
     if (turnFocus.index >= 0) showTurn(turnFocus.index);
