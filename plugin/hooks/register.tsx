@@ -752,11 +752,18 @@ export const register: Register = on => {
       await log($, 'sent', `→ ${String(args.to)}: ${String(args.summary ?? args.message ?? '')}`)
       for (const id of new Set(String(args.message ?? '').match(/\bdlg_[a-z0-9]{8}\b/g) ?? [])) {
         const d = await readDelegation($, id)
-        if (d?.status !== 'draft') continue
-        d.status = 'sent'
-        d.to = { ...d.to, address: String(args.to) }
-        d.notes.push({ at: await $.clock.now(), by: me?.project ?? '', status: 'sent', text: 'delivered with SendMessage' })
-        await writeDelegation($, d)
+        if (d?.status === 'draft') {
+          d.status = 'sent'
+          d.to = { ...d.to, address: String(args.to) }
+          d.notes.push({ at: await $.clock.now(), by: me?.project ?? '', status: 'sent', text: 'delivered with SendMessage' })
+          await writeDelegation($, d)
+        } else if (d?.status === 'accepted' && me && d.to.sessionId === me.sessionId) {
+          // The recipient writing about it means the work has started, even if its
+          // model never called delegation_update.
+          d.status = 'in_progress'
+          d.notes.push({ at: await $.clock.now(), by: me.project, status: 'in_progress', text: clip(String(args.summary ?? args.message ?? ''), 200) })
+          await writeDelegation($, d)
+        }
       }
     }
     return ran

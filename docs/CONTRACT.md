@@ -61,7 +61,9 @@ Created by the mod's `delegate` tool in the *sender*; status changed by the
 `delegation_update` tool in the *recipient* (or the sender, to cancel). The
 recipient's mod also marks a `sent`/`draft` delegation `accepted` (note
 "received", `to.sessionId` filled) the moment its brief arrives, so the board
-does not wait for the recipient's model. Delivery: the sender's mod sends the
+does not wait for the recipient's model. Likewise an `accepted` delegation
+turns `in_progress` when the recipient's model sends a SendMessage that names
+its id (its summary becomes the note). Delivery: the sender's mod sends the
 brief itself; when auto mode leaves both tries undecided it keeps it `draft`,
 asks its model to SendMessage it (that send marks it `sent`), and makes no
 further attempts of its own for the rest of the session.

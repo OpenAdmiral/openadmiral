@@ -199,6 +199,20 @@ test('a delegation brief reaching its recipient marks it accepted', async ($, on
   expect(d.to.sessionId).toBe('sess-mcp')
 })
 
+test('the recipient writing about an accepted delegation moves it to in progress', async ($, on) => {
+  const files = new Map<string, string>()
+  engine(on, 'sess-mcp', files, [])
+  on('tool.call', { tool: 'SendMessage' }, () => ({ result: { success: true } as never }))
+  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
+  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
+  files.set(path, JSON.stringify({
+    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
+    to: { address: 'acme-mcp-server', sessionId: 'sess-mcp', project: 'acme-mcp-server' }, status: 'accepted', notes: [], createdAt: 0, updatedAt: 0,
+  }))
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'tu1', to: 'acme-intelligence', summary: 'Building it', message: 'dlg_abcd1234: building the endpoint now' })
+  expect(JSON.parse(files.get(path)!).status).toBe('in_progress')
+})
+
 test('a retried send that gets through marks the delegation sent', async ($, on) => {
   const files = new Map<string, string>()
   engine(on, 'sess-intel', files, [], ['no-verdict', 'ok'])
