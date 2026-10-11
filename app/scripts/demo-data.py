@@ -34,10 +34,12 @@ def sid(n):
     return f"{n:08x}-0000-4000-8000-{n:012x}"
 
 
-LIMITS = [
-    {"kind": "five_hour", "percentUsed": 34, "resetsAt": "2026-10-09T02:00:00.000Z"},
-    {"kind": "seven_day", "percentUsed": 21, "resetsAt": "2026-10-13T09:00:00.000Z"},
-]
+def limits(now):
+    iso = lambda ms: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(ms / 1000))
+    return [
+        {"kind": "five_hour", "percentUsed": 34, "resetsAt": iso(now + 166 * MIN)},
+        {"kind": "seven_day", "percentUsed": 21, "resetsAt": iso(now + 4 * 24 * 60 * MIN)},
+    ]
 COMMANDS = ["clear", "compact", "context", "model", "rename", "status", "usage", "remote-control"]
 QUEUE_COMMANDS = [
     {"name": n, "kind": "command"} for n in ["clear", "compact", "rename", "reload-plugins", "context"]
@@ -98,7 +100,7 @@ def sessions(now):
             "repo": {"root": f"/Users/demo/code/{project}", "remote": f"https://github.com/acme/{project}.git"},
             "branch": branch, "model": model, "status": status,
             "context": {"tokens": ctx * 2000, "window": 200_000, "percent": ctx, "usablePercent": min(100, round(ctx * 1.2))},
-            "rateLimits": LIMITS, "costUsd": cost, "commands": COMMANDS, "queueCommands": QUEUE_COMMANDS,
+            "rateLimits": limits(now), "costUsd": cost, "commands": COMMANDS, "queueCommands": QUEUE_COMMANDS,
             "startedAt": now - (40 + n * 9) * MIN, "updatedAt": now,
         }
         for k, v in extra.items():
