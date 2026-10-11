@@ -12,6 +12,7 @@ mod scheduler;
 mod shot;
 mod telemetry;
 mod transcript;
+mod tray;
 mod underway;
 mod updater;
 
@@ -25,7 +26,7 @@ use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::tray::TrayIconBuilder;
 use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -753,6 +754,7 @@ fn poll_agents(app: AppHandle) {
             if !preview() {
                 handoff::tick(&app, &agents);
             }
+            tray::refresh(&app, &agents);
             let _ = app.emit("openadmiral://agents", agents);
         }
         std::thread::sleep(Duration::from_secs(2));
@@ -868,7 +870,7 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&openadmiral, &edit, &window, &help])
 }
 
-fn show_main(app: &AppHandle) {
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -889,6 +891,7 @@ pub fn run() {
         .manage(handoff::Handoffs::default())
         .manage(transcript::Transcripts::default())
         .manage(underway::Underway::default())
+        .manage(tray::Tray::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             list_agents,
@@ -940,6 +943,7 @@ pub fn run() {
             underway::underway_networks,
             plugin_files::plugin_changed_at,
             plugin_files::plugin_reload,
+            tray::tray_today,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -985,25 +989,16 @@ pub fn run() {
                 }
             }
             app.on_menu_event(|app, e| handle_menu(app, e.id().as_ref()));
-            let show = MenuItem::with_id(app, "show", "Show OpenAdmiral", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit OpenAdmiral", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
             if !preview() {
-                TrayIconBuilder::with_id("openadmiral")
+                // The menu bar icon (tray.rs): a placeholder menu until the first poll fills it.
+                let show = MenuItem::with_id(app, "tray:show", "Show OpenAdmiral", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "tray:quit", "Quit OpenAdmiral", true, None::<&str>)?;
+                TrayIconBuilder::with_id(tray::ID)
                     .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
                     .icon_as_template(true)
-                    .menu(&menu)
-                    .show_menu_on_left_click(false)
-                    .on_menu_event(|app, e| match e.id.as_ref() {
-                        "show" => show_main(app),
-                        "quit" => app.exit(0),
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, e| {
-                        if let TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, .. } = e {
-                            show_main(tray.app_handle());
-                        }
-                    })
+                    .menu(&Menu::with_items(app, &[&show, &quit])?)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, e| tray::on_menu(app, e.id.as_ref()))
                     .build(app)?;
             }
             handoff::load(&handle);

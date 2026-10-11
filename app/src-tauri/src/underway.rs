@@ -717,6 +717,12 @@ fn refresh(app: &AppHandle) -> Option<State> {
     u.state()
 }
 
+/// Turns Underway on or off (the menu bar's check item).
+pub fn set_enabled(app: &AppHandle, on: bool) -> Option<State> {
+    app.state::<Underway>().update(app, |s| s.enabled = on);
+    refresh(app)
+}
+
 #[tauri::command]
 pub fn underway_state(app: AppHandle) -> Option<State> {
     let u = app.state::<Underway>();

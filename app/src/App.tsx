@@ -209,6 +209,23 @@ export default function App() {
   }, []);
   const costReport = useCostReport();
   const costs = useCosts(costReport.report, agents);
+  // The menu bar's fleet report shows today's cost (src-tauri/src/tray.rs).
+  useEffect(() => {
+    invoke("tray_today", { usd: costs?.today ?? null }).catch(() => {});
+  }, [costs?.today]);
+  // Clicks in the menu bar menu: an agent, a view, a new agent, the Underway panel.
+  useEffect(() => {
+    const offs = [
+      listen<{ kind: string; id?: string }>("openadmiral://navigate", (e) => {
+        const { kind, id } = e.payload;
+        if (kind === "agent" && id) setView({ kind: "agent", id });
+        else if (kind === "agents" || kind === "costs" || kind === "queue" || kind === "delegations" || kind === "artifacts") setView({ kind });
+      }),
+      listen("openadmiral://new-agent", () => setSheet(true)),
+      listen("openadmiral://underway-panel", () => window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: "underway" }))),
+    ];
+    return () => offs.forEach((p) => void p.then((off) => off()));
+  }, []);
 
   const [preview, setPreview] = useState(false);
   const [previewChecks, setPreviewChecks] = useState({ attach: false, probe: false });
