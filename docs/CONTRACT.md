@@ -63,7 +63,9 @@ recipient's mod also marks a `sent`/`draft` delegation `accepted` (note
 "received", `to.sessionId` filled) the moment its brief arrives, so the board
 does not wait for the recipient's model. Likewise an `accepted` delegation
 turns `in_progress` when the recipient's model sends a SendMessage that names
-its id (its summary becomes the note). Delivery: the sender's mod sends the
+its id (its summary becomes the note), or once the recipient uses a tool in a
+turn that started after the delegation was accepted (note "working on it";
+checked at most every 20 s), so quiet work still shows as under way. Delivery: the sender's mod sends the
 brief itself; when auto mode leaves both tries undecided it keeps it `draft`,
 asks its model to SendMessage it (that send marks it `sent`), and makes no
 further attempts of its own for the rest of the session.

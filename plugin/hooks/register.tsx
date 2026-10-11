@@ -237,6 +237,27 @@ async function listJson<T>($: EngineInterface, dir: string): Promise<T[]> {
   return out
 }
 
+// A delegation accepted here and a turn that started after it, using tools: the work
+// is under way, whether or not the model calls delegation_update. Without this the
+// board shows "accepted" for as long as the recipient works quietly. Checked at most
+// every 20 s, on tool calls.
+let lastStartCheck = 0
+async function markStarted($: EngineInterface) {
+  if (!me?.turn) return
+  const now = await $.clock.now()
+  if (now - lastStartCheck < 20_000) return
+  lastStartCheck = now
+  for (const d of await listJson<AdmiralDelegation>($, `${root}/delegations`)) {
+    if (d.status !== 'accepted' || d.to.sessionId !== me.sessionId) continue
+    const acceptedAt = [...d.notes].reverse().find(n => n.status === 'accepted')?.at ?? d.updatedAt
+    // A brief that arrived in the middle of other work waits for the turn that takes it up.
+    if (me.turn.startedAt < acceptedAt - 2_000) continue
+    d.status = 'in_progress'
+    d.notes.push({ at: now, by: me.project, status: 'in_progress', text: 'working on it' })
+    await writeDelegation($, d)
+  }
+}
+
 function toolSummary(tool: string, e: Record<string, unknown>): string {
   const s = (k: string) => (typeof e[k] === 'string' ? (e[k] as string) : '')
   switch (tool) {
@@ -432,6 +453,10 @@ async function listPeers($: EngineInterface): Promise<Peer[]> {
   peerCache = { at: now, peers }
   return peers
 }
+
+// How an @mention spells a session: Claude Code quotes names with spaces.
+const mentionOf = (name: string) => (/^[\w.-]+$/.test(name) ? `@${name}` : `@"${name}"`)
+const nameOfMention = (text: string) => text.match(/^@"([^"]+)"$/)?.[1] ?? text.match(/^@([\w.-]+)$/)?.[1]
 
 function describePeer(p: Peer, now: number) {
   const where = `${p.project}${p.branch ? `@${p.branch}` : ''}`
@@ -725,6 +750,7 @@ export const register: Register = on => {
     const ran = await next(e)
     if ('deny' in ran && ran.deny !== undefined) return ran
     if (me?.status === 'waiting') touch($, { status: 'working', waiting: undefined })
+    if (!mine) await markStarted($).catch(() => undefined)
 
     if (tool === 'TodoWrite' && Array.isArray(args.todos)) {
       const todos = args.todos as { content: string; status: TaskStatus; activeForm: string }[]
@@ -863,19 +889,30 @@ export const register: Register = on => {
     return answer(lines.join('\n'))
   }).catch(() => ({ deny: 'openadmiral: this tool failed (claude --debug has the reason).' }))
 
+  // Claude Code offers its own row for other sessions ("message session"): keep that one
+  // row per session, with what the session is doing as its description, peers first.
+  // A peer the engine did not offer gets a row in the same (quoted) form.
   on('prompt.autocomplete', { token: /^@/ }, async ($, e, next) => {
     const engine = await next(e)
-    const query = e.token.slice(1).toLowerCase()
+    const query = e.token.slice(1).replace(/^"/, '').toLowerCase()
     const now = await $.clock.now()
-    const mine = (await listPeers($))
-      .filter(p => !query || p.name.toLowerCase().includes(query) || p.project.toLowerCase().includes(query))
-      .slice(0, 8)
-      .map(p => ({ text: `@${p.name}`, label: `@${p.name}`, description: describePeer(p, now) }))
-    return { suggestions: [...mine, ...engine.suggestions] }
+    const peers = await listPeers($)
+    const byName = new Map(peers.map(p => [p.name, p]))
+    const peerOf = (text: string) => byName.get(nameOfMention(text) ?? '')
+    const enrich = <T extends { text: string; description?: string }>(row: T): T => {
+      const p = peerOf(row.text)
+      return p ? { ...row, description: describePeer(p, now) } : row
+    }
+    const wanted = peers.filter(p => !query || p.name.toLowerCase().includes(query) || p.project.toLowerCase().includes(query)).slice(0, 8)
+    const native = new Map(engine.suggestions.flatMap(r => (peerOf(r.text) ? [[peerOf(r.text)!.name, r] as const] : [])))
+    const top = wanted.map(p => enrich(native.get(p.name) ?? { text: mentionOf(p.name), label: mentionOf(p.name) }))
+    const shown = new Set(wanted.map(p => p.name))
+    const rest = engine.suggestions.filter(r => !shown.has(peerOf(r.text)?.name ?? '')).map(enrich)
+    return { suggestions: [...top, ...rest] }
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
-    const named = new Set([...e.text.matchAll(/@([\w.-]+)/g)].map(m => m[1]!))
+    const named = new Set([...e.text.matchAll(/@"([^"]+)"|@([\w.-]+)/g)].map(m => (m[1] ?? m[2])!))
     if (!named.size) return next(e)
     const now = await $.clock.now()
     const mentioned = (await listPeers($)).filter(p => named.has(p.name))

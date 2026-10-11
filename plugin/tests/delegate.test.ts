@@ -213,6 +213,47 @@ test('the recipient writing about an accepted delegation moves it to in progress
   expect(JSON.parse(files.get(path)!).status).toBe('in_progress')
 })
 
+test('an accepted delegation goes in progress once a later turn uses tools', async ($, on) => {
+  const files = new Map<string, string>()
+  const { clock } = engine(on, 'sess-mcp', files, [])
+  on('tool.call', { tool: 'Read' }, () => ({ result: 'ok' as never }))
+  on('turn.start', (_$, e) => ({ ...e }) as never)
+  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
+  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
+  const accepted = (at: number) => JSON.stringify({
+    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
+    to: { address: 'acme-mcp-server', sessionId: 'sess-mcp', project: 'acme-mcp-server' }, status: 'accepted',
+    notes: [{ at, by: 'acme-mcp-server', status: 'accepted', text: 'received' }], createdAt: 0, updatedAt: at,
+  })
+  // Arrived during other work: the turn already running does not count.
+  await $.turn.start({ text: 'something else', turnId: 't1' })
+  await clock.advance(60_000)
+  files.set(path, accepted(60_000))
+  await $.tool.call({ tool: 'Read', tool_use_id: 'tu1', file_path: '/x' } as never)
+  expect(JSON.parse(files.get(path)!).status).toBe('accepted')
+  // The turn that takes it up does.
+  await clock.advance(30_000)
+  await $.turn.start({ text: '[OpenAdmiral delegation dlg_abcd1234] from acme-intelligence', turnId: 't2' })
+  await $.tool.call({ tool: 'Read', tool_use_id: 'tu2', file_path: '/x' } as never)
+  const d = JSON.parse(files.get(path)!)
+  expect(d.status).toBe('in_progress')
+  expect(d.notes.at(-1).text).toBe('working on it')
+})
+
+test("@ shows one row per session: Claude Code's own, described by OpenAdmiral", async ($, on) => {
+  const files = new Map<string, string>()
+  const agents = [{ sessionId: 'sess-web', name: 'Acme Website', cwd: '/work/acme-website', status: 'idle' }]
+  engine(on, 'sess-intel', files, [], [], agents)
+  on('prompt.autocomplete', () => ({ suggestions: [{ text: '@README.md' }, { text: '@"Acme Website"', label: '@"Acme Website"', description: 'message session · on this machine' }] }))
+  files.set('/home/t/.claude/openadmiral/sessions/sess-web.json', JSON.stringify({ sessionId: 'sess-web', project: 'acme-website', branch: 'landing', status: 'idle', updatedAt: 0 }))
+  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
+  const rows = await $.prompt.autocomplete({ text: '@Acme', cursor: 5, token: '@Acme', start: 0 })
+  expect(rows.suggestions.map(r => r.text)).toEqual(['@"Acme Website"', '@README.md'])
+  expect(rows.suggestions[0]!.description).toBe('○ idle · acme-website@landing')
+  const submitted = (await $.prompt.submit({ text: '@"Acme Website" add the page', wait: false } as never)) as unknown as { context?: string[] }
+  expect(submitted.context?.join('\n')).toContain('Acme Website (session sess-web)')
+})
+
 test('a retried send that gets through marks the delegation sent', async ($, on) => {
   const files = new Map<string, string>()
   engine(on, 'sess-intel', files, [], ['no-verdict', 'ok'])
