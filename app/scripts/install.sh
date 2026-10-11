@@ -56,14 +56,20 @@ if pgrep -f "$DEST/Contents/MacOS/" >/dev/null; then
   if (( WHEN_QUIT )); then
     # Detached, so it outlives this shell (and OpenAdmiral's own terminals): wait for
     # the quit, swap, reopen. Gives up after 12 h.
+    # It logs to ~/Library/Logs/OpenAdmiral/install.log, so a swap that did not happen says why.
+    LOG="$HOME/Library/Logs/OpenAdmiral/install.log"
+    mkdir -p "${LOG:h}"
+    echo "$(date '+%F %T') waiting for OpenAdmiral to quit (watcher $$)" >>"$LOG"
     nohup /bin/zsh -c '
       for i in {1..43200}; do pgrep -f "$1/Contents/MacOS/" >/dev/null || break; sleep 1; done
-      pgrep -f "$1/Contents/MacOS/" >/dev/null && exit 0
-      [[ -d "$2" ]] || exit 0
+      echo "$(date "+%F %T") quit seen"
+      pgrep -f "$1/Contents/MacOS/" >/dev/null && { echo "still running after 12 h: gave up"; exit 0; }
+      [[ -d "$2" ]] || { echo "nothing staged (another watcher swapped it)"; exit 0; }
+      set -x
       # A clean environment, as the Finder would give it: this script often runs inside
       # a Claude Code session, whose variables (NO_COLOR, CLAUDE_*) must not reach the app.
       rm -rf "$1" && mv "$2" "$1" && env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/open "$1"
-    ' _ "$DEST" "$STAGE" >/dev/null 2>&1 &!
+    ' _ "$DEST" "$STAGE" >>"$LOG" 2>&1 &!
     echo "OpenAdmiral is running: the new build goes in when you quit it (⌘Q), and OpenAdmiral reopens by itself."
     exit 0
   fi
