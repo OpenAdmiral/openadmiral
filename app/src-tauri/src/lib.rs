@@ -936,6 +936,7 @@ pub fn run() {
             underway::underway_helper,
             underway::underway_backup,
             underway::underway_join,
+            underway::underway_networks,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -98,7 +98,7 @@ fn quitting_it_puts_sleep_back() {
     let h = start("quit");
     call(&h, r#"{"op":"hold","ttl":1,"batteryFloor":20}"#); // clamped to 15 s
     let st = call(&h, r#"{"op":"status"}"#);
-    assert!(st["leaseSeconds"].as_u64().unwrap() >= 14);
+    assert!(st["leaseSeconds"].as_u64().unwrap() >= 10); // each answer reads ioreg, up to a second
     // Waiting the lease out is unit-tested in the helper; here, launchd stopping it.
     unsafe { libc::kill(h.child.id() as i32, libc::SIGTERM) };
     wait_until(|| calls(&h).ends_with("-a disablesleep 0\n"));

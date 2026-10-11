@@ -776,7 +776,7 @@ pub fn underway_helper(app: AppHandle, action: String) -> Result<Option<State>, 
 #[tauri::command]
 pub fn underway_backup(app: AppHandle, ssid: String, password: Option<String>) -> Result<Option<State>, String> {
     let u = app.state::<Underway>();
-    let ssid = ssid.trim().to_string();
+    let ssid = crate::netwatch::resolve_name(&ssid, &crate::netwatch::known_networks());
     let old = u.settings().backup_ssid;
     if let Some(old) = old.filter(|o| *o != ssid) {
         let _ = crate::netwatch::save_password(&old, None);
@@ -786,6 +786,15 @@ pub fn underway_backup(app: AppHandle, ssid: String, password: Option<String>) -
     }
     u.update(&app, |s| s.backup_ssid = (!ssid.is_empty()).then_some(ssid));
     Ok(refresh(&app))
+}
+
+/// Wi-Fi networks this Mac knows, to pick the backup from.
+#[tauri::command]
+pub fn underway_networks() -> Vec<String> {
+    if crate::preview() {
+        return vec!["Alex’s iPhone".into(), "Office".into()];
+    }
+    crate::netwatch::known_networks()
 }
 
 #[tauri::command]

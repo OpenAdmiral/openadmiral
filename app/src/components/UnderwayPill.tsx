@@ -1,4 +1,5 @@
 import { CheckCircleLinearIcon, CloseCircleLinearIcon, DangerTriangleLinearIcon } from "@solar-icons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useUnderwayContext, type UnderwayCheck, type UnderwayState } from "@/lib/underway";
@@ -191,6 +192,11 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
   const s = u.state!;
   const [ssid, setSsid] = useState(s.settings.backupSsid ?? "");
   const [password, setPassword] = useState("");
+  // Networks this Mac has joined: picking one avoids typing "César’s iPhone" by hand.
+  const [known, setKnown] = useState<string[]>([]);
+  useEffect(() => {
+    if (editing) invoke<string[]>("underway_networks").then(setKnown, () => {});
+  }, [editing]);
   if (!editing) {
     return (
       <Row label="Backup network" hint={s.settings.backupSsid ?? (s.net.iphoneUsb ? "iPhone by cable" : "None")}>
@@ -217,9 +223,33 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
         onChange={(e) => setSsid(e.target.value)}
         placeholder="Network name, e.g. Alex’s iPhone"
         aria-label="Network name"
+        list="underway-known-networks"
         autoFocus
         className="mt-2 w-full rounded-md border border-line-strong bg-canvas px-2.5 py-1.5 text-xs text-ink focus:border-brand-500 focus:outline-none"
       />
+      {known.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {/* An iPhone's hotspot is the likely backup: those first. */}
+          {[...known.filter((n) => /iphone/i.test(n)), ...known.filter((n) => !/iphone/i.test(n))].slice(0, 6).map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setSsid(n)}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                ssid === n ? "border-brand-500 bg-brand-500/10 text-ink" : "border-line-strong text-ink-2 hover:bg-line hover:text-ink",
+              )}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+      <datalist id="underway-known-networks">
+        {known.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
       <input
         value={password}
         onChange={(e) => setPassword(e.target.value)}

@@ -163,6 +163,26 @@ impl NetWatch {
     }
 }
 
+/// Wi-Fi networks this Mac has joined before, as macOS spells them.
+pub fn known_networks() -> Vec<String> {
+    let ports = power::parse_hardware_ports(&power::run("/usr/sbin/networksetup", &["-listallhardwareports"]));
+    let Some((_, device)) = ports.iter().find(|(n, _)| n == "Wi-Fi") else { return vec![] };
+    power::run("/usr/sbin/networksetup", &["-listpreferredwirelessnetworks", device])
+        .lines()
+        .skip(1)
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// The name as macOS knows it when the typed one differs only in its apostrophe:
+/// an iPhone calls its hotspot "César’s iPhone" (’), a keyboard types ' or ´.
+pub fn resolve_name(typed: &str, known: &[String]) -> String {
+    let fold = |s: &str| s.chars().map(|c| if matches!(c, '\'' | '’' | '‘' | '´' | '`' | 'ʼ') { '\'' } else { c }).collect::<String>().to_lowercase();
+    let t = fold(typed.trim());
+    known.iter().find(|k| fold(k) == t).cloned().unwrap_or_else(|| typed.trim().to_string())
+}
+
 /// Offline long enough, not tried too recently, and not on the hotspot already.
 fn should_join(offline_for: Option<Duration>, since_last: Option<Duration>, on_hotspot: bool) -> bool {
     !on_hotspot && offline_for.is_some_and(|d| d >= JOIN_AFTER) && since_last.is_none_or(|d| d >= JOIN_EVERY)
@@ -217,6 +237,14 @@ pub fn save_password(_: &str, _: Option<&str>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_typed_apostrophe_finds_the_iphone_name() {
+        let known = vec!["César’s iPhone".to_string(), "Home".to_string()];
+        assert_eq!(resolve_name("César´s iPhone", &known), "César’s iPhone");
+        assert_eq!(resolve_name("césar's iphone ", &known), "César’s iPhone");
+        assert_eq!(resolve_name("Office", &known), "Office");
+    }
 
     #[test]
     fn the_backup_is_tried_after_a_while_offline_and_not_in_a_loop() {
