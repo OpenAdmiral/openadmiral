@@ -762,6 +762,9 @@ fn popup_menu(window: tauri::Window, items: Vec<MenuSpec>) -> Result<(), String>
 fn handle_menu(app: &AppHandle, id: &str) {
     if let Some(rest) = id.strip_prefix("ui:") {
         let _ = app.emit("openadmiral://menu", rest.to_string());
+    } else if id == "app:about" {
+        show_main(app);
+        let _ = app.emit("openadmiral://about", ());
     } else if id == "help:shortcuts" {
         let _ = app.emit("openadmiral://shortcuts", ());
     } else if id == "help:updates" {
@@ -796,29 +799,10 @@ fn heartbeat_attached(app: AppHandle) {
 
 /// The macOS menu bar without "Close Window", so ⌘W reaches the app (it closes
 /// the selected agent); the red button still hides the window.
-/// The About window. macOS shows the credits text and the copyright.
-fn about() -> tauri::menu::AboutMetadata<'static> {
-    tauri::menu::AboutMetadataBuilder::new()
-        .credits(Some(ABOUT_CREDITS))
-        .copyright(Some("© César Trigo · MIT License"))
-        .website(Some("https://openadmiral.com"))
-        .build()
-}
-
-const ABOUT_CREDITS: &str = "Mission control for your Claude Code sessions: every agent in one window, \
-a nudge when one needs you, and agents that hand work to each other. Free and open source. \
-More at openadmiral.com.
-
-Built on the shoulders of open source. Thank you to Tauri, React, Tailwind CSS, xterm.js, \
-Motion, dnd kit, TanStack Virtual, Mermaid, react-markdown, highlight.js, Solar Icons, \
-the Outfit and JetBrains Mono fonts, WezTerm's portable-pty, notify, ccusage and Vite, \
-and to everyone who maintains them.
-
-Not affiliated with Anthropic. Claude and Claude Code are trademarks of Anthropic.";
-
 fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     let openadmiral = Submenu::with_items(app, "OpenAdmiral", true, &[
-        &PredefinedMenuItem::about(app, Some("About OpenAdmiral"), Some(about()))?,
+        // Our own About (AboutSheet.tsx): macOS's panel shows credits as a bare text box.
+        &MenuItem::with_id(app, "app:about", "About OpenAdmiral", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &PredefinedMenuItem::hide(app, None)?,
         &PredefinedMenuItem::hide_others(app, None)?,

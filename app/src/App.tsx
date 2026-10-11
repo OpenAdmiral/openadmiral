@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, MotionGlobalConfig, motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import type { Agent } from "@/lib/types";
+import { AboutSheet } from "@/components/AboutSheet";
 import { AgentDetail } from "@/components/AgentDetail";
 import { CostsView } from "@/components/CostsView";
 import { useCostReport, useCosts } from "@/lib/costs";
@@ -48,6 +49,7 @@ export default function App() {
   }, [superseded, view]);
   const [sheet, setSheet] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
+  const [about, setAbout] = useState(false);
   const life = useLifecycle(rawAgents);
   // Rename shows the new name at once (and moves the sidebar-order entry, keyed by name).
   const renameKey = useRef<(a: Agent, from: string, to: string) => void>(() => {});
@@ -102,6 +104,12 @@ export default function App() {
   // Help → Keyboard Shortcuts (its ⌘/ accelerator lands here too, before the webview sees the key).
   useEffect(() => {
     const off = listen("openadmiral://shortcuts", () => setShortcuts(true));
+    return () => {
+      off.then((u) => u());
+    };
+  }, []);
+  useEffect(() => {
+    const off = listen("openadmiral://about", () => setAbout(true));
     return () => {
       off.then((u) => u());
     };
@@ -190,6 +198,7 @@ export default function App() {
       setPreviewChecks({ attach: !!d.attach, probe: !!d.probe });
       if (d.select) setView({ kind: "agent", id: d.select });
       if (d.view === "agents" || d.view === "delegations" || d.view === "costs" || d.view === "artifacts" || d.view === "queue") setView({ kind: d.view });
+      if (d.view === "about") setAbout(true);
       if (d.rail) ui.toggleLeft();
       if (d.inspectorHidden) ui.toggleRight();
       // A webview snapshot leaves out the window's vibrancy: paint it (index.css).
@@ -459,6 +468,7 @@ export default function App() {
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
       <Notices notices={life.notices} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
+      <AboutSheet open={about} onClose={() => setAbout(false)} />
       <NewAgentSheet open={sheet} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
     </div>
     </TooltipProvider>
