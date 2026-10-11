@@ -1,8 +1,7 @@
 //! The menu bar icon: quiet until someone needs you, and a fleet report on click.
 //!
 //! The icon itself only changes when it matters: a dot and a count when agents
-//! wait for a permission or an answer, a horizon line under it while Underway keeps
-//! the Mac awake. Clicking it opens a native menu: who needs you, who is working,
+//! wait for a permission or an answer. Clicking it opens a native menu: who needs you, who is working,
 //! Underway, today's cost and plan, what runs next, open delegations, and the
 //! usual Show / New Agent / Quit. It is rebuilt only when what it says changes.
 
@@ -26,7 +25,6 @@ pub struct Report {
     pub plan: Option<String>,
     pub next: Option<String>,
     pub delegations: (usize, usize),
-    pub holding: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +40,7 @@ pub struct Tray {
     last: Mutex<Option<Report>>,
     /// Today's cost, from the app's cost report (the webview computes it).
     today: Mutex<Option<f64>>,
+    live: Mutex<Option<(Vec<Line>, Vec<Handle>)>>,
 }
 
 fn clip(s: &str, n: usize) -> String {
@@ -169,36 +168,21 @@ pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<
     r
 }
 
-/// The icon: the template glyph, with a dot (someone needs you) or a horizon line
-/// under it (Underway is keeping the Mac awake). Template images take the menu
-/// bar's own colour, so the marks are cut out of and drawn in the same ink.
-fn icon(base: &Image<'_>, dot: bool, horizon: bool) -> Image<'static> {
+/// The icon: the template glyph, with a dot cut into its corner while someone needs
+/// you. Template images take the menu bar's own colour, so the dot is drawn in the
+/// same ink, with a clear ring around it.
+fn icon(base: &Image<'_>, dot: bool) -> Image<'static> {
     let (w, h) = (base.width() as i64, base.height() as i64);
     let mut px = base.rgba().to_vec();
-    let mut set = |x: i64, y: i64, a: u8| {
-        if (0..w).contains(&x) && (0..h).contains(&y) {
-            let i = ((y * w + x) * 4) as usize;
-            px[i..i + 4].copy_from_slice(&[0, 0, 0, a]);
-        }
-    };
-    if horizon {
-        let t = (h / 16).max(1);
-        for y in h - 3 * t..h {
-            for x in 0..w {
-                set(x, y, if y >= h - t { 255 } else { 0 });
-            }
-        }
-    }
     if dot {
         let r = (w as f64 / 7.0).max(2.5);
-        let (cx, cy) = (w as f64 - r - 0.5, h as f64 - r - 0.5 - if horizon { (h / 16 * 3) as f64 } else { 0.0 });
+        let (cx, cy) = (w as f64 - r - 0.5, h as f64 - r - 0.5);
         for y in 0..h {
             for x in 0..w {
                 let d = ((x as f64 + 0.5 - cx).powi(2) + (y as f64 + 0.5 - cy).powi(2)).sqrt();
-                if d <= r {
-                    set(x, y, 255);
-                } else if d <= r + 3.0 {
-                    set(x, y, 0);
+                if d <= r + 3.0 {
+                    let i = ((y * w + x) * 4) as usize;
+                    px[i..i + 4].copy_from_slice(&[0, 0, 0, if d <= r { 255 } else { 0 }]);
                 }
             }
         }
@@ -210,65 +194,153 @@ fn base_icon() -> Option<Image<'static>> {
     Image::from_bytes(include_bytes!("../icons/tray.png")).ok().map(|i| i.to_owned())
 }
 
-fn build(app: &AppHandle, r: &Report) -> tauri::Result<Menu<tauri::Wry>> {
-    let menu = Menu::new(app)?;
-    let info = |text: &str| MenuItem::new(app, text, false, None::<&str>);
-    let sep = || PredefinedMenuItem::separator(app);
+/// One line of the menu. Its `key` and kind make the menu's structure; text and
+/// check state may change in place without rebuilding it.
+#[derive(Debug, Clone, PartialEq)]
+enum Line {
+    Sep,
+    /// Greyed out, not clickable.
+    Info(String),
+    /// Clickable: (menu id, text).
+    Item(String, String),
+    /// Underway's switch: (text, on).
+    Check(String, bool),
+}
+
+impl Line {
+    fn shape(&self) -> String {
+        match self {
+            Line::Sep => "sep".into(),
+            Line::Info(_) => "info".into(),
+            Line::Item(id, _) => format!("item:{id}"),
+            Line::Check(..) => "check".into(),
+        }
+    }
+}
+
+fn lines(r: &Report) -> Vec<Line> {
+    let mut out = vec![];
     let mut summary = vec![format!("{} working", r.working.len())];
     if !r.waiting.is_empty() {
         summary.push(format!("{} need{} you", r.waiting.len(), if r.waiting.len() == 1 { "s" } else { "" }));
     }
     summary.push(format!("{} idle", r.idle));
-    menu.append(&info(&summary.join(" · "))?)?;
+    out.push(Line::Info(summary.join(" · ")));
     if !r.waiting.is_empty() {
-        menu.append(&sep()?)?;
-        menu.append(&info("Needs you")?)?;
+        out.push(Line::Sep);
+        out.push(Line::Info("Needs you".into()));
         for row in &r.waiting {
-            menu.append(&MenuItem::with_id(app, format!("tray:agent:{}", row.session_id), format!("⚠  {}  —  {}", row.name, row.detail), true, None::<&str>)?)?;
+            out.push(Line::Item(format!("tray:agent:{}", row.session_id), format!("⚠  {}  —  {}", row.name, row.detail)));
         }
     }
     if !r.working.is_empty() {
-        menu.append(&sep()?)?;
-        menu.append(&info("Working")?)?;
+        out.push(Line::Sep);
+        out.push(Line::Info("Working".into()));
         for row in r.working.iter().take(WORKING_SHOWN) {
-            menu.append(&MenuItem::with_id(app, format!("tray:agent:{}", row.session_id), format!("●  {}  —  {}", row.name, row.detail), true, None::<&str>)?)?;
+            out.push(Line::Item(format!("tray:agent:{}", row.session_id), format!("●  {}  —  {}", row.name, row.detail)));
         }
         if r.working.len() > WORKING_SHOWN {
-            menu.append(&MenuItem::with_id(app, "tray:view:agents", format!("…and {} more", r.working.len() - WORKING_SHOWN), true, None::<&str>)?)?;
+            out.push(Line::Item("tray:view:agents".into(), format!("…and {} more", r.working.len() - WORKING_SHOWN)));
         }
     }
     if let Some((on, title, detail)) = &r.underway {
-        menu.append(&sep()?)?;
-        menu.append(&CheckMenuItem::with_id(app, "tray:underway", format!("Underway · {title}"), true, *on, None::<&str>)?)?;
+        out.push(Line::Sep);
+        out.push(Line::Check(format!("Underway · {title}"), *on));
         if !detail.is_empty() {
-            menu.append(&info(&format!("     {}", clip(detail, 60)))?)?;
+            out.push(Line::Info(format!("     {}", clip(detail, 60))));
         }
     }
     let mut extra = vec![];
     if r.today.is_some() || r.plan.is_some() {
         let today = r.today.map(|usd| format!("Today ${usd:.2}")).unwrap_or_else(|| "Today".into());
         let plan = r.plan.as_ref().map(|p| format!("  ·  {p}")).unwrap_or_default();
-        extra.push(MenuItem::with_id(app, "tray:view:costs", format!("{today}{plan}"), true, None::<&str>)?);
+        extra.push(Line::Item("tray:view:costs".into(), format!("{today}{plan}")));
     }
     if let Some(next) = &r.next {
-        extra.push(MenuItem::with_id(app, "tray:view:queue", next, true, None::<&str>)?);
+        extra.push(Line::Item("tray:view:queue".into(), next.clone()));
     }
     if r.delegations.0 > 0 {
         let blocked = if r.delegations.1 > 0 { format!(" · {} blocked", r.delegations.1) } else { String::new() };
         let n = r.delegations.0;
-        extra.push(MenuItem::with_id(app, "tray:view:delegations", format!("{n} delegation{} open{blocked}", if n == 1 { "" } else { "s" }), true, None::<&str>)?);
+        extra.push(Line::Item("tray:view:delegations".into(), format!("{n} delegation{} open{blocked}", if n == 1 { "" } else { "s" })));
     }
     if !extra.is_empty() {
-        menu.append(&sep()?)?;
-        for item in &extra {
-            menu.append(item)?;
+        out.push(Line::Sep);
+        out.extend(extra);
+    }
+    out.push(Line::Sep);
+    out.push(Line::Item("tray:show".into(), "Show OpenAdmiral".into()));
+    out.push(Line::Item("tray:new".into(), "New Agent…".into()));
+    out.push(Line::Item("tray:quit".into(), "Quit OpenAdmiral".into()));
+    out
+}
+
+/// The live menu's items, to change their text in place.
+enum Handle {
+    None,
+    Item(MenuItem<tauri::Wry>),
+    Check(CheckMenuItem<tauri::Wry>),
+}
+
+fn build(app: &AppHandle, lines: &[Line]) -> tauri::Result<(Menu<tauri::Wry>, Vec<Handle>)> {
+    let menu = Menu::new(app)?;
+    let mut handles = vec![];
+    for line in lines {
+        match line {
+            Line::Sep => {
+                menu.append(&PredefinedMenuItem::separator(app)?)?;
+                handles.push(Handle::None);
+            }
+            Line::Info(text) => {
+                let item = MenuItem::new(app, text, false, None::<&str>)?;
+                menu.append(&item)?;
+                handles.push(Handle::Item(item));
+            }
+            Line::Item(id, text) => {
+                let item = MenuItem::with_id(app, id, text, true, None::<&str>)?;
+                menu.append(&item)?;
+                handles.push(Handle::Item(item));
+            }
+            Line::Check(text, on) => {
+                let item = CheckMenuItem::with_id(app, "tray:underway", text, true, *on, None::<&str>)?;
+                menu.append(&item)?;
+                handles.push(Handle::Check(item));
+            }
         }
     }
-    menu.append(&sep()?)?;
-    menu.append(&MenuItem::with_id(app, "tray:show", "Show OpenAdmiral", true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "tray:new", "New Agent…", true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "tray:quit", "Quit OpenAdmiral", true, None::<&str>)?)?;
-    Ok(menu)
+    Ok((menu, handles))
+}
+
+/// Brings the menu up to `next`. Replacing the menu closes it if it is open, so
+/// when only words or a check mark changed (minutes ticking, battery) the items
+/// are updated in place; the menu is rebuilt only when its lines come or go.
+fn apply(app: &AppHandle, tray: &tauri::tray::TrayIcon, live: &mut Option<(Vec<Line>, Vec<Handle>)>, next: Vec<Line>) {
+    if let Some((shown, handles)) = live.as_mut() {
+        let same_shape = shown.len() == next.len() && shown.iter().zip(&next).all(|(a, b)| a.shape() == b.shape());
+        if same_shape {
+            for ((old, new), handle) in shown.iter().zip(&next).zip(handles.iter()) {
+                if old == new {
+                    continue;
+                }
+                match (new, handle) {
+                    (Line::Info(text) | Line::Item(_, text), Handle::Item(item)) => {
+                        let _ = item.set_text(text);
+                    }
+                    (Line::Check(text, on), Handle::Check(item)) => {
+                        let _ = item.set_text(text);
+                        let _ = item.set_checked(*on);
+                    }
+                    _ => {}
+                }
+            }
+            *shown = next;
+            return;
+        }
+    }
+    if let Ok((menu, handles)) = build(app, &next) {
+        let _ = tray.set_menu(Some(menu));
+        *live = Some((next, handles));
+    }
 }
 
 /// Rebuilds the menu and icon when the report changed. Called from the agents poll.
@@ -295,23 +367,20 @@ pub fn refresh(app: &AppHandle, agents: &Value) {
     let mut r = report(&sessions, agents, &queues, &delegations, now);
     r.today = *state.today.lock().unwrap();
     if let Some(u) = app.state::<crate::underway::Underway>().state() {
-        r.holding = u.hold && u.safe;
         r.underway = Some((u.settings.enabled, u.title.clone(), if u.settings.enabled { u.detail.clone() } else { String::new() }));
     }
     let mut last = state.last.lock().unwrap();
     if last.as_ref() == Some(&r) {
         return;
     }
-    let icon_changed = last.as_ref().is_none_or(|l| l.waiting.is_empty() != r.waiting.is_empty() || l.holding != r.holding);
+    let icon_changed = last.as_ref().is_none_or(|l| l.waiting.is_empty() != r.waiting.is_empty());
     *last = Some(r.clone());
     drop(last);
-    if let Ok(menu) = build(app, &r) {
-        let _ = tray.set_menu(Some(menu));
-    }
+    apply(app, &tray, &mut state.live.lock().unwrap(), lines(&r));
     let _ = tray.set_title(if r.waiting.is_empty() { None } else { Some(r.waiting.len().to_string()) });
     if icon_changed {
         if let Some(base) = base_icon() {
-            let _ = tray.set_icon(Some(icon(&base, !r.waiting.is_empty(), r.holding)));
+            let _ = tray.set_icon(Some(icon(&base, !r.waiting.is_empty())));
             let _ = tray.set_icon_as_template(true);
         }
     }
@@ -399,8 +468,8 @@ mod icon_preview {
     fn write_variants() {
         let out = std::path::PathBuf::from(std::env::var("OPENADMIRAL_ICON_OUT").expect("OPENADMIRAL_ICON_OUT"));
         let base = super::base_icon().unwrap();
-        for (name, dot, horizon) in [("plain", false, false), ("dot", true, false), ("horizon", false, true), ("both", true, true)] {
-            let i = super::icon(&base, dot, horizon);
+        for (name, dot) in [("plain", false), ("dot", true)] {
+            let i = super::icon(&base, dot);
             std::fs::write(out.join(format!("{name}-{}x{}.rgba", i.width(), i.height())), i.rgba()).unwrap();
         }
     }
