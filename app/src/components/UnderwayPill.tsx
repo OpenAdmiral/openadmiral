@@ -225,7 +225,6 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
         onChange={(e) => setSsid(e.target.value)}
         placeholder="Network name, e.g. Alex’s iPhone"
         aria-label="Network name"
-        list="underway-known-networks"
         autoFocus
         className="mt-2 w-full rounded-md border border-line-strong bg-canvas px-2.5 py-1.5 text-xs text-ink focus:border-brand-500 focus:outline-none"
       />
@@ -247,11 +246,6 @@ function BackupNetwork({ editing, setEditing, run }: { editing: boolean; setEdit
           ))}
         </div>
       )}
-      <datalist id="underway-known-networks">
-        {known.map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
       <input
         value={password}
         onChange={(e) => setPassword(e.target.value)}
