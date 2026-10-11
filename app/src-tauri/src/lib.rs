@@ -3,11 +3,15 @@ mod handoff;
 mod jobs;
 mod lifecycle;
 mod migrate;
+mod netwatch;
+mod power;
 mod pty;
+mod resume;
 mod scheduler;
 mod shot;
 mod telemetry;
 mod transcript;
+mod underway;
 mod updater;
 
 use notify::{RecursiveMode, Watcher};
@@ -235,7 +239,7 @@ fn delegation_close(id: String, status: String, note: String) -> Result<(), Stri
     std::fs::rename(tmp, path).map_err(|e| e.to_string())
 }
 
-fn read_dir_json(dir: &Path) -> Vec<Value> {
+pub(crate) fn read_dir_json(dir: &Path) -> Vec<Value> {
     let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
     entries
         .filter_map(|e| e.ok())
@@ -883,6 +887,7 @@ pub fn run() {
         .manage(pty::Ptys::default())
         .manage(handoff::Handoffs::default())
         .manage(transcript::Transcripts::default())
+        .manage(underway::Underway::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
             list_agents,
@@ -926,6 +931,11 @@ pub fn run() {
             open_issue,
             updater::update_check,
             updater::update_install,
+            underway::underway_state,
+            underway::underway_settings,
+            underway::underway_helper,
+            underway::underway_backup,
+            underway::underway_join,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -954,6 +964,8 @@ pub fn run() {
             app.set_menu(app_menu(app)?)?;
             updater::start(handle.clone());
             telemetry::start(handle.clone());
+            // Underway: the lid, the network, auto-resume (a preview shows a canned state).
+            app.state::<underway::Underway>().start(handle.clone());
             // Preview checks of either appearance without touching the system's (OPENADMIRAL_THEME=light|dark).
             if preview() {
                 if let (Ok(theme), Some(w)) = (std::env::var("OPENADMIRAL_THEME"), app.get_webview_window("main")) {
@@ -1012,11 +1024,13 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building OpenAdmiral")
-        .run(|_, event| {
-            // A clean quit tells the statusline nothing is attached any more.
+        .run(|app, event| {
+            // A clean quit tells the statusline nothing is attached any more, and
+            // gives sleep back to macOS at once (the helper would after its lease).
             if let tauri::RunEvent::Exit = event {
                 if !preview() {
                     pty::write_attached(&[]);
+                    app.state::<underway::Underway>().shutdown();
                 }
             }
         });

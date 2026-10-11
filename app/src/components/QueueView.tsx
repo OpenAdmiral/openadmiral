@@ -21,6 +21,7 @@ import { ago, cn, projectColor, projectLabel } from "@/lib/utils";
 import { Info } from "./Info";
 import { QueueInput, QueueText, queueTextProblem } from "./QueueBits";
 import { StatusIcon } from "./StatusIcon";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   queues: Record<string, QueueEntry>;
@@ -112,6 +113,7 @@ export function QueueView({ queues, agents, delegations, now, onJump, onError }:
             </optgroup>
           )}
         </select>
+        <UnderwayPill />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">

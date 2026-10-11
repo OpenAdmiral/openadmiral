@@ -212,6 +212,18 @@ after 10 min. A resume that starts a copy under a new id moves the queue to it.
 Sessions removed from OpenAdmiral (no `sessions/<id>.json`) are not resumed; their
 queue stays visible in the Up next view until deleted.
 
+**Auto-resume (app).** When a session's turn ended on a dropped connection
+(its transcript's last main-conversation entry is an `isApiErrorMessage`
+assistant line whose `error` is `server_error`, or whose text says the
+connection was lost, timed out or the computer slept; never `rate_limit`,
+billing or auth errors), the session is alive and idle, and the Mac has been
+back online for 15 s, the app inserts one item at the top of that session's
+queue: the fixed text "The connection dropped before you finished. Continue
+where you left off." with `runNowAt` = now. The mod serves it like any Run now
+item. At most once per error and three times per session per hour; errors
+older than 6 h and paused queues are left alone. Switch: Underway panel →
+"Resume after a network drop" (`src-tauri/src/resume.rs`).
+
 ## artifacts/<sessionId>/<artifactId>/ (mod → app)
 
 Written by the mod's `show` tool: what an agent wants the user to look at (report,

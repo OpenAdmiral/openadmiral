@@ -35,6 +35,8 @@ import { ShortcutsSheet } from "@/components/ShortcutsSheet";
 import { QueueView } from "@/components/QueueView";
 import { pending, useQueueJanitor, type SchedulerEvent } from "@/lib/queue";
 import { isTimed } from "@/lib/schedule";
+import { UnderwayContext, useUnderway } from "@/lib/underway";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 export default function App() {
   const { agents: rawAgents, delegations, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded } = useAdmiral();
@@ -51,6 +53,12 @@ export default function App() {
   const [shortcuts, setShortcuts] = useState(false);
   const [about, setAbout] = useState(false);
   const life = useLifecycle(rawAgents);
+  const underway = useUnderway();
+  // Auto-resume (src-tauri/src/resume.rs): say which agents a dropped connection had stopped.
+  useEffect(() => {
+    const off = listen<{ sessionId: string; name: string }>("openadmiral://resumed", (e) => life.notify(`Back online: ${e.payload.name || "an agent"} carries on where the connection dropped`));
+    return () => void off.then((f) => f());
+  }, [life.notify]);
   // Rename shows the new name at once (and moves the sidebar-order entry, keyed by name).
   const renameKey = useRef<(a: Agent, from: string, to: string) => void>(() => {});
   const renameFailed = useCallback((text: string) => life.notify(text, "error"), [life.notify]);
@@ -343,6 +351,7 @@ export default function App() {
   }, [rename.editing, ui.leftCollapsed]);
 
   return (
+    <UnderwayContext.Provider value={underway}>
     <TooltipProvider>
     <div className="flex h-full">
       {/* The sidebar's width animates between full and rail; the views refit once it settles. */}
@@ -472,12 +481,16 @@ export default function App() {
       <NewAgentSheet open={sheet} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
     </div>
     </TooltipProvider>
+    </UnderwayContext.Provider>
   );
 }
 
 function Empty({ onNew }: { onNew: () => void }) {
   return (
-    <div data-tauri-drag-region className="flex h-full flex-col items-center justify-center text-center">
+    <div data-tauri-drag-region className="relative flex h-full flex-col items-center justify-center text-center">
+      <div className="absolute top-3.5 right-5">
+        <UnderwayPill />
+      </div>
       <img src="/icon.png" alt="" className="mb-4 size-16 opacity-90" />
       <h1 className="text-xl font-semibold text-ink">Your fleet is quiet</h1>
       <p className="mt-1 max-w-sm text-sm text-ink-3">Agents appear here as soon as a Claude Code session with the OpenAdmiral plugin starts, or when you start one.</p>

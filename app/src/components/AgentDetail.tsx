@@ -39,6 +39,7 @@ import { matchShortcut } from "@/lib/shortcuts";
 import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript";
 import { Chip, DelegationPill, KIND, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   agent: Agent;
@@ -400,6 +401,7 @@ function Header({
           <span className="truncate text-sm text-ink-3">· {ago(s.turn.startedAt, now)} on “{s.turn.prompt.slice(0, 80)}”</span>
         )}
         <span className="flex-1" />
+        <UnderwayPill />
         <Tip side="bottom" content={<TipLabel label={inspector.hidden ? "Show the inspector" : "Hide the inspector"} kbd="⌘⌥0" />}>
           <button
             onClick={inspector.toggle}

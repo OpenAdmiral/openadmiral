@@ -9,6 +9,7 @@ import { Info } from "./Info";
 import { emptyQueue, newItemId, saveQueue, type QueueEntry } from "@/lib/queue";
 import { closeDelegation, findEnd, isActive, isOpen, staleReason } from "@/lib/delegations";
 import { ActionMenu, type ActionItem } from "./ActionMenu";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   delegations: AdmiralDelegation[];
@@ -60,6 +61,7 @@ export function DelegationsView({ delegations, agents, now, onJump, queues }: Pr
             </button>
           ))}
         </div>
+        <UnderwayPill />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">

@@ -103,17 +103,39 @@ pub fn needs_session_now(queue: &Value, sent: &[Value], now: i64) -> bool {
     })
 }
 
-fn read_json(path: &Path) -> Option<Value> {
+/// Queued work that will start within `window` ms (Underway keeps the Mac awake for
+/// it): Run now pending, a plain item when its session is running (`live`: it runs
+/// as soon as that session is idle; a closed one is not woken for it), or a
+/// time/schedule item due by then. Items gated on a delegation or another
+/// session wait on agents that are working, which count on their own.
+pub fn work_ahead(queue: &Value, sent: &[Value], now: i64, window: i64, live: bool) -> bool {
+    if queue.get("paused").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    let Some(items) = queue.get("items").and_then(Value::as_array) else { return false };
+    items.iter().any(|i| {
+        let active = i.get("paused").and_then(Value::as_bool) != Some(true)
+            && i.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty());
+        active && (run_now_pending(i, sent)
+            || match kind(i) {
+                None => live && !is_done(i, sent),
+                Some("time") | Some("schedule") => next_due(i, sent).is_some_and(|due| due <= now + window),
+                _ => false,
+            })
+    })
+}
+
+pub(crate) fn read_json(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok())
 }
 
-fn write_json(path: &Path, v: &Value) -> Result<(), String> {
+pub(crate) fn write_json(path: &Path, v: &Value) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(v).unwrap_or_default()).map_err(|e| e.to_string())?;
     std::fs::rename(tmp, path).map_err(|e| e.to_string())
 }
 
-fn sent_of(dir: &Path, id: &str) -> Vec<Value> {
+pub(crate) fn sent_of(dir: &Path, id: &str) -> Vec<Value> {
     read_json(&dir.join(format!("{id}.sent.json")))
         .and_then(|v| v.get("sent").and_then(Value::as_array).cloned())
         .unwrap_or_default()
@@ -284,6 +306,22 @@ mod tests {
         assert_eq!(next_due(&item, &sent), Some(local(2026, 10, 8, 9, 0)));
         let paused = json!({ "paused": true, "items": [item] });
         assert!(!needs_session_now(&paused, &[], wed));
+    }
+
+    #[test]
+    fn work_ahead_sees_plain_soon_and_run_now_items() {
+        let t = local(2026, 10, 7, 9, 0);
+        let plain = json!({ "items": [{ "id": "q_p", "text": "y", "createdAt": 0 }] });
+        assert!(work_ahead(&plain, &[], t, 0, true));
+        assert!(!work_ahead(&plain, &[], t, 0, false)); // its session is closed
+        assert!(!work_ahead(&plain, &[json!({ "id": "q_p", "at": t })], t, 0, true)); // done
+        let later = json!({ "items": [{ "id": "q_t", "text": "x", "createdAt": 0, "after": { "kind": "time", "at": t + 2 * 3600_000 } }] });
+        assert!(!work_ahead(&later, &[], t, 3600_000, true));
+        assert!(work_ahead(&later, &[], t + 3600_000, 3600_000, false));
+        let gated = json!({ "items": [{ "id": "q_d", "text": "x", "createdAt": 0, "after": { "kind": "delegation", "id": "dlg_1", "status": ["done"] } }] });
+        assert!(!work_ahead(&gated, &[], t, 3600_000, true));
+        let paused = json!({ "paused": true, "items": [{ "id": "q_p", "text": "y", "createdAt": 0 }] });
+        assert!(!work_ahead(&paused, &[], t, 0, true));
     }
 
     #[test]

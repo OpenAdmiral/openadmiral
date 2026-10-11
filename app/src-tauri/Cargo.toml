@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "OpenAdmiral: a control room for Claude Code agents"
 authors = ["OpenAdmiral contributors"]
 edition = "2021"
+default-run = "openadmiral"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +14,11 @@ edition = "2021"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "openadmiral_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Underway's privileged helper (registered with SMAppService, bundled in Contents/MacOS).
+[[bin]]
+name = "openadmiral-helper"
+path = "src/bin/openadmiral-helper.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -29,12 +35,16 @@ portable-pty = "0.9"
 dirs = "6"
 chrono = "0.4"
 tauri-plugin-updater = "2"
+libc = "0.2"
 
 # Preview screenshots of the webview itself (shot.rs)
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSError", "NSProcessInfo", "NSString", "NSObject"] }
+# Underway: the helper (SMAppService) and the backup network password (Keychain)
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+security-framework = "3"
 objc2-app-kit = { version = "0.3", features = ["NSImage", "NSImageRep", "NSBitmapImageRep"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }
 

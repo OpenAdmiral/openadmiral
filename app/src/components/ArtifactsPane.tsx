@@ -12,6 +12,7 @@ import { fileUrl, keyOf, latest, type Artifact, type ArtifactKind } from "@/lib/
 import type { Agent } from "@/lib/types";
 import { ago, cn, projectColor } from "@/lib/utils";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 export const KIND_ICON: Record<ArtifactKind, typeof CodeLinearIcon> = {
   html: CodeLinearIcon,
@@ -130,6 +131,7 @@ export function ArtifactsGallery({ artifacts, agents, ...s }: Shared & { artifac
           <option value="">All kinds</option>
           {kinds.map((k) => <option key={k}>{k}</option>)}
         </select>
+        <UnderwayPill />
       </header>
       <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3">
         <div className={cn("min-h-0 overflow-y-auto px-3", current ? "w-[420px] shrink-0" : "flex-1")}>

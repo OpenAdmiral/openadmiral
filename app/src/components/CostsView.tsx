@@ -7,6 +7,7 @@ import { PlanMeters } from "./PlanMeters";
 import { Info } from "./Info";
 import { SectionTitle } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   costs: Costs | null;
@@ -58,6 +59,7 @@ export function CostsView({ costs, fetchedAt, loading, error, onRefresh, agents,
         >
           <RefreshLinearIcon size={16} className={cn(loading && "animate-spin")} />
         </button>
+        <UnderwayPill />
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">

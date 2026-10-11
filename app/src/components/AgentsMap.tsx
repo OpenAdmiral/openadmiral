@@ -9,6 +9,7 @@ import { DELEGATION_HELP, DELEGATION_LABEL, DELEGATION_STROKE, Meter } from "./p
 import { StatusIcon } from "./StatusIcon";
 import { Info } from "./Info";
 import { Tip } from "./Tooltip";
+import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   groups: Group[];
@@ -155,6 +156,7 @@ export function AgentsMap({ groups, agents, delegations, queues, now, onJump, on
           Show ended
           {endedCount > 0 && <span className="text-ink-3 tabular">{endedCount}</span>}
         </label>
+        <UnderwayPill />
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-6 pb-6">
