@@ -513,7 +513,7 @@ fn work(now: i64) -> (usize, bool) {
 
 /// A preview shows a canned state for screenshots (OPENADMIRAL_UNDERWAY=docked|safe|warn|standby|blocked).
 fn preview_inputs(kind: &str, now: i64) -> (Inputs, Settings) {
-    let mut s = Settings { enabled: kind != "docked", backup_ssid: Some("César’s iPhone".into()), acknowledged: true, enabled_at: Some(now - 3600_000), ..Default::default() };
+    let mut s = Settings { enabled: kind != "docked", backup_ssid: Some("Alex’s iPhone".into()), acknowledged: true, enabled_at: Some(now - 3600_000), ..Default::default() };
     let mut i = Inputs {
         battery: Battery { ac: false, percent: Some(82), charging: false, remaining_min: Some(310) },
         sleep_disabled: kind != "docked",

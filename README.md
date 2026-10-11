@@ -71,6 +71,7 @@ We don't think you should have to choose.
 - Every conversation readable and searchable, long after it scrolled away
 - Agents that hand work to each other, queues and schedules
 - What it all costs, and how much of your plan is left
+- Close the lid and keep going: agents keep working on the road
 
 </td>
 </tr>
@@ -159,6 +160,20 @@ left before the limit, always in view.
   </tr>
 </table>
 
+## Close the lid. The fleet keeps sailing.
+
+Your agents run on your Mac, and a Mac goes to sleep the moment its lid closes. Turn on
+**Underway** and it stays awake for as long as your agents have work, then sleeps as
+usual. Before you pack up, one look at the top right answers the only question that
+matters: *Safe to close the lid*.
+
+It looks after the Mac while you're away. It stops on its own before the battery runs
+low, if the Mac runs too hot, or after the time you set. And when the connection drops
+on the road, your agents don't lose the thread: OpenAdmiral switches to your iPhone's
+hotspot if you set one up, and they carry on where they stopped.
+
+<p align="center"><img src="docs/screenshots/underway-dark.png" alt="Underway: the pill at the top right says it is safe to close the lid, with the checks behind it"></p>
+
 ## A day with OpenAdmiral
 
 It's 9 am. Overnight, a scheduled prompt ran the end-to-end suite and an agent has
@@ -171,6 +186,9 @@ moment the endpoint lands, and go to a meeting.
 
 When you're back, the endpoint is merged, the checkout is half rebuilt, and the progress
 report is sitting in Artifacts. You didn't copy a single line between terminals.
+
+At six, two agents are still going. The top right says *Safe to close the lid*, so you
+close it and drive home. They finish on the way.
 
 ## Built on what you already use
 
@@ -214,6 +232,9 @@ cd openadmiral/app && pnpm install && scripts/install.sh
 </details>
 
 Open **OpenAdmiral** from your Applications folder. Every session with the plugin shows up on its own.
+
+**3. Optional: Underway.** To keep agents working with the lid closed, click **Docked** at
+the top right, turn Underway on and install its helper. macOS asks you to allow it once.
 
 ## Where we're heading
 
