@@ -1,0 +1,32 @@
+name: Report a bug
+description: Something in OpenAdmiral doesn't work as it should.
+type: Bug
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we reproduce it?
+      placeholder: |
+        1. Open an agent…
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: OpenAdmiral version
+      description: Filled in when you report from the app (About OpenAdmiral shows it too).
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything else?
+      description: Error messages, the Claude Code version (`claude --version`), anything that seems related.

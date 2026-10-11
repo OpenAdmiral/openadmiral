@@ -672,6 +672,31 @@ fn set_attention(app: AppHandle, count: usize) {
     }
 }
 
+/// Opens a new GitHub issue from the repo's form ("bug" or "feedback"), its type
+/// preset by the form, with this app's version and macOS already filled in.
+#[tauri::command]
+fn open_issue(app: AppHandle, kind: String) -> Result<(), String> {
+    let template = match kind.as_str() {
+        "bug" => "bug.yml",
+        "feedback" => "feedback.yml",
+        _ => return Err(format!("unknown issue kind {kind}")),
+    };
+    let macos = format!("{} · {}", telemetry::os_version(), std::env::consts::ARCH);
+    let url = format!(
+        "https://github.com/OpenAdmiral/openadmiral/issues/new?template={template}&version={}&macos={}",
+        query_escape(&app.package_info().version.to_string()),
+        query_escape(&macos),
+    );
+    Command::new("open").arg(url).status().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Percent-encodes everything but unreserved URL characters.
+fn query_escape(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
+}
+
 #[tauri::command]
 fn open_in_terminal(cwd: String) -> Result<(), String> {
     Command::new("open")
@@ -767,6 +792,8 @@ fn handle_menu(app: &AppHandle, id: &str) {
         let _ = app.emit("openadmiral://about", ());
     } else if id == "help:shortcuts" {
         let _ = app.emit("openadmiral://shortcuts", ());
+    } else if let Some(kind) = id.strip_prefix("help:").filter(|k| *k == "bug" || *k == "feedback") {
+        let _ = open_issue(app.clone(), kind.to_string());
     } else if id == "help:updates" {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -826,6 +853,9 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     ])?;
     let help = Submenu::with_items(app, "Help", true, &[
         &MenuItem::with_id(app, "help:shortcuts", "Keyboard Shortcuts", true, Some("CmdOrCtrl+/"))?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "help:feedback", "Send Feedback…", true, None::<&str>)?,
+        &MenuItem::with_id(app, "help:bug", "Report a Bug…", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "help:updates", "Check for Updates…", true, None::<&str>)?,
         &CheckMenuItem::with_id(app, "help:telemetry", "Share Anonymous Usage Stats", true, telemetry::enabled(app.handle()), None::<&str>)?,
@@ -893,6 +923,7 @@ pub fn run() {
             lifecycle::agent_remove,
             transcript::transcript_open,
             transcript::transcript_close,
+            open_issue,
             updater::update_check,
             updater::update_install,
         ])
@@ -989,4 +1020,13 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn query_escape_keeps_unreserved_and_encodes_the_rest() {
+        assert_eq!(super::query_escape("0.1.1"), "0.1.1");
+        assert_eq!(super::query_escape("26.0 · aarch64"), "26.0%20%C2%B7%20aarch64");
+    }
 }

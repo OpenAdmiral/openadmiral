@@ -15,6 +15,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AddLinearIcon, AltArrowDownLinearIcon, DollarLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
@@ -269,12 +270,19 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
             <PlanMeters limits={rateLimits} />
           </>
         )}
-        <button
-          onClick={onShortcuts}
-          className={cn("flex items-center gap-1.5 rounded-md text-[11px] text-ink-3 transition-colors hover:text-ink", rateLimits.length > 0 && "mt-3")}
-        >
-          <Kbd>⌘/</Kbd> Shortcuts
-        </button>
+        <div className={cn("flex items-center gap-3 text-[11px] text-ink-3", rateLimits.length > 0 && "mt-3")}>
+          <button onClick={onShortcuts} className="flex items-center gap-1.5 rounded-md transition-colors hover:text-ink">
+            <Kbd>⌘/</Kbd> Shortcuts
+          </button>
+          <span className="flex-1" />
+          {/* A new GitHub issue from the repo's form, type preset, versions filled in. */}
+          <button onClick={() => void invoke("open_issue", { kind: "feedback" })} title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
+            Feedback
+          </button>
+          <button onClick={() => void invoke("open_issue", { kind: "bug" })} title="Report a bug (opens GitHub)" className="transition-colors hover:text-ink">
+            Report a bug
+          </button>
+        </div>
       </footer>
     </aside>
   );

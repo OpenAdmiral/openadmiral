@@ -62,7 +62,7 @@ fn install_id(app: &AppHandle) -> Option<String> {
     Some(id)
 }
 
-fn os_version() -> String {
+pub fn os_version() -> String {
     Command::new("sw_vers")
         .arg("-productVersion")
         .output()

@@ -1,0 +1,24 @@
+name: Feedback & ideas
+description: Tell us what would make OpenAdmiral better, or what you'd love it to do.
+type: Feature
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What's on your mind?
+      description: An idea, something that feels clumsy, a workflow you wish it supported.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: The situation where you'd use it. Helps us get it right.
+  - type: input
+    id: version
+    attributes:
+      label: OpenAdmiral version
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
