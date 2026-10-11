@@ -519,10 +519,12 @@ function Header({
           ) : (
             <Chip icon={<DollarLinearIcon size={13} />}>{usd(s.costUsd).replace("$", "")}</Chip>
           ))}
-        {agent.cli && (
+        {/* Only the exception is worth a chip: a session in a Terminal window (one in
+            OpenAdmiral is the normal case). */}
+        {agent.cli && !agent.attachable && (
           <Chip icon={<MonitorLinearIcon size={13} />}>
-            {KIND[agent.attachable ? "openadmiral" : "terminal"].label}
-            <Info tip={KIND[agent.attachable ? "openadmiral" : "terminal"].hint + "."} />
+            {KIND.terminal.label}
+            <Info tip={KIND.terminal.hint + "."} />
           </Chip>
         )}
         {remote.kind !== "hidden" && (
