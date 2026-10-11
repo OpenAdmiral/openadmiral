@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload to R2
         run: |
-          put() { npx --yes wrangler@3 r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --cache-control "$4" --remote; }
+          put() { npx --yes wrangler@4 r2 object put "$BUCKET/$1" --file "$2" --content-type "$3" --cache-control "$4" --remote; }
           V="${TAG#v}"
           for f in out/*.dmg; do put "downloads/$V/$(basename "$f")" "$f" application/x-apple-diskimage "public, max-age=31536000, immutable"; done
           for f in out/*.app.tar.gz; do put "downloads/$V/$(basename "$f")" "$f" application/gzip "public, max-age=31536000, immutable"; done
