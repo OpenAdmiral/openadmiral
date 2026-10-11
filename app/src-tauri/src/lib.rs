@@ -796,9 +796,29 @@ fn heartbeat_attached(app: AppHandle) {
 
 /// The macOS menu bar without "Close Window", so ⌘W reaches the app (it closes
 /// the selected agent); the red button still hides the window.
+/// The About window. macOS shows the credits text and the copyright.
+fn about() -> tauri::menu::AboutMetadata<'static> {
+    tauri::menu::AboutMetadataBuilder::new()
+        .credits(Some(ABOUT_CREDITS))
+        .copyright(Some("© César Trigo · MIT License"))
+        .website(Some("https://openadmiral.com"))
+        .build()
+}
+
+const ABOUT_CREDITS: &str = "Mission control for your Claude Code sessions: every agent in one window, \
+a nudge when one needs you, and agents that hand work to each other. Free and open source. \
+More at openadmiral.com.
+
+Built on the shoulders of open source. Thank you to Tauri, React, Tailwind CSS, xterm.js, \
+Motion, dnd kit, TanStack Virtual, Mermaid, react-markdown, highlight.js, Solar Icons, \
+the Outfit and JetBrains Mono fonts, WezTerm's portable-pty, notify, ccusage and Vite, \
+and to everyone who maintains them.
+
+Not affiliated with Anthropic. Claude and Claude Code are trademarks of Anthropic.";
+
 fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     let openadmiral = Submenu::with_items(app, "OpenAdmiral", true, &[
-        &PredefinedMenuItem::about(app, Some("About OpenAdmiral"), None)?,
+        &PredefinedMenuItem::about(app, Some("About OpenAdmiral"), Some(about()))?,
         &PredefinedMenuItem::separator(app)?,
         &PredefinedMenuItem::hide(app, None)?,
         &PredefinedMenuItem::hide_others(app, None)?,

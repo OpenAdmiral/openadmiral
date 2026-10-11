@@ -227,6 +227,33 @@ of terminal tabs. Next on the horizon:
 
 Ideas, issues and pull requests are welcome.
 
+## About
+
+OpenAdmiral is mission control for your Claude Code sessions: every agent in one window, a nudge
+when one needs you, and agents that hand work to each other. It's free, open source and made by
+[César Trigo](https://github.com/CesarTrigo). Find out more, download it and see what's new at
+**[openadmiral.com](https://openadmiral.com)**.
+
+### Thank you, open source
+
+OpenAdmiral stands on the work of these projects and the people who maintain them:
+[Tauri](https://tauri.app) ·
+[React](https://react.dev) ·
+[Tailwind CSS](https://tailwindcss.com) ·
+[xterm.js](https://xtermjs.org) ·
+[Motion](https://motion.dev) ·
+[dnd kit](https://dndkit.com) ·
+[TanStack Virtual](https://tanstack.com/virtual) ·
+[Mermaid](https://mermaid.js.org) ·
+[react-markdown](https://github.com/remarkjs/react-markdown) ·
+[highlight.js](https://highlightjs.org) ·
+[Solar Icons](https://www.npmjs.com/package/@solar-icons/react) ·
+[Outfit](https://fonts.google.com/specimen/Outfit) and [JetBrains Mono](https://www.jetbrains.com/lp/mono/) ·
+[portable-pty](https://github.com/wezterm/wezterm/tree/main/pty) from WezTerm ·
+[notify](https://github.com/notify-rs/notify) ·
+[ccusage](https://github.com/ryoppippi/ccusage) ·
+[Vite](https://vite.dev) and [Vitest](https://vitest.dev).
+
 <details>
 <summary><b>For contributors</b></summary>
 
