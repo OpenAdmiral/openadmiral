@@ -15,6 +15,7 @@ import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AddLinearIcon, AltArrowDownLinearIcon, DollarLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
@@ -239,14 +240,17 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
 
       <footer className="shrink-0 border-t border-line px-5 pt-3.5 pb-2.5">
         {update && (
-          <button
-            onClick={update.install}
-            disabled={update.installing}
-            className="mb-3 flex w-full items-center justify-between gap-2 rounded-lg bg-brand-500/12 px-3 py-2 text-left text-xs ring-1 ring-brand-500/25 transition-colors hover:bg-brand-500/18 disabled:opacity-70"
-          >
-            <span className="truncate font-semibold text-ink">OpenAdmiral {update.version} is available</span>
-            <span className="shrink-0 font-semibold text-brand-700 dark:text-brand-300">{update.installing ? "Installing…" : "Install & restart"}</span>
-          </button>
+          <div className="mb-3 rounded-lg bg-brand-500/12 px-3 py-2 text-xs ring-1 ring-brand-500/25">
+            <div className="font-semibold text-ink">OpenAdmiral {update.version} is available</div>
+            <div className="mt-1 flex items-center gap-3">
+              <button onClick={update.install} disabled={update.installing} className="font-semibold text-brand-700 hover:underline disabled:opacity-70 dark:text-brand-300">
+                {update.installing ? "Installing…" : "Install & restart"}
+              </button>
+              <button onClick={() => void openUrl("https://openadmiral.com/releases")} className="text-ink-3 hover:text-ink hover:underline">
+                What's new
+              </button>
+            </div>
+          </div>
         )}
         {todayCost !== undefined && (
           <button onClick={() => onSelect({ kind: "costs" })} title="API-equivalent cost today" className="mb-3 flex w-full items-baseline justify-between text-left">

@@ -178,8 +178,9 @@ report is sitting in Artifacts. You didn't copy a single line between terminals.
   is a Claude Code mod: it plugs into Claude Code's own extension system, with no patching,
   no screen-scraping and nothing standing between you and your sessions. Remove it and
   everything is exactly as it was.
-- **Local-first.** Everything stays on your Mac. The app and your sessions talk through
-  plain files in your Claude folder: no account, no server, no telemetry.
+- **Local-first.** 100% local: your code and sessions never leave your Mac. No account.
+  One anonymous daily ping counts installs, and you can turn it off
+  ([what it sends](https://openadmiral.com/privacy)).
 - **Open source.** MIT licensed. Read it, change it, make it yours.
 
 ## Get started
@@ -193,10 +194,10 @@ report is sitting in Artifacts. You didn't copy a single line between terminals.
 
 Run `/reload-plugins` in sessions that were already open.
 
-**2. Install the app.** Download the latest `.dmg` from
-[Releases](https://github.com/OpenAdmiral/openadmiral/releases/latest) (Apple Silicon and Intel),
-open it and drag OpenAdmiral to Applications. The first time, right-click it and choose **Open**:
-builds are not notarized by Apple yet.
+**2. Install the app.** [Download OpenAdmiral](https://openadmiral.com/download) (Apple Silicon
+and Intel), open the `.dmg` and drag OpenAdmiral to Applications. The first time, right-click it
+and choose **Open**: builds are not notarized by Apple yet. From then on it updates itself;
+see [what's new](https://openadmiral.com/releases) in every version.
 
 <details>
 <summary>Or build it from source</summary>
