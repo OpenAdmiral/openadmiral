@@ -11,6 +11,7 @@ import {
   MonitorLinearIcon,
   RecordCircleLinearIcon,
   RoutingLinearIcon,
+  RefreshLinearIcon,
 } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
@@ -76,12 +77,14 @@ type Props = {
   };
   /** Set while the header edits this agent's name (renaming with the sidebar collapsed to a rail). */
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
+  /** This session runs an older OpenAdmiral plugin than the one installed: offer /reload-plugins. */
+  pluginBehind?: { reload: () => void };
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind }: Props) {
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
   const tasks = pickTasks(s, transcript);
@@ -190,6 +193,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
         inspector={{ hidden: inspectorHidden, attention: inspectorAttention, toggle: onToggleInspector }}
         cmd={cmd}
         renaming={renaming}
+        pluginBehind={pluginBehind}
       />
       {agent.status === "waiting" && s?.waiting && (
         <div className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm">
@@ -348,6 +352,7 @@ function Header({
   inspector,
   cmd,
   renaming,
+  pluginBehind,
 }: {
   agent: Agent;
   now: number;
@@ -358,6 +363,7 @@ function Header({
   inspector: { hidden: boolean; attention: boolean; toggle: () => void };
   cmd: HeaderCommands;
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
+  pluginBehind?: { reload: () => void };
 }) {
   const s = agent.session;
   const ctx = s?.context;
@@ -526,6 +532,13 @@ function Header({
             {KIND.terminal.label}
             <Info tip={KIND.terminal.hint + "."} />
           </Chip>
+        )}
+        {pluginBehind && (
+          <Tip side="bottom" content={<TipLabel label="This session runs an older OpenAdmiral plugin. Reload runs /reload-plugins in it as soon as it is idle." />}>
+            <Chip icon={<RefreshLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={pluginBehind.reload}>
+              Plugin outdated · Reload
+            </Chip>
+          </Tip>
         )}
         {remote.kind !== "hidden" && (
           <Tip

@@ -59,6 +59,8 @@ type Props = {
   scheduledCount?: number;
   /** A newer version of OpenAdmiral, offered by the updater. */
   update?: { version: string; installing: boolean; install: () => void };
+  /** Running sessions on an older OpenAdmiral plugin than the installed one. */
+  pluginBehind?: { count: number; reload: () => void };
   /** The agent whose name is being edited in its row, and what to do with the result. */
   renaming?: { id: string; save: (a: Agent, name: string) => void; cancel: () => void };
 };
@@ -82,7 +84,8 @@ const collision: CollisionDetection = (args) => {
   return closestCenter({ ...args, droppableContainers });
 };
 
-export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update }: Props) {
+export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
+  pluginBehind }: Props) {
   const newArtifacts = Object.values(unseen).reduce((n, x) => n + x, 0);
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
@@ -240,6 +243,16 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       </div>
 
       <footer className="shrink-0 border-t border-line px-5 pt-3.5 pb-2.5">
+        {pluginBehind && pluginBehind.count > 0 && (
+          <div className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs ring-1 ring-amber-500/25">
+            <div className="font-semibold text-ink">
+              {pluginBehind.count === 1 ? "1 session runs" : `${pluginBehind.count} sessions run`} an older OpenAdmiral plugin
+            </div>
+            <button onClick={pluginBehind.reload} className="mt-1 font-semibold text-amber-700 hover:underline dark:text-amber-300">
+              Reload {pluginBehind.count === 1 ? "it" : "all"}
+            </button>
+          </div>
+        )}
         {update && (
           <div className="mb-3 rounded-lg bg-brand-500/12 px-3 py-2 text-xs ring-1 ring-brand-500/25">
             <div className="font-semibold text-ink">OpenAdmiral {update.version} is available</div>

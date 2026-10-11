@@ -36,6 +36,7 @@ import { QueueView } from "@/components/QueueView";
 import { pending, useQueueJanitor, type SchedulerEvent } from "@/lib/queue";
 import { isTimed } from "@/lib/schedule";
 import { UnderwayContext, useUnderway } from "@/lib/underway";
+import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { UnderwayPill } from "@/components/UnderwayPill";
 
 export default function App() {
@@ -54,6 +55,16 @@ export default function App() {
   const [about, setAbout] = useState(false);
   const life = useLifecycle(rawAgents);
   const underway = useUnderway();
+  // Sessions still on an older plugin than the installed one: offer /reload-plugins.
+  const pluginChangedAt = usePluginChangedAt();
+  const reloadPlugins = useCallback(
+    (ids: string[]) =>
+      reloadPlugin(ids).then(
+        (n) => life.notify(n === 1 ? "Reloading the plugin: the session does it as soon as it is idle." : `Reloading the plugin in ${n} sessions, each as soon as it is idle.`),
+        (e) => life.notify(String(e), "error"),
+      ),
+    [life.notify],
+  );
   // Auto-resume (src-tauri/src/resume.rs): say which agents a dropped connection had stopped.
   useEffect(() => {
     const off = listen<{ sessionId: string; name: string }>("openadmiral://resumed", (e) => life.notify(`Back online: ${e.payload.name || "an agent"} carries on where the connection dropped`));
@@ -64,6 +75,7 @@ export default function App() {
   const renameFailed = useCallback((text: string) => life.notify(text, "error"), [life.notify]);
   const rename = useRename(rawAgents, now, (a, from, to) => renameKey.current(a, from, to), renameFailed);
   const agents = rename.agents;
+  const behindIds = agents.filter((a) => pluginBehind(a, pluginChangedAt)).map((a) => a.id);
   const order = useSidebarOrder(agents, cliReady);
   useEffect(() => {
     if (!openWhenListed) return;
@@ -378,6 +390,7 @@ export default function App() {
         onShortcuts={() => setShortcuts(true)}
         scheduledCount={scheduledCount}
         update={update ? { ...update, install: installUpdate } : undefined}
+        pluginBehind={{ count: behindIds.length, reload: () => void reloadPlugins(behindIds) }}
         groups={order.groups}
         queues={queues}
         unseen={seen.unseen}
@@ -467,6 +480,7 @@ export default function App() {
                 seen={seen}
                 onClaudeLink={openClaude}
                 renaming={ui.leftCollapsed && rename.editing === selected.id ? { save: rename.commit, cancel: rename.cancel } : undefined}
+                pluginBehind={behindIds.includes(selected.id) ? { reload: () => void reloadPlugins([selected.id]) } : undefined}
               />
             ) : (
               <Empty onNew={() => setSheet(true)} />

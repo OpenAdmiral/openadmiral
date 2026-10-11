@@ -39,6 +39,7 @@ type AdmiralSession = {
   supersededBy?: string
   commands?: string[]
   queueCommands?: QueueCommand[]
+  plugin?: { loadedAt: number }  // when this code was loaded: the app compares it with the plugin's files to spot a session needing /reload-plugins
   startedAt: number
   updatedAt: number
 }
@@ -122,9 +123,15 @@ function touch($: EngineInterface, patch: Partial<AdmiralSession> = {}) {
   flushTimer = $.clock.after(250, () => void flush($))
 }
 
+// When this module was loaded (session start or the last /reload-plugins), stamped on
+// the first write after it.
+let loadedAt: number | undefined
+
 async function flush($: EngineInterface) {
   if (!me) return
   me.updatedAt = await $.clock.now()
+  loadedAt ??= me.updatedAt
+  me.plugin = { loadedAt }
   await $.fs.write(`${root}/sessions/${me.sessionId}.json`, JSON.stringify(me, null, 1))
 }
 

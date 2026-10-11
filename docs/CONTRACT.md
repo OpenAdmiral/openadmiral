@@ -47,10 +47,18 @@ type AdmiralSession = {
   commands?: string[]          // which of model/usage/cost/status/compact/context/clear/remote-control/rename this build has
   queueCommands?: { name: string; kind: 'command' | 'skill'; description?: string }[]  // slash commands Up next may queue here (see queue/); absent from older mods
   supersededBy?: string        // set on the old file when /clear gave the same process a new session id (status 'ended'); the app follows it
+  plugin?: { loadedAt: number } // when this session loaded the plugin (start or last /reload-plugins); absent from older mods
   startedAt: number
   updatedAt: number            // heartbeat: refreshed at least every 30 s while the session is alive
 }
 ```
+
+**Outdated plugin (app).** A session keeps the plugin it loaded until
+`/reload-plugins`. The app compares `plugin.loadedAt` (missing counts as old) with
+the newest file under the plugin's `hooks/` and `.claude-plugin/` (this repo's
+`./plugin` for a directory marketplace, else the installed copy); a running session
+that loaded before them shows "Plugin outdated · Reload", and Reload puts
+`/reload-plugins` first in its queue as Run now (`src-tauri/src/plugin_files.rs`).
 
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).

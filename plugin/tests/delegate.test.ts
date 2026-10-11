@@ -254,6 +254,16 @@ test("@ shows one row per session: Claude Code's own, described by OpenAdmiral",
   expect(submitted.context?.join('\n')).toContain('Acme Website (session sess-web)')
 })
 
+test('the session file says when this plugin was loaded, for the app to spot stale ones', async ($, on) => {
+  const files = new Map<string, string>()
+  const { clock } = engine(on, 'sess-x', files, [])
+  await clock.advance(5_000)
+  await $.session.start({ cwd: '/work/acme', surface: null, isInteractive: true })
+  await clock.advance(1_000)
+  const s = JSON.parse(files.get('/home/t/.claude/openadmiral/sessions/sess-x.json')!)
+  expect(s.plugin.loadedAt).toBeGreaterThanOrEqual(5_000)
+})
+
 test('a retried send that gets through marks the delegation sent', async ($, on) => {
   const files = new Map<string, string>()
   engine(on, 'sess-intel', files, [], ['no-verdict', 'ok'])

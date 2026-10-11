@@ -29,6 +29,8 @@ export type AdmiralSession = {
   commands?: string[];
   /** Slash commands Up next may queue in this session, and how they run (docs/CONTRACT.md); absent from older mods. */
   queueCommands?: { name: string; kind: "command" | "skill"; description?: string }[];
+  /** When this session loaded its OpenAdmiral plugin (docs/CONTRACT.md); absent from older mods. */
+  plugin?: { loadedAt: number };
   tasks?: { id: string; subject: string; status: "pending" | "in_progress" | "completed"; activeForm?: string }[];
   subagents?: { id: string; type?: string; description?: string; status: "running" | "done" | "failed"; startedAt: number; endedAt?: number }[];
   activity?: { at: number; kind: "prompt" | "tool" | "reply" | "sent" | "received" | "permission"; text: string }[];

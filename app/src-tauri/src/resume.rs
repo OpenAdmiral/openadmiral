@@ -73,9 +73,12 @@ fn new_item_id() -> String {
     format!("q_{}", b.iter().map(|x| digits[(*x as usize) % 36] as char).collect::<String>())
 }
 
-/// Puts the resume prompt first in the session's Up next, as Run now. Err when
-/// the queue is paused (the person paused it: leave the agent alone).
-pub fn enqueue(session_id: &str, now: i64) -> Result<(), String> {
+/// Puts `text` (a prompt or a slash command) first in the session's Up next, as Run
+/// now. Err when the queue is paused (the person paused it: leave the agent alone).
+pub fn enqueue(session_id: &str, text: &str, now: i64) -> Result<(), String> {
+    if session_id.is_empty() || session_id.contains('/') || session_id.contains("..") {
+        return Err("bad session id".into());
+    }
     let dir = crate::admiral_dir().join("queue");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{session_id}.json"));
@@ -91,8 +94,8 @@ pub fn enqueue(session_id: &str, now: i64) -> Result<(), String> {
     }
     let items = queue["items"].as_array_mut().unwrap();
     // One is enough: an earlier one that has not run yet will.
-    items.retain(|i| i.get("text").and_then(Value::as_str) != Some(PROMPT));
-    items.insert(0, json!({ "id": new_item_id(), "text": PROMPT, "createdAt": now, "runNowAt": now }));
+    items.retain(|i| i.get("text").and_then(Value::as_str) != Some(text));
+    items.insert(0, json!({ "id": new_item_id(), "text": text, "createdAt": now, "runNowAt": now }));
     queue["v"] = json!(1);
     queue["updatedAt"] = json!(now);
     crate::scheduler::write_json(&path, &queue)
@@ -133,7 +136,7 @@ impl Resumer {
                 continue;
             }
             done.push((uuid, now));
-            if enqueue(&id, now).is_ok() {
+            if enqueue(&id, PROMPT, now).is_ok() {
                 out.push((id, str_of("name").to_string()));
             }
         }

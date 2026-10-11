@@ -4,6 +4,7 @@ mod jobs;
 mod lifecycle;
 mod migrate;
 mod netwatch;
+mod plugin_files;
 mod power;
 mod pty;
 mod resume;
@@ -937,6 +938,8 @@ pub fn run() {
             underway::underway_backup,
             underway::underway_join,
             underway::underway_networks,
+            plugin_files::plugin_changed_at,
+            plugin_files::plugin_reload,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
