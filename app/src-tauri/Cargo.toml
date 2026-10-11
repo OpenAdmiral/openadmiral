@@ -1,6 +1,6 @@
 [package]
 name = "openadmiral"
-version = "0.1.1"
+version = "0.1.2"
 description = "OpenAdmiral: a control room for Claude Code agents"
 authors = ["OpenAdmiral contributors"]
 edition = "2021"
