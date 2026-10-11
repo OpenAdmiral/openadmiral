@@ -215,7 +215,13 @@ Run `/reload-plugins` in sessions that were already open.
 **2. Install the app.** [Download OpenAdmiral](https://openadmiral.com/download) (Apple Silicon
 and Intel), open the `.dmg` and drag OpenAdmiral to Applications. It is signed and notarized by
 Apple, so it opens like any other app. From then on it updates itself;
-see [what's new](https://openadmiral.com/releases) in every version.
+see [what's new](https://openadmiral.com/releases) in every version. Or with Homebrew:
+
+```sh
+brew install --cask openadmiral/tap/openadmiral
+```
+
+OpenAdmiral needs macOS 13 or later.
 
 <details>
 <summary>Or build it from source</summary>

@@ -55,6 +55,7 @@
     ],
     "category": "DeveloperTool",
     "macOS": {
+      "minimumSystemVersion": "13.0",
       "files": {
         "Library/LaunchDaemons/com.openadmiral.helper.plist": "./LaunchDaemons/com.openadmiral.helper.plist"
       }
