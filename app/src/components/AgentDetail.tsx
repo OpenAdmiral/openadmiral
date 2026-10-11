@@ -520,7 +520,7 @@ function Header({
             <Chip icon={<DollarLinearIcon size={13} />}>{usd(s.costUsd).replace("$", "")}</Chip>
           ))}
         {agent.cli && (
-          <Chip icon={<MonitorLinearIcon size={13} />} title={KIND[agent.attachable ? "openadmiral" : "terminal"].hint}>
+          <Chip icon={<MonitorLinearIcon size={13} />}>
             {KIND[agent.attachable ? "openadmiral" : "terminal"].label}
             <Info tip={KIND[agent.attachable ? "openadmiral" : "terminal"].hint + "."} />
           </Chip>
