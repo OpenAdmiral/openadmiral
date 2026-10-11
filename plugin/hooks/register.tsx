@@ -378,7 +378,12 @@ const answer = (text: string) => ({ result: text, text })
 // Sends through the engine's session.send. A send a plugin makes can come back
 // undecided from auto mode's classifier ("no verdict … issue it again once"),
 // so retry once; the caller falls back to asking the model to SendMessage.
+// Once both tries fail that way, this session stops trying: the classifier keeps
+// refusing plugin sends, and each attempt only delays the model's own send.
+let pluginSendsBlocked = false
+const BLOCKED = 'auto mode does not let OpenAdmiral send for this session'
 async function deliver($: EngineInterface, to: Parameters<EngineInterface['session']['send']>[0]['to'], text: string): Promise<string | undefined> {
+  if (pluginSendsBlocked) return BLOCKED
   for (let attempt = 0; attempt < 2; attempt++) {
     const sent = await $.session
       .send({ to, text })
@@ -386,7 +391,12 @@ async function deliver($: EngineInterface, to: Parameters<EngineInterface['sessi
     const failure: string | undefined =
       'deny' in sent && sent.deny ? String(sent.deny) : sent.isDelivered === false ? String(sent.reason ?? 'not delivered') : undefined
     if (!failure) return undefined
-    if (attempt === 1 || !/no verdict|again once/i.test(failure)) return failure
+    const undecided = /no verdict|again once/i.test(failure)
+    if (undecided && attempt === 1) {
+      pluginSendsBlocked = true
+      return BLOCKED
+    }
+    if (!undecided) return failure
   }
   return 'not delivered'
 }
@@ -559,6 +569,7 @@ const SHOW_TOOL = 'show'
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await admiralRoot($)
+    pluginSendsBlocked = false
     const sessionId = await $.session.id()
     const now = await $.clock.now()
     let previous: Partial<AdmiralSession> = {}
@@ -776,7 +787,7 @@ export const register: Register = on => {
     const failure = await deliver($, args.to, brief)
     if (failure) {
       // Kept as a draft: the model's own SendMessage (which carries the id) marks it sent.
-      d.notes.push({ at: now, by: me.project, status: 'draft', text: `plugin could not deliver: ${failure}` })
+      d.notes.push({ at: now, by: me.project, status: 'draft', text: `handed to the agent to send (${clip(failure, 120)})` })
       await writeDelegation($, d)
       return answer(
         `Delegation ${d.id} is recorded but OpenAdmiral could not deliver it (${clip(failure, 160)}). ` +
@@ -986,6 +997,16 @@ export const register: Register = on => {
   on('session.receive', async ($, e, next) => {
     if (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message' || e.origin.kind === 'coordinator') {
       await log($, 'received', e.text)
+      // A delegation brief reached its recipient: on the board it is accepted from now on,
+      // not "sent" until the recipient's model gets round to delegation_update.
+      const id = e.text.match(/\[OpenAdmiral delegation (dlg_[a-z0-9]{8})\] from /)?.[1]
+      const d = id && me ? await readDelegation($, id) : undefined
+      if (d && me && d.from.sessionId !== me.sessionId && (d.status === 'sent' || d.status === 'draft')) {
+        d.status = 'accepted'
+        d.to = { ...d.to, sessionId: me.sessionId, project: me.project }
+        d.notes.push({ at: await $.clock.now(), by: me.project, status: 'accepted', text: 'received' })
+        await writeDelegation($, d)
+      }
     }
     return next(e)
   }).catch(($, e, next) => next(e))

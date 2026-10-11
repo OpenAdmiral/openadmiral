@@ -172,6 +172,33 @@ test('an undelivered delegation stays a draft until the model sends it itself', 
   expect(JSON.parse(files.get(path)!).status).toBe('sent')
 })
 
+test('after a send auto mode kept undecided, the next delegation goes straight to the model', async ($, on) => {
+  const files = new Map<string, string>()
+  const sent: { to: unknown; text: string }[] = []
+  engine(on, 'sess-intel', files, sent, ['no-verdict', 'no-verdict'])
+  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
+  await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu1', to: 'mcp-b3', title: 'T1', detail: 'D' })
+  const second = await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu2', to: 'mcp-b3', title: 'T2', detail: 'D' })
+  expect(sent.length).toBe(2)                       // no new attempts for the second one
+  expect(String(second.result)).toContain('SendMessage')
+})
+
+test('a delegation brief reaching its recipient marks it accepted', async ($, on) => {
+  const files = new Map<string, string>()
+  engine(on, 'sess-mcp', files, [])
+  on('session.receive', (_$, e) => ({ text: e.text }))
+  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
+  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
+  files.set(path, JSON.stringify({
+    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
+    to: { address: 'acme-mcp-server' }, status: 'sent', notes: [], createdAt: 0, updatedAt: 0,
+  }))
+  await $.session.receive({ text: '[OpenAdmiral delegation dlg_abcd1234] from acme-intelligence\nTitle: T', origin: { kind: 'peer' } } as never)
+  const d = JSON.parse(files.get(path)!)
+  expect(d.status).toBe('accepted')
+  expect(d.to.sessionId).toBe('sess-mcp')
+})
+
 test('a retried send that gets through marks the delegation sent', async ($, on) => {
   const files = new Map<string, string>()
   engine(on, 'sess-intel', files, [], ['no-verdict', 'ok'])
