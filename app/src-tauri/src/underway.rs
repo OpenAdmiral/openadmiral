@@ -408,6 +408,14 @@ fn helper_call(req: Value) -> Result<Value, String> {
     }
 }
 
+/// The helper's launchd plist inside this app bundle (Contents/Library/LaunchDaemons).
+fn bundled_plist() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent()?.parent().map(|contents| contents.join("Library/LaunchDaemons").join(PLIST)))
+        .is_some_and(|p| p.exists())
+}
+
 /// The helper as the app sees it, and its answer when it is up.
 fn helper_state() -> (HelperState, Option<Value>, Option<String>) {
     #[cfg(target_os = "macos")]
@@ -421,6 +429,9 @@ fn helper_state() -> (HelperState, Option<Value>, Option<String>) {
                 Ok(v) => (HelperState::Ready, Some(v), None),
                 Err(_) => (HelperState::Unavailable, None, Some("The helper is installed but not answering".into())),
             },
+            // SMAppService says "not found" for a daemon it has not registered yet, not
+            // only for one missing from the bundle: look for the plist ourselves.
+            3 if bundled_plist() => (HelperState::Missing, None, None),
             _ => (HelperState::Unavailable, None, Some("This build has no helper (install the app from openadmiral.com)".into())),
         }
     }
