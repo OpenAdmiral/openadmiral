@@ -751,10 +751,13 @@ pub fn underway_helper(app: AppHandle, action: String) -> Result<Option<State>, 
     match action.as_str() {
         "install" => {
             let result = mac::register();
-            if mac::service_status() == 2 {
-                mac::open_login_items();
+            // Waiting for the person's approval comes back as "Operation not permitted":
+            // not a failure, the next step is theirs, in Login Items.
+            match mac::service_status() {
+                2 => mac::open_login_items(),
+                1 => {}
+                _ => result?,
             }
-            result?;
         }
         "uninstall" => {
             app.state::<Underway>().shutdown();
