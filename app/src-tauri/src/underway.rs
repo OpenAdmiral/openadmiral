@@ -203,9 +203,9 @@ pub fn evaluate(i: &Inputs, s: &Settings, now: i64) -> (State, Option<Stop>) {
     }
     if enabled || i.helper != Some(HelperState::Ready) {
         match i.helper {
-            Some(HelperState::Ready) => {}
+            Some(HelperState::Ready) => check("helper", Level::Ok, "Helper allowed and running".into()),
             Some(HelperState::Missing) | None => check("helper", Level::Bad, "Install the helper that keeps the Mac awake".into()),
-            Some(HelperState::Approval) => check("helper", Level::Bad, "Allow OpenAdmiral in System Settings → Login Items".into()),
+            Some(HelperState::Approval) => check("helper", Level::Bad, "Waiting for your approval in System Settings → Login Items".into()),
             Some(HelperState::Unavailable) => check("helper", Level::Bad, i.helper_error.clone().unwrap_or_else(|| "The helper is not available".into())),
         }
     }
@@ -879,7 +879,7 @@ mod tests {
         i.helper = Some(HelperState::Approval);
         let (st, _) = evaluate(&i, &s, 1000);
         assert_eq!(st.mode, Mode::Blocked);
-        assert_eq!(st.detail, "Allow OpenAdmiral in System Settings → Login Items");
+        assert_eq!(st.detail, "Waiting for your approval in System Settings → Login Items");
     }
 
     #[test]
