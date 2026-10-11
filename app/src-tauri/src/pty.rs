@@ -95,6 +95,10 @@ pub fn pty_open(
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // A colour switch the app inherited (it was opened from a shell that had one, e.g.
+    // a Claude Code session's NO_COLOR) must not turn the embedded Claude Code grey.
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("FORCE_COLOR");
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;

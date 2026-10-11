@@ -46,7 +46,9 @@ if pgrep -f "$DEST/Contents/MacOS/" >/dev/null; then
       for i in {1..43200}; do pgrep -f "$1/Contents/MacOS/" >/dev/null || break; sleep 1; done
       pgrep -f "$1/Contents/MacOS/" >/dev/null && exit 0
       [[ -d "$2" ]] || exit 0
-      rm -rf "$1" && mv "$2" "$1" && open "$1"
+      # A clean environment, as the Finder would give it: this script often runs inside
+      # a Claude Code session, whose variables (NO_COLOR, CLAUDE_*) must not reach the app.
+      rm -rf "$1" && mv "$2" "$1" && env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/open "$1"
     ' _ "$DEST" "$STAGE" >/dev/null 2>&1 &!
     echo "OpenAdmiral is running: the new build goes in when you quit it (⌘Q), and OpenAdmiral reopens by itself."
     exit 0
