@@ -1,5 +1,6 @@
 # Builds OpenAdmiral.app for Apple Silicon and Intel (one universal binary) and
-# attaches the .dmg to a draft GitHub release: review it, then publish.
+# attaches the .dmg and the signed update package to a draft GitHub release:
+# write the changelog in its notes, then publish (publish.yml takes it from there).
 #
 #   git tag v0.1.0 && git push origin v0.1.0     # or run it by hand from the Actions tab
 #
@@ -63,6 +64,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update package (.app.tar.gz.sig) the in-app updater checks.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Ad-hoc ("-") unless the step above set a real identity.
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY || '-' }}
         with:
@@ -70,6 +74,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: OpenAdmiral v__VERSION__
           releaseBody: |
+            <!-- Changelog: replace this line with what changed, in markdown. It becomes the
+                 release notes on openadmiral.com and in the app's update offer. -->
+
             Download the **.dmg** below (Apple Silicon and Intel), open it and drag OpenAdmiral to Applications.
 
             Then add the plugin in Claude Code:
@@ -78,4 +85,6 @@ jobs:
             /plugin install openadmiral@openadmiral
             ```
           releaseDraft: true
+          # Ours lives on openadmiral.com (publish.yml), with links users can reach.
+          includeUpdaterJson: false
           args: --target universal-apple-darwin --bundles app,dmg

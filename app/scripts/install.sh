@@ -27,7 +27,8 @@ BUNDLE="$APP_DIR/src-tauri/target/debug/bundle/macos/OpenAdmiral.app"
 
 if (( BUILD )); then
   export PATH="$HOME/.cargo/bin:$PATH"
-  (cd "$APP_DIR" && pnpm tauri build --debug)
+  # No update packages for a local install: they need the release signing key.
+  (cd "$APP_DIR" && pnpm tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}')
 fi
 [[ -d "$BUNDLE" ]] || { echo "No bundle at $BUNDLE; build first." >&2; exit 1; }
 

@@ -55,6 +55,8 @@ type Props = {
   onShortcuts: () => void;
   /** Scheduled Up next items across agents (the nav badge). */
   scheduledCount?: number;
+  /** A newer version of OpenAdmiral, offered by the updater. */
+  update?: { version: string; installing: boolean; install: () => void };
   /** The agent whose name is being edited in its row, and what to do with the result. */
   renaming?: { id: string; save: (a: Agent, name: string) => void; cancel: () => void };
 };
@@ -78,7 +80,7 @@ const collision: CollisionDetection = (args) => {
   return closestCenter({ ...args, droppableContainers });
 };
 
-export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0 }: Props) {
+export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update }: Props) {
   const newArtifacts = Object.values(unseen).reduce((n, x) => n + x, 0);
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
@@ -236,6 +238,16 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       </div>
 
       <footer className="shrink-0 border-t border-line px-5 pt-3.5 pb-2.5">
+        {update && (
+          <button
+            onClick={update.install}
+            disabled={update.installing}
+            className="mb-3 flex w-full items-center justify-between gap-2 rounded-lg bg-brand-500/12 px-3 py-2 text-left text-xs ring-1 ring-brand-500/25 transition-colors hover:bg-brand-500/18 disabled:opacity-70"
+          >
+            <span className="truncate font-semibold text-ink">OpenAdmiral {update.version} is available</span>
+            <span className="shrink-0 font-semibold text-brand-700 dark:text-brand-300">{update.installing ? "Installing…" : "Install & restart"}</span>
+          </button>
+        )}
         {todayCost !== undefined && (
           <button onClick={() => onSelect({ kind: "costs" })} title="API-equivalent cost today" className="mb-3 flex w-full items-baseline justify-between text-left">
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Today</span>

@@ -133,6 +133,25 @@ export default function App() {
   // Up next: sent one-shots leave their files; queues follow a session's new id.
   useQueueJanitor(queues, superseded);
   const scheduledCount = Object.values(queues).reduce((n, e) => n + pending(e).filter(isTimed).length, 0);
+  // A newer version (the updater checks at launch, every 6 h and from Help → Check for Updates…).
+  const [update, setUpdate] = useState<{ version: string; installing: boolean } | null>(null);
+  useEffect(() => {
+    const offs = [
+      listen<{ version: string }>("openadmiral://update", (e) => setUpdate({ version: e.payload.version, installing: false })),
+      listen<string>("openadmiral://update-none", (e) => life.notify(`You're up to date: OpenAdmiral ${e.payload} is the latest version.`)),
+      listen<string>("openadmiral://update-error", (e) => life.notify(`Could not check for updates: ${e.payload}`, "error")),
+    ];
+    return () => offs.forEach((off) => off.then((u) => u()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const installUpdate = () => {
+    setUpdate((u) => (u ? { ...u, installing: true } : u));
+    invoke("update_install").catch((err) => {
+      setUpdate((u) => (u ? { ...u, installing: false } : u));
+      life.notify(`The update failed: ${String(err)}`, "error");
+    });
+  };
+
   // A file saved from the webview (an image's Download Image): say where it went.
   useEffect(() => {
     const off = listen<{ success: boolean; path?: string | null }>("openadmiral://download", (e) => {
@@ -340,6 +359,7 @@ export default function App() {
         onCollapse={ui.toggleLeft}
         onShortcuts={() => setShortcuts(true)}
         scheduledCount={scheduledCount}
+        update={update ? { ...update, install: installUpdate } : undefined}
         groups={order.groups}
         queues={queues}
         unseen={seen.unseen}

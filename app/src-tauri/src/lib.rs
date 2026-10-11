@@ -6,7 +6,9 @@ mod migrate;
 mod pty;
 mod scheduler;
 mod shot;
+mod telemetry;
 mod transcript;
+mod updater;
 
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
@@ -17,7 +19,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Emitter, Manager};
@@ -762,6 +764,14 @@ fn handle_menu(app: &AppHandle, id: &str) {
         let _ = app.emit("openadmiral://menu", rest.to_string());
     } else if id == "help:shortcuts" {
         let _ = app.emit("openadmiral://shortcuts", ());
+    } else if id == "help:updates" {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = updater::check(&app, true).await;
+        });
+    } else if id == "help:telemetry" {
+        // The menu toggles its own checkmark; follow it.
+        telemetry::set_enabled(app, !telemetry::enabled(app));
     }
 }
 
@@ -812,6 +822,9 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     ])?;
     let help = Submenu::with_items(app, "Help", true, &[
         &MenuItem::with_id(app, "help:shortcuts", "Keyboard Shortcuts", true, Some("CmdOrCtrl+/"))?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "help:updates", "Check for Updates…", true, None::<&str>)?,
+        &CheckMenuItem::with_id(app, "help:telemetry", "Share Anonymous Usage Stats", true, telemetry::enabled(app.handle()), None::<&str>)?,
     ])?;
     Menu::with_items(app, &[&openadmiral, &edit, &window, &help])
 }
@@ -831,6 +844,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Pending::default())
         .manage(pty::Ptys::default())
         .manage(handoff::Handoffs::default())
         .manage(transcript::Transcripts::default())
@@ -874,6 +889,8 @@ pub fn run() {
             lifecycle::agent_remove,
             transcript::transcript_open,
             transcript::transcript_close,
+            updater::update_check,
+            updater::update_install,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -900,6 +917,8 @@ pub fn run() {
                     .build()?;
             }
             app.set_menu(app_menu(app)?)?;
+            updater::start(handle.clone());
+            telemetry::start(handle.clone());
             // Preview checks of either appearance without touching the system's (OPENADMIRAL_THEME=light|dark).
             if preview() {
                 if let (Ok(theme), Some(w)) = (std::env::var("OPENADMIRAL_THEME"), app.get_webview_window("main")) {
