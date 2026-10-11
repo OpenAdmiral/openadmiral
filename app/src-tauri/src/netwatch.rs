@@ -203,7 +203,9 @@ fn join(device: &str, ssid: &str) -> Result<(), String> {
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).trim().to_string();
     if out.status.success() && text.is_empty() {
         Ok(())
-    } else if text.contains("Could not find network") {
+    } else if text.contains("Could not find network") || text.contains("-3900") {
+        // -3900: macOS did not see the network when it tried (an iPhone only shows its
+        // hotspot to other devices with Allow Others to Join on).
         Err(format!("{ssid} is not in range. On the iPhone, open Personal Hotspot and turn on Allow Others to Join."))
     } else {
         Err(if text.is_empty() { "Could not join".into() } else { text })
