@@ -9,6 +9,12 @@
 #   scripts/install.sh --no-build install the bundle already built
 #   add --when-quit               if OpenAdmiral is running, swap in the new build as
 #                                 soon as the user quits it (⌘Q) and reopen it
+#
+# Signing: with a Developer ID in the keychain, name it in OPENADMIRAL_SIGNING_IDENTITY
+# or in ~/.config/openadmiral/signing-identity (one line, as `security find-identity`
+# prints it). A signed build keeps the permissions macOS granted (Desktop files,
+# notifications) from one install to the next, and can install Underway's helper.
+# Without one it is ad-hoc signed: every build is a new app to macOS.
 set -euo pipefail
 
 BUILD=1 WHEN_QUIT=0
@@ -25,8 +31,16 @@ DEST="$HOME/Applications/OpenAdmiral.app"
 STAGE="$HOME/Applications/OpenAdmiral.app.new"
 BUNDLE="$APP_DIR/src-tauri/target/debug/bundle/macos/OpenAdmiral.app"
 
+IDENTITY=${OPENADMIRAL_SIGNING_IDENTITY:-}
+ID_FILE="$HOME/.config/openadmiral/signing-identity"
+[[ -z "$IDENTITY" && -f "$ID_FILE" ]] && IDENTITY=$(<"$ID_FILE")
+
 if (( BUILD )); then
   export PATH="$HOME/.cargo/bin:$PATH"
+  if [[ -n "$IDENTITY" ]]; then
+    export APPLE_SIGNING_IDENTITY="$IDENTITY"
+    echo "Signing with $IDENTITY"
+  fi
   # No update packages for a local install: they need the release signing key.
   (cd "$APP_DIR" && pnpm tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}')
 fi
