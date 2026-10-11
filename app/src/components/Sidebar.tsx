@@ -14,7 +14,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddLinearIcon, DollarLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddLinearIcon, AltArrowDownLinearIcon, DollarLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
@@ -83,6 +83,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
   const [active, setActive] = useState<string | null>(null);
+  const [folded, toggleFolded] = useFolded();
 
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so a click still selects.
@@ -193,7 +194,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
         >
           <SortableContext items={groups.map((g) => pid(g.key))} strategy={verticalListSortingStrategy}>
             {groups.map((g) => (
-              <SortableGroup key={g.key} group={g}>
+              <SortableGroup key={g.key} group={g} folded={folded.has(g.key)} onFold={() => toggleFolded(g.key)}>
                 <SortableContext items={g.agents.map((a) => aid(g.key, a.id))} strategy={verticalListSortingStrategy}>
                   {g.agents.map((a) => (
                     <SortableAgent
@@ -280,36 +281,82 @@ function NavItem({ active, onClick, icon: Icon, label, kbd, children }: { active
 /** Where the dragged item will land: a dashed slot in brand color. */
 const DROP_SLOT = "rounded-lg outline-2 outline-dashed -outline-offset-2 outline-brand-500/60 bg-brand-500/[0.06] [&>*]:opacity-0";
 
-function SortableGroup({ group, children }: { group: Group; children: React.ReactNode }) {
+/** Folded projects, remembered across launches (this webview's storage). */
+const FOLDED = "openadmiral.sidebar.folded";
+function useFolded(): [Set<string>, (key: string) => void] {
+  const [folded, setFolded] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(FOLDED) ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggle = (key: string) =>
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      try {
+        localStorage.setItem(FOLDED, JSON.stringify([...next]));
+      } catch {
+        // Not remembered; the fold still applies now.
+      }
+      return next;
+    });
+  return [folded, toggle];
+}
+
+/** A project: its header, then its agents indented behind a rail in the project's color. */
+function SortableGroup({ group, folded, onFold, children }: { group: Group; folded: boolean; onFold: () => void; children: React.ReactNode }) {
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: pid(group.key) });
   return (
     <section
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("mb-4", isDragging && DROP_SLOT)}
+      className={cn("mt-2 border-t border-line pt-2 first:mt-0 first:border-t-0 first:pt-0", isDragging && DROP_SLOT)}
     >
-      <GroupHeader group={group} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
-      {children}
+      <GroupHeader group={group} folded={folded} onFold={onFold} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
+      {!folded && (
+        <div className="ml-[13px] border-l-2 pl-1.5" style={{ borderColor: `color-mix(in srgb, ${projectColor(group.label)} 45%, transparent)` }}>
+          {children}
+        </div>
+      )}
     </section>
   );
 }
 
-function GroupHeader({ group, handle, lifted }: { group: Group; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
+function GroupHeader({ group, folded, onFold, handle, lifted }: { group: Group; folded?: boolean; onFold?: () => void; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
   const { ref, ...rest } = handle ?? {};
+  // Folded away, an agent waiting on you still shows on its project.
+  const waiting = folded && group.agents.some((a) => a.status === "waiting");
   return (
     <div
       ref={ref}
       {...rest}
       aria-label={`${group.label} project. Press space to reorder.`}
       className={cn(
-        "mb-1 flex items-center gap-2 rounded-md px-2.5 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+        "mb-1 flex items-center gap-2 rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
         handle && "cursor-grab active:cursor-grabbing",
         lifted && "cursor-grabbing",
       )}
     >
-      <span className="size-1.5 rounded-full" style={{ background: projectColor(group.label) }} />
-      <h3 className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{projectLabel(group.label)}</h3>
-      {lifted && <span className="ml-auto text-[10px] text-ink-3 tabular">{group.agents.length}</span>}
+      {onFold ? (
+        <button
+          type="button"
+          onClick={onFold}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label={folded ? `Show ${group.label}'s agents` : `Hide ${group.label}'s agents`}
+          aria-expanded={!folded}
+          className="-m-1 rounded p-1 text-ink-3 transition-colors hover:text-ink"
+        >
+          <AltArrowDownLinearIcon size={12} className={cn("transition-transform duration-150", folded && "-rotate-90")} />
+        </button>
+      ) : (
+        <span className="w-2.5" />
+      )}
+      <span className="size-2 shrink-0 rounded-full" style={{ background: projectColor(group.label) }} />
+      <h3 className="truncate text-[13px] font-semibold text-ink">{projectLabel(group.label)}</h3>
+      {waiting && <span title="An agent here needs you" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}
+      <span className="ml-auto rounded-full bg-line px-1.5 text-[10px] leading-4 text-ink-3 tabular">{group.agents.length}</span>
     </div>
   );
 }
