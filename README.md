@@ -213,8 +213,8 @@ close it and drive home. They finish on the way.
 Run `/reload-plugins` in sessions that were already open.
 
 **2. Install the app.** [Download OpenAdmiral](https://openadmiral.com/download) (Apple Silicon
-and Intel), open the `.dmg` and drag OpenAdmiral to Applications. The first time, right-click it
-and choose **Open**: builds are not notarized by Apple yet. From then on it updates itself;
+and Intel), open the `.dmg` and drag OpenAdmiral to Applications. It is signed and notarized by
+Apple, so it opens like any other app. From then on it updates itself;
 see [what's new](https://openadmiral.com/releases) in every version.
 
 <details>
@@ -243,7 +243,6 @@ is one person directing many agents, and that person deserves a real bridge, not
 of terminal tabs. Next on the horizon:
 
 - **Your fleet in your pocket.** Notifications, approvals, queues and results from your phone.
-- **Notarized builds and auto-update**, so new versions arrive on their own.
 - **Beyond macOS.**
 
 Ideas, issues and pull requests are welcome.
