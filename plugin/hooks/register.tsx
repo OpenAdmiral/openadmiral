@@ -298,6 +298,9 @@ function toolSummary(tool: string, e: Record<string, unknown>): string {
 // delete, so it marks the request served.
 async function serveRequest($: EngineInterface) {
   if (!me || exiting || me.status !== 'idle') return
+  // An editor's Claude Code panel does not close on /exit: the session would stay, and
+  // `exiting` would stop its Up next. The app neither asks it; a leftover request waits out.
+  if (me.host?.kind === 'extension') return
   const path = `${root}/requests/${me.sessionId}.json`
   let request: { action?: string; at?: number; servedAt?: number; waiting?: string }
   try {

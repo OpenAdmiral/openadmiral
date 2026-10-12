@@ -47,6 +47,33 @@ fn newest(dir: &Path) -> Option<i64> {
     best
 }
 
+/// Installed from GitHub (not this repo's folder, which loads in place): Claude Code
+/// only updates it on request, as auto-update is off for marketplaces other than its own.
+fn from_github() -> bool {
+    let known = read(&crate::claude_home().join("plugins").join("known_marketplaces.json"));
+    known
+        .as_ref()
+        .and_then(|m| m.get("openadmiral")?.pointer("/source/source")?.as_str().map(String::from))
+        .is_some_and(|s| s != "directory")
+}
+
+/// Keeps the installed plugin current: at launch and every six hours, refreshes the
+/// marketplace and updates the plugin (its version is the commit, so every release is
+/// an update). Sessions then show as running an older plugin and offer Reload.
+pub fn keep_updated() {
+    if crate::preview() {
+        return;
+    }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        if from_github() && crate::claude_bin().is_some() {
+            let _ = crate::claude_cmd().args(["plugin", "marketplace", "update", "openadmiral"]).output();
+            let _ = crate::claude_cmd().args(["plugin", "update", "openadmiral@openadmiral"]).output();
+        }
+        std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+    });
+}
+
 /// When the plugin's code last changed (epoch ms), if it can be found.
 #[tauri::command]
 pub fn plugin_changed_at() -> Option<i64> {

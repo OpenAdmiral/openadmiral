@@ -1,1 +1,1 @@
-{ "name": "openadmiral", "version": "0.1.0", "description": "Publishes this session's live state and tracked delegations to ~/.claude/openadmiral for the OpenAdmiral app." }
+{"name": "openadmiral", "description": "Publishes this session's live state and tracked delegations to ~/.claude/openadmiral for the OpenAdmiral app."}

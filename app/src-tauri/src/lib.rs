@@ -1091,6 +1091,7 @@ pub fn run() {
             }
             handoff::load(&handle);
             watch_admiral(handle.clone());
+            plugin_files::keep_updated();
             poll_agents(handle.clone());
             if !preview() {
                 // Up next: resumes closed sessions whose scheduled items are due.

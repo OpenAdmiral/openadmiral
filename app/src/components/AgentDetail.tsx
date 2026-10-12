@@ -407,7 +407,10 @@ function Header({
         {renaming ? (
           <NameEditor value={agent.name} onSave={(name) => renaming.save(agent, name)} onCancel={renaming.cancel} className="max-w-sm text-xl tracking-tight" />
         ) : (
-          <h1 className="truncate text-xl font-semibold tracking-tight text-ink">{agent.name}</h1>
+          <h1 className="truncate text-xl font-semibold tracking-tight text-ink">
+            {agent.name}
+            {agent.twin && <span className="ml-2 font-mono text-sm font-normal text-ink-3">{agent.twin}</span>}
+          </h1>
         )}
         <span className="text-sm text-ink-3">{STATUS_LABEL[agent.status]}</span>
         {closing && (

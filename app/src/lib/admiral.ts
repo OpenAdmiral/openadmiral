@@ -131,6 +131,11 @@ export function mergeAgents(
       unplugged: { via: d.via },
     });
   }
+  // Claude Code names sessions after their folder plus two characters of their id, so
+  // a folder with many sessions repeats names: tell those apart by a longer piece of the id.
+  const named = new Map<string, number>();
+  for (const a of byId.values()) named.set(a.name, (named.get(a.name) ?? 0) + 1);
+  for (const a of byId.values()) if ((named.get(a.name) ?? 0) > 1) a.twin = a.id.slice(0, 4);
   const order: Record<AgentStatus, number> = { waiting: 0, working: 1, starting: 2, idle: 3, ended: 4 };
   return [...byId.values()].sort(
     (a, b) => order[a.status] - order[b.status] || a.project.localeCompare(b.project) || a.name.localeCompare(b.name),

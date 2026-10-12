@@ -623,7 +623,10 @@ function AgentRow({
       )}
       <span className="relative flex items-center gap-2.5">
         <StatusIcon status={a.status} />
-        <span className="flex-1 truncate text-sm font-semibold text-ink">{a.name}</span>
+        <span className="flex-1 truncate text-sm font-semibold text-ink">
+          {a.name}
+          {a.twin && <span className="ml-1.5 font-mono text-[11px] font-normal text-ink-3">{a.twin}</span>}
+        </span>
         {queued > 0 && (
           <span title={`${queued} queued prompt${queued > 1 ? "s" : ""}`} className="rounded-full bg-brand-500/15 px-1.5 text-[10px] font-semibold leading-4 text-brand-700 tabular dark:text-brand-300">
             +{queued}

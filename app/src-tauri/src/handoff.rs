@@ -92,8 +92,18 @@ pub fn handoff_list(handoffs: State<'_, Handoffs>) -> Vec<Handoff> {
 /// Asks an interactive session to hand over (writes the mod's request file), or
 /// resumes a session that is not running right away. Refuses a running
 /// background session: it is already in OpenAdmiral, and the request would make it exit.
+/// Runs in an editor's Claude Code panel (the plugin says so in `host`): /exit does not
+/// close it, so it can never hand over.
+fn in_extension(session_id: &str) -> bool {
+    crate::scheduler::read_json(&crate::admiral_dir().join("sessions").join(format!("{session_id}.json")))
+        .is_some_and(|s| s.pointer("/host/kind").and_then(Value::as_str) == Some("extension"))
+}
+
 #[tauri::command]
 pub async fn handoff_start(app: AppHandle, session_id: String, name: String, cwd: String) -> Result<(), String> {
+    if in_extension(&session_id) {
+        return Err(format!("{name} runs in its editor's Claude Code panel, which can't hand it over: keep working on it there."));
+    }
     let agents = crate::claude_agents().ok_or("could not ask claude which sessions are running")?;
     let from = match crate::agent_row(&agents, &session_id) {
         Some(r) if r.get("kind").and_then(Value::as_str) == Some("interactive") => "terminal",
@@ -144,6 +154,17 @@ pub fn tick(app: &AppHandle, agents: &Value) {
             return;
         }
         let mut changed = false;
+        // Hand-offs asked of a session in an editor's panel (before OpenAdmiral knew better)
+        // can never finish: drop them and their request.
+        let before = list.len();
+        list.retain(|h| {
+            let stuck = h.from == "terminal" && h.state != "resuming" && in_extension(&h.session_id);
+            if stuck {
+                let _ = std::fs::remove_file(request_path(&h.session_id));
+            }
+            !stuck
+        });
+        changed |= list.len() != before;
         for h in list.iter_mut() {
             if matches!(h.state.as_str(), "error" | "expired" | "resuming") {
                 continue;

@@ -79,6 +79,8 @@ export type AgentStatus = "working" | "waiting" | "idle" | "starting" | "ended";
 export type Agent = {
   id: string;
   name: string;
+  /** A piece of the id, shown beside the name while another agent has the same name. */
+  twin?: string;
   project: string;
   cwd: string;
   attachable: boolean;
