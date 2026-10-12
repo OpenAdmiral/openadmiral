@@ -1,14 +1,13 @@
 //! The menu bar icon: quiet until someone needs you, and a fleet report on click.
 //!
-//! The icon's colour is the state at a glance: the menu bar's own ink when all is
-//! calm, green while Underway makes it safe to close the lid, orange with a count
-//! while agents wait for a permission or an answer. Clicking it opens a native menu: who needs you, who is working,
+//! The icon stays the plain template glyph (colours read badly on some menu bar
+//! backgrounds); a count beside it says how many agents wait for a permission or
+//! an answer. Everything else is in the menu. Clicking it opens a native menu: who needs you, who is working,
 //! Underway, today's cost and plan, what runs next, open delegations, and the
 //! usual Show / New Agent / Quit. It is rebuilt only when what it says changes.
 
 use serde_json::Value;
 use std::sync::Mutex;
-use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -26,8 +25,6 @@ pub struct Report {
     pub plan: Option<String>,
     pub next: Option<String>,
     pub delegations: (usize, usize),
-    /// Underway is on and it is safe to close the lid.
-    pub underway_safe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,42 +166,6 @@ pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<
     let blocked = open.iter().filter(|d| d.get("status").and_then(Value::as_str) == Some("blocked")).count();
     r.delegations = (open.len(), blocked);
     r
-}
-
-/// How the icon looks: the template glyph in the menu bar's own ink, or the glyph
-/// painted in a colour (no longer a template, so it keeps that colour).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Look {
-    Calm,
-    Underway,
-    Waiting,
-}
-
-const GREEN: [u8; 3] = [0x30, 0xD1, 0x58];
-const ORANGE: [u8; 3] = [0xFF, 0x9F, 0x0A];
-
-fn look(r: &Report) -> Look {
-    if !r.waiting.is_empty() {
-        Look::Waiting
-    } else if r.underway_safe {
-        Look::Underway
-    } else {
-        Look::Calm
-    }
-}
-
-fn icon(base: &Image<'_>, tint: Option<[u8; 3]>) -> Image<'static> {
-    let mut px = base.rgba().to_vec();
-    if let Some([r, g, b]) = tint {
-        for p in px.chunks_exact_mut(4) {
-            p[..3].copy_from_slice(&[r, g, b]);
-        }
-    }
-    Image::new_owned(px, base.width(), base.height())
-}
-
-fn base_icon() -> Option<Image<'static>> {
-    Image::from_bytes(include_bytes!("../icons/tray.png")).ok().map(|i| i.to_owned())
 }
 
 /// One line of the menu. Its `key` and kind make the menu's structure; text and
@@ -380,29 +341,16 @@ pub fn refresh(app: &AppHandle, agents: &Value) {
     let mut r = report(&sessions, agents, &queues, &delegations, now);
     r.today = *state.today.lock().unwrap();
     if let Some(u) = app.state::<crate::underway::Underway>().state() {
-        r.underway_safe = u.settings.enabled && u.safe;
         r.underway = Some((u.settings.enabled, u.title.clone(), if u.settings.enabled { u.detail.clone() } else { String::new() }));
     }
     let mut last = state.last.lock().unwrap();
     if last.as_ref() == Some(&r) {
         return;
     }
-    let icon_changed = last.as_ref().is_none_or(|l| look(l) != look(&r));
     *last = Some(r.clone());
     drop(last);
     apply(app, &tray, &mut state.live.lock().unwrap(), lines(&r));
     let _ = tray.set_title(if r.waiting.is_empty() { None } else { Some(r.waiting.len().to_string()) });
-    if icon_changed {
-        if let Some(base) = base_icon() {
-            let tint = match look(&r) {
-                Look::Calm => None,
-                Look::Underway => Some(GREEN),
-                Look::Waiting => Some(ORANGE),
-            };
-            let _ = tray.set_icon(Some(icon(&base, tint)));
-            let _ = tray.set_icon_as_template(tint.is_none());
-        }
-    }
 }
 
 /// Today's cost, as the app's cost report has it.
@@ -476,20 +424,5 @@ mod tests {
         assert_eq!(span(4 * 60_000), "4m");
         assert_eq!(span(125 * 60_000), "2h 5m");
         assert_eq!(span(3 * 86_400_000), "3d");
-    }
-}
-
-#[cfg(test)]
-mod icon_preview {
-    /// Writes the icon variants as raw RGBA for a look: OPENADMIRAL_ICON_OUT=<dir> cargo test icon_preview -- --ignored
-    #[test]
-    #[ignore]
-    fn write_variants() {
-        let out = std::path::PathBuf::from(std::env::var("OPENADMIRAL_ICON_OUT").expect("OPENADMIRAL_ICON_OUT"));
-        let base = super::base_icon().unwrap();
-        for (name, tint) in [("calm", None), ("underway", Some(super::GREEN)), ("waiting", Some(super::ORANGE))] {
-            let i = super::icon(&base, tint);
-            std::fs::write(out.join(format!("{name}-{}x{}.rgba", i.width(), i.height())), i.rgba()).unwrap();
-        }
     }
 }
