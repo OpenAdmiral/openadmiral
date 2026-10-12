@@ -964,6 +964,12 @@ pub(crate) fn show_main(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Opened from Finder or the Dock, the app gets no locale, and its children inherit
+    // none: pbcopy (ours, and Claude Code's copy-on-select in the embedded terminal)
+    // then reads UTF-8 as Mac Roman and "sesión" lands on the clipboard as "sesi√≥n".
+    if std::env::var_os("LANG").is_none() && std::env::var_os("LC_ALL").is_none() && std::env::var_os("LC_CTYPE").is_none() {
+        std::env::set_var("LANG", "en_US.UTF-8");
+    }
     migrate::legacy();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
