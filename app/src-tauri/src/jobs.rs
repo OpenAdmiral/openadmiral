@@ -86,6 +86,24 @@ pub fn job_of(rows: &Value, session_id: &str) -> Option<Job> {
 }
 
 /// Is any id this session has had running (as a job, or an interactive session)?
+/// Listed with a process. The CLI also lists background jobs that have none (left
+/// idle for long, or whose process died): those are parked, serve nothing (their
+/// plugin does not run, so Up next waits) and need `claude respawn` to wake.
+pub fn is_awake(live: &Value, session_id: &str) -> bool {
+    awake_in(live, &chain_of(session_id))
+}
+
+fn awake_in(live: &Value, chain: &[String]) -> bool {
+    let Some(rows) = live.as_array() else { return false };
+    let origin = chain.last().map(String::as_str).unwrap_or("");
+    rows.iter().any(|r| {
+        let sid = r.get("sessionId").and_then(Value::as_str).unwrap_or("");
+        let id = r.get("id").and_then(Value::as_str).unwrap_or("");
+        let ours = chain.iter().any(|c| c == sid) || (id.len() >= 8 && origin.starts_with(id));
+        ours && r.get("pid").is_some_and(|p| !p.is_null())
+    })
+}
+
 pub fn is_running(live: &Value, session_id: &str) -> bool {
     let ids = chain_of(session_id);
     ids.iter().any(|id| crate::is_listed(live, id)) || find(live, &ids).is_some()
@@ -93,6 +111,15 @@ pub fn is_running(live: &Value, session_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_listed_job_without_a_process_is_parked() {
+        use serde_json::json;
+        let rows = json!([{ "id": "abcd1234", "sessionId": "abcd1234-x", "pid": null }, { "id": "efgh5678", "sessionId": "efgh5678-y", "pid": 42 }]);
+        assert!(!super::awake_in(&rows, &["abcd1234-x".into()]));
+        assert!(super::awake_in(&rows, &["efgh5678-y".into()]));
+        assert!(!super::awake_in(&rows, &["zzz".into()]));
+    }
+
     use super::*;
     use serde_json::json;
 

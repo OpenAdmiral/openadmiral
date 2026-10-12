@@ -403,7 +403,22 @@ pub fn run_cli_within(mut cmd: Command, limit: Duration) -> Result<String, Strin
 pub fn resume_session(session_id: &str, name: &str, cwd: &str) -> Result<String, String> {
     let agents = claude_agents().ok_or("could not ask claude which sessions are running")?;
     if jobs::is_running(&agents, session_id) {
-        return Err("That session is still running.".into());
+        if jobs::is_awake(&agents, session_id) {
+            return Err("That session is still running.".into());
+        }
+        // Listed but parked (no process): wake the same job rather than start another.
+        let job = jobs::find(&agents, &jobs::chain_of(session_id)).ok_or("That session is listed but its job was not found.")?;
+        let mut cmd = claude_cmd();
+        cmd.args(["respawn", &job.id]);
+        run_cli_within(cmd, Duration::from_secs(30))?;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(30) {
+            if claude_agents().is_some_and(|a| jobs::is_awake(&a, session_id)) {
+                return Ok(job.session_id);
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        return Err("claude respawned the session, but it did not start within 30 s.".into());
     }
     let job = claude_agents_all().and_then(|all| jobs::job_of(&all, session_id));
     let target = job.as_ref().map_or(session_id, |j| j.session_id.as_str());

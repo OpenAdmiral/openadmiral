@@ -186,7 +186,7 @@ pub fn queue_move(from: String, to: String) -> Result<(), String> {
     move_queue(&from, &to)
 }
 
-/// Sessions (ids) whose queue needs them now while they are not running.
+/// Sessions (ids) whose queue needs them now while they are not running (or parked).
 fn due_closed_sessions(agents: &Value, now: i64) -> Vec<String> {
     let dir = crate::admiral_dir().join("queue");
     let Ok(entries) = std::fs::read_dir(&dir) else { return vec![] };
@@ -198,7 +198,13 @@ fn due_closed_sessions(agents: &Value, now: i64) -> Vec<String> {
             continue;
         }
         let Some(queue) = read_json(&e.path()) else { continue };
-        if needs_session_now(&queue, &sent_of(&dir, id), now) && !crate::jobs::is_running(agents, id) {
+        // Not awake: not listed, or listed without a process (parked). A session whose
+        // plugin wrote lately runs somewhere `claude agents` does not list (an editor,
+        // a terminal window): never resume a copy of it.
+        let fresh = read_json(&crate::admiral_dir().join("sessions").join(format!("{id}.json")))
+            .and_then(|s| num(&s, "updatedAt"))
+            .is_some_and(|u| now - u < 90_000);
+        if needs_session_now(&queue, &sent_of(&dir, id), now) && !crate::jobs::is_awake(agents, id) && !fresh {
             out.push(id.to_string());
         }
     }

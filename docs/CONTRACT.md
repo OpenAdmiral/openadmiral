@@ -214,9 +214,13 @@ id, would start a copy / a second job). Keep the superseded files: they are
 those links.
 
 **Scheduler (app).** The app checks every 15 s, for sessions that are **not**
-running (`claude agents --json` does not list them), whether their queue needs
+running (`claude agents --json` does not list them, or lists them without a
+`pid`: a parked background job, which serves nothing until woken), whether their queue needs
 them now: an item with Run now pending, or a time/schedule item that is due
-(not paused, queue not paused). If so it resumes the session as a hand-off does
+(not paused, queue not paused). A parked job is woken with `claude respawn <job id>` (same job, same
+conversation). A session whose file was written in the last 90 s runs somewhere
+the CLI does not list (an editor, a terminal window) and is never resumed. Otherwise
+it resumes the session as a hand-off does
 (`claude --bg --resume <id>`, without flags when `claude agents --all` still has
 its job) and the mod drains the queue once it is up. A failed resume is retried
 after 10 min. A resume that starts a copy under a new id moves the queue to it.
