@@ -38,10 +38,11 @@ import type { AdmiralRequest } from "@/lib/admiral";
 import { Conversation } from "./Conversation";
 import { matchShortcut } from "@/lib/shortcuts";
 import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript";
-import { Chip, DelegationPill, KIND, Meter, STATUS_LABEL } from "./primitives";
+import { Chip, DelegationPill, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
+import { runsElsewhere, whereLabel } from "@/lib/host";
 
 type Props = {
   agent: Agent;
@@ -536,12 +537,12 @@ function Header({
           ) : (
             <Chip icon={<DollarLinearIcon size={13} />}>{usd(s.costUsd).replace("$", "")}</Chip>
           ))}
-        {/* Only the exception is worth a chip: a session in a Terminal window (one in
-            OpenAdmiral is the normal case). */}
-        {agent.cli && !agent.attachable && (
+        {/* Only the exception is worth a chip: a session running outside OpenAdmiral
+            (an editor, a terminal window); one in OpenAdmiral is the normal case. */}
+        {runsElsewhere(agent) && (
           <Chip icon={<MonitorLinearIcon size={13} />}>
-            {KIND.terminal.label}
-            <Info tip={KIND.terminal.hint + "."} />
+            In {whereLabel(agent) ?? "Terminal"}
+            <Info tip={`Running in ${whereLabel(agent) ?? "a terminal window"}. Bring it into OpenAdmiral to work on it here.`} />
           </Chip>
         )}
         {agent.unplugged && (
@@ -719,7 +720,9 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
   const s = agent.session;
   const [handoff, setHandoff] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const inTerminal = agent.cli?.kind === "interactive";
+  // Running in an editor or a terminal window (interactive sessions are not in `claude agents`).
+  const inTerminal = runsElsewhere(agent);
+  const where = whereLabel(agent) ?? "a terminal window";
   // The job finished (or was cancelled): close the sheet instead of leaving its last step spinning.
   const hadJob = useRef(false);
   useEffect(() => {
@@ -738,8 +741,11 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
         <div className="flex-1 text-sm text-ink-2">
           {inTerminal ? (
             <>
-              <p className="font-semibold text-ink" title={KIND.terminal.hint}>{KIND.terminal.label}</p>
-              <p className="mt-0.5 text-xs leading-relaxed">{KIND.terminal.hint}. It continues as the same conversation, and keeps running when you close OpenAdmiral.</p>
+              <p className="font-semibold text-ink">Running in {where}</p>
+              <p className="mt-0.5 text-xs leading-relaxed">
+                Follow it here and read its whole conversation. Bring it into OpenAdmiral to work on it here: it continues as the same conversation, and keeps running when you
+                close OpenAdmiral.
+              </p>
             </>
           ) : (
             <>
@@ -749,7 +755,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {inTerminal && (
+          {inTerminal && !agent.session?.host && (
             <button
               onClick={() => invoke("open_in_terminal", { cwd: agent.cwd }).catch(() => {})}
               className="rounded-lg px-3 py-2 text-xs font-semibold text-ink-2 transition-all duration-200 hover:bg-line focus:outline-none focus:ring-2 focus:ring-brand-500"

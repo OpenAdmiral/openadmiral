@@ -33,6 +33,7 @@ import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
 import { KIND, Kbd, Meter } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { runsElsewhere, whereLabel } from "@/lib/host";
 
 export type View = { kind: "agent"; id: string } | { kind: "agents" } | { kind: "delegations" } | { kind: "costs" } | { kind: "artifacts" } | { kind: "queue" };
 
@@ -448,9 +449,11 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
       title={
         a.unplugged
           ? `${a.name} · in ${a.unplugged.via}, not connected: it needs the OpenAdmiral plugin`
-          : a.cli
-            ? `${a.name} · ${KIND[a.attachable ? "openadmiral" : "terminal"].label}: ${KIND[a.attachable ? "openadmiral" : "terminal"].hint}`
-            : `${a.name} · not running`
+          : runsElsewhere(a)
+            ? `${a.name} · running in ${whereLabel(a) ?? "a terminal window"}`
+            : a.cli
+              ? `${a.name} · ${KIND.openadmiral.label}: ${KIND.openadmiral.hint}`
+              : `${a.name} · not running`
       }
       className={cn(
         "relative flex w-full flex-col gap-1 rounded-lg px-2.5 py-2 text-left outline-none transition-colors duration-200 hover:bg-line focus-visible:ring-2 focus-visible:ring-brand-500",
@@ -486,7 +489,7 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
         </span>
       )}
       <span className="relative flex items-center gap-2 pl-[18px] text-xs text-ink-3">
-        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.unplugged ? `in ${a.unplugged.via}` : a.cli ? KIND[a.attachable ? "openadmiral" : "terminal"].label : "ended")}</span>
+        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.unplugged || runsElsewhere(a) ? `in ${whereLabel(a) ?? "Terminal"}` : a.cli ? KIND.openadmiral.label : "ended")}</span>
         {!!a.session?.dirty && <span className="text-amber-600 dark:text-amber-400 tabular">±{a.session.dirty}</span>}
         <span className="flex-1" />
         {ctx !== undefined && (

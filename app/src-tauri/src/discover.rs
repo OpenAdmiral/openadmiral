@@ -93,6 +93,17 @@ fn via(pid: u32, by_pid: &HashMap<u32, &Proc>) -> String {
     "Terminal".into()
 }
 
+/// "VS Code" for the editor's own extension (its bundled binary), "VS Code terminal"
+/// for `claude` typed in its terminal; as the plugin says it (plugin/hooks/host.ts).
+fn label(app: &str, command: &str) -> String {
+    let editor = matches!(app, "VS Code" | "Cursor" | "Windsurf" | "Zed" | "JetBrains");
+    if editor && !command.contains("/extensions/") && !command.contains("native-binary") {
+        format!("{app} terminal")
+    } else {
+        app.to_string()
+    }
+}
+
 /// Working folders of these pids (`lsof`, one call).
 fn cwds(pids: &[u32]) -> HashMap<u32, String> {
     if pids.is_empty() {
@@ -298,7 +309,7 @@ fn discover() -> Discovery {
                 last_prompt,
                 last_reply,
                 updated_at: mtime,
-                via: via(p.pid, &by_pid),
+                via: label(&via(p.pid, &by_pid), &p.command),
             });
         }
     }
@@ -321,6 +332,9 @@ mod tests {
         assert!(!is_session("claude attach aee3888e"));
         assert!(!is_session("/usr/bin/grep claude"));
         assert!(!is_session("/Users/x/.local/bin/claude --chrome-native-host"));
+        assert_eq!(label("VS Code", "/Users/x/.vscode/extensions/anthropic.claude-code-2/resources/native-binary/claude --output-format stream-json"), "VS Code");
+        assert_eq!(label("VS Code", "claude"), "VS Code terminal");
+        assert_eq!(label("iTerm", "claude"), "iTerm");
         assert_eq!(session_arg("claude --resume 0123456789abcdef0123456789abcdef0123"), Some("0123456789abcdef0123456789abcdef0123".into()));
         assert_eq!(session_arg("claude -r short"), None);
     }

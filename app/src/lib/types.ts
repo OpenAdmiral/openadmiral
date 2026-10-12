@@ -31,6 +31,8 @@ export type AdmiralSession = {
   queueCommands?: { name: string; kind: "command" | "skill"; description?: string }[];
   /** When this session loaded its OpenAdmiral plugin (docs/CONTRACT.md); absent from older mods. */
   plugin?: { loadedAt: number };
+  /** Where it runs (from its environment); absent from older mods. */
+  host?: { app: string; kind: "extension" | "terminal" };
   tasks?: { id: string; subject: string; status: "pending" | "in_progress" | "completed"; activeForm?: string }[];
   subagents?: { id: string; type?: string; description?: string; status: "running" | "done" | "failed"; startedAt: number; endedAt?: number }[];
   activity?: { at: number; kind: "prompt" | "tool" | "reply" | "sent" | "received" | "permission"; text: string }[];

@@ -48,6 +48,7 @@ type AdmiralSession = {
   queueCommands?: { name: string; kind: 'command' | 'skill'; description?: string }[]  // slash commands Up next may queue here (see queue/); absent from older mods
   supersededBy?: string        // set on the old file when /clear gave the same process a new session id (status 'ended'); the app follows it
   plugin?: { loadedAt: number } // when this session loaded the plugin (start or last /reload-plugins); absent from older mods
+  host?: { app: string; kind: 'extension' | 'terminal' }  // where it runs, from CLAUDE_CODE_ENTRYPOINT, TERM_PROGRAM and __CFBundleIdentifier (plugin/hooks/host.ts): VS Code extension, "VS Code terminal", iTerm…
   startedAt: number
   updatedAt: number            // heartbeat: refreshed at least every 30 s while the session is alive
 }

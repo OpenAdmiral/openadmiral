@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { ICON, parseAnswer, slugOf } from './card'
 import { classifyQueueText, isDone, isDueByTime, isTimed, nextDue, queueCommandsFrom, runNowPending, type QueueCommand, type QueueCondition, type QueueItemCore, type SentEntry } from './queue'
+import { hostOf, type Host } from './host'
 
 const OPENS_IN_APP = new Set(['html', 'image', 'pdf'])
 
@@ -39,6 +40,7 @@ type AdmiralSession = {
   supersededBy?: string
   commands?: string[]
   queueCommands?: QueueCommand[]
+  host?: Host                  // where it runs: { app: 'VS Code', kind: 'extension' | 'terminal' }
   plugin?: { loadedAt: number }  // when this code was loaded: the app compares it with the plugin's files to spot a session needing /reload-plugins
   startedAt: number
   updatedAt: number
@@ -127,11 +129,21 @@ function touch($: EngineInterface, patch: Partial<AdmiralSession> = {}) {
 // the first write after it.
 let loadedAt: number | undefined
 
+// Where this session runs, read once per load (its environment does not change).
+let hostRead = false
+
 async function flush($: EngineInterface) {
   if (!me) return
   me.updatedAt = await $.clock.now()
   loadedAt ??= me.updatedAt
   me.plugin = { loadedAt }
+  if (!hostRead) {
+    hostRead = true
+    const entrypoint = (await $.env.get('CLAUDE_CODE_ENTRYPOINT').catch(() => undefined)) ?? undefined
+    const termProgram = (await $.env.get('TERM_PROGRAM').catch(() => undefined)) ?? undefined
+    const bundleId = (await $.env.get('__CFBundleIdentifier').catch(() => undefined)) ?? undefined
+    me.host = hostOf({ entrypoint, termProgram, bundleId })
+  }
   await $.fs.write(`${root}/sessions/${me.sessionId}.json`, JSON.stringify(me, null, 1))
 }
 
