@@ -212,6 +212,15 @@ close it and drive home. They finish on the way.
 
 Run `/reload-plugins` in sessions that were already open.
 
+In the **VS Code extension**, `/plugin` isn't available. Type `/plugins`, add
+`OpenAdmiral/openadmiral` in the **Marketplaces** tab and install `openadmiral` from the
+**Plugins** tab, or open this link (or the *Install in VS Code* button on
+[openadmiral.com](https://openadmiral.com/#install)), which asks before installing anything:
+
+```
+vscode://anthropic.claude-code/install-plugin?plugin=openadmiral&marketplace=OpenAdmiral/openadmiral
+```
+
 **2. Install the app.** [Download OpenAdmiral](https://openadmiral.com/download) (Apple Silicon
 and Intel), open the `.dmg` and drag OpenAdmiral to Applications. It is signed and notarized by
 Apple, so it opens like any other app. From then on it updates itself;
