@@ -66,9 +66,37 @@ pub fn inherited_claude_vars() -> Vec<String> {
         .collect()
 }
 
+/// The `claude` to run: the CLI on the login PATH, or else the copy an editor's Claude
+/// Code extension bundles (people who only use the VS Code extension have no CLI).
+/// `None` when there is neither.
+pub fn claude_bin() -> Option<PathBuf> {
+    let on_path = login_path().split(':').map(|d| Path::new(d).join("claude")).find(|p| p.is_file());
+    on_path.or_else(|| {
+        let home = dirs::home_dir()?;
+        let mut found: Vec<(std::time::SystemTime, PathBuf)> = [".vscode", ".vscode-insiders", ".cursor", ".windsurf"]
+            .iter()
+            .filter_map(|d| std::fs::read_dir(home.join(d).join("extensions")).ok())
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("anthropic.claude-code-"))
+            .map(|e| e.path().join("resources/native-binary/claude"))
+            .filter(|p| p.is_file())
+            .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
+            .collect();
+        found.sort();
+        found.pop().map(|(_, p)| p)
+    })
+}
+
+/// Whether Claude Code can be run at all (see `claude_bin`), for the app to say so.
+#[tauri::command]
+fn claude_available() -> bool {
+    claude_bin().is_some()
+}
+
 /// `claude` with the login PATH and none of a parent session's variables.
 pub fn claude_cmd() -> Command {
-    let mut cmd = Command::new("claude");
+    let mut cmd = Command::new(claude_bin().unwrap_or_else(|| "claude".into()));
     cmd.env("PATH", login_path());
     for k in inherited_claude_vars() {
         cmd.env_remove(k);
@@ -723,6 +751,42 @@ fn query_escape(s: &str) -> String {
         .collect()
 }
 
+/// Installs the OpenAdmiral plugin for this user, as the two `/plugin` commands would,
+/// with whichever `claude` there is (the VS Code extension's own, when there is no CLI).
+#[tauri::command]
+async fn install_plugin() -> Result<(), String> {
+    if preview() {
+        return Err("A preview instance installs nothing.".into());
+    }
+    tauri::async_runtime::spawn_blocking(|| {
+        if claude_bin().is_none() {
+            return Err("Claude Code was not found on this Mac.".to_string());
+        }
+        // Adding a marketplace that is already there fails harmlessly; the install says.
+        let _ = claude_cmd().args(["plugin", "marketplace", "add", "OpenAdmiral/openadmiral"]).output();
+        let out = claude_cmd().args(["plugin", "install", "openadmiral@openadmiral"]).output().map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            Err(if msg.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { msg })
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The VS Code extension's own install link: it opens its Manage plugins dialog on
+/// OpenAdmiral and installs nothing until the person picks a scope.
+#[tauri::command]
+fn open_vscode_plugin_install() -> Result<(), String> {
+    Command::new("open")
+        .arg("vscode://anthropic.claude-code/install-plugin?plugin=openadmiral&marketplace=OpenAdmiral/openadmiral")
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn open_in_terminal(cwd: String) -> Result<(), String> {
     Command::new("open")
@@ -914,6 +978,9 @@ pub fn run() {
         .manage(tray::Tray::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
+            claude_available,
+            install_plugin,
+            open_vscode_plugin_install,
             list_agents,
             new_agent,
             resume_agent,

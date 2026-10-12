@@ -15,3 +15,9 @@ export function whereLabel(a: Agent): string | undefined {
 
 /** Running, but somewhere OpenAdmiral cannot attach to (an editor, a terminal window). */
 export const runsElsewhere = (a: Agent) => a.live && !a.attachable && !a.unplugged && a.status !== "ended";
+
+/**
+ * Running in an editor's Claude Code panel (not its terminal). It cannot be brought into
+ * OpenAdmiral: the panel would not close, so it stays where it is and is followed from here.
+ */
+export const inExtension = (a: Agent) => runsElsewhere(a) && a.session?.host?.kind === "extension";

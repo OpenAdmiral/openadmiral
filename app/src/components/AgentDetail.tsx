@@ -42,7 +42,7 @@ import { Chip, DelegationPill, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
-import { runsElsewhere, whereLabel } from "@/lib/host";
+import { inExtension, runsElsewhere, whereLabel } from "@/lib/host";
 
 type Props = {
   agent: Agent;
@@ -542,7 +542,13 @@ function Header({
         {runsElsewhere(agent) && (
           <Chip icon={<MonitorLinearIcon size={13} />}>
             In {whereLabel(agent) ?? "Terminal"}
-            <Info tip={`Running in ${whereLabel(agent) ?? "a terminal window"}. Bring it into OpenAdmiral to work on it here.`} />
+            <Info
+              tip={
+                inExtension(agent)
+                  ? `Running in the ${whereLabel(agent)} panel. Follow it here; keep working on it in ${whereLabel(agent)}.`
+                  : `Running in ${whereLabel(agent) ?? "a terminal window"}. Bring it into OpenAdmiral to work on it here.`
+              }
+            />
           </Chip>
         )}
         {agent.unplugged && (
@@ -723,6 +729,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
   // Running in an editor or a terminal window (interactive sessions are not in `claude agents`).
   const inTerminal = runsElsewhere(agent);
   const where = whereLabel(agent) ?? "a terminal window";
+  const panel = inExtension(agent);
   // The job finished (or was cancelled): close the sheet instead of leaving its last step spinning.
   const hadJob = useRef(false);
   useEffect(() => {
@@ -739,7 +746,15 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
           <RecordCircleLinearIcon size={20} />
         </span>
         <div className="flex-1 text-sm text-ink-2">
-          {inTerminal ? (
+          {panel ? (
+            <>
+              <p className="font-semibold text-ink">Running in {where}</p>
+              <p className="mt-0.5 text-xs leading-relaxed">
+                Follow it here and read its whole conversation; you'll know when it needs you. Keep working on it in {where}: its panel there can't hand it over. Once you
+                close its tab, you can resume it in OpenAdmiral.
+              </p>
+            </>
+          ) : inTerminal ? (
             <>
               <p className="font-semibold text-ink">Running in {where}</p>
               <p className="mt-0.5 text-xs leading-relaxed">
@@ -763,6 +778,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
               Open folder in Terminal
             </button>
           )}
+          {!panel && (
           <button
             onClick={async () => {
               // The backend carries it from here; the sheet only shows how it goes.
@@ -775,6 +791,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
           >
             {pending && pending.state !== "error" && pending.state !== "expired" ? "Moving into OpenAdmiral…" : inTerminal ? "Bring into OpenAdmiral" : "Resume in OpenAdmiral"}
           </button>
+          )}
         </div>
       </div>
       <HandoffSheet agent={agent} handoff={pending} waiting={request?.waiting} startError={startError} open={handoff} onClose={() => setHandoff(false)} />

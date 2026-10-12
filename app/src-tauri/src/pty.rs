@@ -86,6 +86,10 @@ pub fn pty_open(
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
     let (program, args) = argv.split_first().ok_or("empty argv")?;
+    let program = match program.as_str() {
+        "claude" => crate::claude_bin().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| program.clone()),
+        _ => program.clone(),
+    };
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     cmd.cwd(&cwd);

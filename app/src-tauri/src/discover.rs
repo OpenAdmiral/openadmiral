@@ -129,6 +129,18 @@ fn session_arg(command: &str) -> Option<String> {
     args.windows(2).find(|w| matches!(w[0], "--session-id" | "--resume" | "-r")).map(|w| w[1].to_string()).filter(|id| id.len() >= 32)
 }
 
+/// What Claude Code says about a running process in `~/.claude/sessions/<pid>.json`:
+/// its current session id and "busy"/"idle". Every session writes it, the VS Code
+/// extension's too (one process per conversation tab), so no guessing from transcripts.
+fn session_file(pid: u32) -> Option<(String, Option<String>)> {
+    let v = crate::scheduler::read_json(&crate::claude_home().join("sessions").join(format!("{pid}.json")))?;
+    if v.get("pid").and_then(Value::as_u64) != Some(pid as u64) {
+        return None;
+    }
+    let id = v.get("sessionId")?.as_str()?.to_string();
+    Some((id, v.get("status").and_then(Value::as_str).map(String::from)))
+}
+
 fn mtime_ms(p: &Path) -> Option<i64> {
     p.metadata().ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
 }
@@ -271,10 +283,19 @@ fn discover() -> Discovery {
     for (cwd, ps) in by_cwd {
         let mut pinned: Vec<(PathBuf, i64, &Proc)> = vec![];
         let mut rest: Vec<&Proc> = vec![];
+        let mut busy: HashMap<u32, bool> = HashMap::new();
         for p in &ps {
-            let path = session_arg(&p.command).and_then(|id| crate::transcript::locate(&id, &cwd));
+            let told = session_file(p.pid);
+            if let Some((_, Some(status))) = &told {
+                busy.insert(p.pid, status == "busy");
+            }
+            let id = told.as_ref().map(|(id, _)| id.clone()).or_else(|| session_arg(&p.command));
+            let path = id.and_then(|id| crate::transcript::locate(&id, &cwd));
             match path.and_then(|path| mtime_ms(&path).map(|m| (path, m))) {
                 Some((path, m)) => pinned.push((path, m, p)),
+                // A session that says its id but has no transcript yet (a new, empty
+                // tab) has nothing to show; only older versions without the file guess.
+                None if told.is_some() => {}
                 None => rest.push(p),
             }
         }
@@ -299,7 +320,7 @@ fn discover() -> Discovery {
             let (branch, last_prompt, last_reply, open) = found;
             // An idle session keeps writing housekeeping lines, so the file's age says
             // nothing: a turn is under way while its last word is not a final reply.
-            let working = open && now - mtime < STUCK_MS;
+            let working = busy.get(&p.pid).copied().unwrap_or(open && now - mtime < STUCK_MS);
             out.push(Discovered {
                 session_id: id,
                 project: Path::new(&cwd).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| cwd.clone()),

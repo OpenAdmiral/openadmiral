@@ -1,6 +1,6 @@
 import { CopyLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export const PLUGIN_COMMANDS = ["/plugin marketplace add OpenAdmiral/openadmiral", "/plugin install openadmiral@openadmiral"];
@@ -28,19 +28,62 @@ function Command({ text }: { text: string }) {
   );
 }
 
+/** Whether OpenAdmiral can run Claude Code here (the CLI, or the copy an editor extension bundles). */
+export function useClaudeAvailable() {
+  const [ok, setOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    void invoke<boolean>("claude_available").then(setOk, () => setOk(null));
+  }, []);
+  return ok;
+}
+
+/** Installs the plugin from the app, with whichever `claude` there is. */
+function InstallButton() {
+  const [state, setState] = useState<"idle" | "busy" | "done" | string>("idle");
+  const busy = state === "busy";
+  return (
+    <div className="space-y-1.5">
+      <button
+        disabled={busy || state === "done"}
+        onClick={() => {
+          setState("busy");
+          invoke("install_plugin").then(
+            () => setState("done"),
+            (e) => setState(String(e)),
+          );
+        }}
+        className="rounded-lg bg-brand-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:opacity-60"
+      >
+        {busy ? "Installing…" : state === "done" ? "Installed" : "Install the plugin"}
+      </button>
+      {state !== "idle" && state !== "busy" && state !== "done" && <p className="text-[11px] leading-relaxed text-red-600 dark:text-red-400">{state}</p>}
+    </div>
+  );
+}
+
 /**
- * How to connect Claude Code sessions to OpenAdmiral: the plugin's two commands,
- * and, for sessions already open, /reload-plugins (or reloading the editor window).
+ * How to connect Claude Code sessions to OpenAdmiral: install the plugin (from here,
+ * or with its two commands; the VS Code extension has no /plugin, so its install
+ * link), then /reload-plugins in sessions that were already open.
  */
 export function PluginSetup({ installed, className }: { installed: boolean; className?: string }) {
+  const claude = useClaudeAvailable();
   return (
     <div className={cn("space-y-2 text-left", className)}>
       {!installed && (
         <>
-          <p className="text-xs leading-relaxed text-ink-2">Run these in any Claude Code session (terminal, VS Code or Cursor):</p>
+          {claude && <InstallButton />}
+          <p className="text-xs leading-relaxed text-ink-2">{claude ? "Or run these" : "Run these"} in any Claude Code session in a terminal:</p>
           {PLUGIN_COMMANDS.map((c) => (
             <Command key={c} text={c} />
           ))}
+          <p className="text-xs leading-relaxed text-ink-2">
+            In the VS Code extension, /plugin isn't available: type /plugins and add OpenAdmiral/openadmiral in Marketplaces, or{" "}
+            <button onClick={() => void invoke("open_vscode_plugin_install").catch(() => {})} className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
+              open it in VS Code
+            </button>
+            .
+          </p>
         </>
       )}
       <p className="text-xs leading-relaxed text-ink-2">
