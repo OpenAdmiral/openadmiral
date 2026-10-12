@@ -137,6 +137,8 @@ const repaints = new Map<string, ReturnType<typeof setTimeout>>();
  * is left stale. Once things settle: fit to the visible size; if that size did not
  * change, nudge the pty one column narrower and back so the TUI gets SIGWINCH and
  * redraws everything; then repaint xterm's own rows. Debounced per terminal.
+ * The TUI coalesces resizes: back within one frame (16 ms) it sees no change and
+ * redraws nothing, from 60 ms on it redraws in full (measured on `claude attach`).
  */
 export function repaintTerminal(key: string, delay = 140) {
   clearTimeout(repaints.get(key));
@@ -154,7 +156,7 @@ export function repaintTerminal(key: string, delay = 140) {
       }
       if (t.term.cols === cols && t.term.rows === rows) {
         invoke("pty_resize", { key, cols: Math.max(2, cols - 1), rows })
-          .then(() => new Promise((r) => requestAnimationFrame(r)))
+          .then(() => new Promise((r) => setTimeout(r, 150)))
           .then(() => invoke("pty_resize", { key, cols, rows }))
           .catch(() => {});
       }
