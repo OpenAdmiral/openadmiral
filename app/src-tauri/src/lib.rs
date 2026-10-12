@@ -10,6 +10,7 @@ mod pty;
 mod resume;
 mod scheduler;
 mod shot;
+mod staged;
 mod telemetry;
 mod transcript;
 mod tray;
@@ -1030,6 +1031,8 @@ pub fn run() {
                 if !preview() {
                     pty::write_attached(&[]);
                     app.state::<underway::Underway>().shutdown();
+                    // A build install.sh staged next to the app goes in now.
+                    staged::swap_on_exit();
                 }
             }
         });
