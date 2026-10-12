@@ -14,10 +14,10 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddLinearIcon, AltArrowDownLinearIcon, DollarLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddLinearIcon, AltArrowDownLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
 import type { Group } from "@/lib/order";
@@ -27,8 +27,8 @@ import { pending, type QueueEntry } from "@/lib/queue";
 import type { AdmiralRequest } from "@/lib/admiral";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
 import { activeOpenCount } from "@/lib/delegations";
-import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel } from "@/lib/utils";
-import { PlanMeters } from "./PlanMeters";
+import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel, until } from "@/lib/utils";
+import { isReset, PlanMeters } from "./PlanMeters";
 import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
 import { KIND, Kbd, Meter } from "./primitives";
@@ -332,38 +332,119 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
             </div>
           </div>
         )}
-        {todayCost !== undefined && (
-          <button onClick={() => onSelect({ kind: "costs" })} title="API-equivalent cost today" className="mb-3 flex w-full items-baseline justify-between text-left">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Today</span>
-            <span className="text-sm font-semibold text-ink tabular">
-              {money(todayCost)} <span className="text-[10px] font-normal text-ink-3">API eq.</span>
-              <Info tip="What this usage would cost at Anthropic API prices; on the Max plan you don't pay it." align="right" className="ml-1" />
-            </span>
-          </button>
-        )}
-        {rateLimits.length > 0 && (
-          <>
-            <div className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
-              Plan usage <Info id="plan-usage" tip="How much of your Max plan's 5-hour and weekly limits you have used; each resets at the time shown." align="left" />
-            </div>
-            <PlanMeters limits={rateLimits} />
-          </>
-        )}
-        <div className={cn("flex items-center gap-3 text-[11px] text-ink-3", rateLimits.length > 0 && "mt-3")}>
-          <button onClick={onShortcuts} className="flex items-center gap-1.5 rounded-md transition-colors hover:text-ink">
-            <Kbd>⌘/</Kbd> Shortcuts
-          </button>
-          <span className="flex-1" />
-          {/* A new GitHub issue from the repo's form, type preset, versions filled in. */}
-          <button onClick={() => void invoke("open_issue", { kind: "feedback" })} title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
-            Feedback
-          </button>
-          <button onClick={() => void invoke("open_issue", { kind: "bug" })} title="Report a bug (opens GitHub)" className="transition-colors hover:text-ink">
-            Report a bug
-          </button>
-        </div>
+        <FooterStats todayCost={todayCost} rateLimits={rateLimits} onCosts={() => onSelect({ kind: "costs" })} onShortcuts={onShortcuts} />
       </footer>
     </aside>
+  );
+}
+
+const LIMIT_SHORT: Record<string, string> = { five_hour: "5h", seven_day: "wk", seven_day_opus: "opus" };
+
+/**
+ * Today's cost, the plan and the links, folded into one line that unfolds upwards,
+ * over the agent list, while the pointer or the keyboard focus is on it. A plan
+ * past 80% turns the line amber with the time to its reset, so it never hides.
+ */
+function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCost?: number; rateLimits: Props["rateLimits"]; onCosts: () => void; onShortcuts: () => void }) {
+  const [open, setOpen] = useState(false);
+  const leave = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const show = () => {
+    clearTimeout(leave.current);
+    setOpen(true);
+  };
+  // A short delay on the way out, so crossing the edge does not flicker it.
+  const hide = () => {
+    clearTimeout(leave.current);
+    leave.current = setTimeout(() => setOpen(false), 250);
+  };
+  useEffect(() => () => clearTimeout(leave.current), []);
+  // Preview screenshots open it with OPENADMIRAL_TIP=footer.
+  useEffect(() => {
+    const onTip = (e: Event) => (e as CustomEvent).detail === "footer" && setOpen(true);
+    window.addEventListener("openadmiral:tip", onTip);
+    return () => window.removeEventListener("openadmiral:tip", onTip);
+  }, []);
+  const live = rateLimits.filter((r) => !isReset(r.resetsAt));
+  const hot = (r: (typeof live)[number]) => r.percentUsed >= 80;
+  const links = (
+    <>
+      <button onClick={onShortcuts} className="flex items-center gap-1.5 rounded-md transition-colors hover:text-ink">
+        <Kbd>⌘/</Kbd> Shortcuts
+      </button>
+      <span className="flex-1" />
+      {/* A new GitHub issue from the repo's form, type preset, versions filled in. */}
+      <button onClick={() => void invoke("open_issue", { kind: "feedback" })} title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
+        Feedback
+      </button>
+      <button onClick={() => void invoke("open_issue", { kind: "bug" })} title="Report a bug (opens GitHub)" className="transition-colors hover:text-ink">
+        Report a bug
+      </button>
+    </>
+  );
+  return (
+    <div
+      className="relative"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hide();
+      }}
+    >
+      <div className="flex items-center gap-2.5 text-[11.5px] text-ink-3">
+        <button onClick={onCosts} title="Today's cost and your plan: open Costs" className="flex min-w-0 items-center gap-2 overflow-hidden tabular transition-colors hover:text-ink">
+          {todayCost !== undefined && <span className="whitespace-nowrap font-semibold text-ink">{money(todayCost)}</span>}
+          {live
+            .filter((r) => LIMIT_SHORT[r.kind])
+            .slice(0, 2)
+            .map((r) => (
+              <span key={r.kind} className={cn("whitespace-nowrap", hot(r) && "font-semibold text-amber-600 dark:text-amber-400")}>
+                {LIMIT_SHORT[r.kind]} {Math.round(r.percentUsed)}%{hot(r) && r.resetsAt ? ` · ${until(r.resetsAt)}` : ""}
+              </span>
+            ))}
+        </button>
+        <span className="flex-1" />
+        <button onClick={onShortcuts} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (⌘/)" className="transition-colors hover:text-ink">
+          <KeyboardLinearIcon size={14} />
+        </button>
+        <button onClick={() => void invoke("open_issue", { kind: "feedback" })} aria-label="Send feedback" title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
+          <ChatLineLinearIcon size={14} />
+        </button>
+        <button onClick={() => void invoke("open_issue", { kind: "bug" })} aria-label="Report a bug" title="Report a bug (opens GitHub)" className="transition-colors hover:text-ink">
+          <BugMinimalisticLinearIcon size={14} />
+        </button>
+      </div>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.15 }}
+            className="absolute -inset-x-5 -bottom-2.5 z-30 border-t border-line bg-panel px-5 pt-3.5 pb-2.5 shadow-[0_-12px_24px_rgb(0_0_0/0.18)] dark:bg-[#1d2026]"
+          >
+            {todayCost !== undefined && (
+              <button onClick={onCosts} title="API-equivalent cost today" className="mb-3 flex w-full items-baseline justify-between text-left">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Today</span>
+                <span className="text-sm font-semibold text-ink tabular">
+                  {money(todayCost)} <span className="text-[10px] font-normal text-ink-3">API eq.</span>
+                  <Info tip="What this usage would cost at Anthropic API prices; on the Max plan you don't pay it." align="right" className="ml-1" />
+                </span>
+              </button>
+            )}
+            {rateLimits.length > 0 && (
+              <>
+                <div className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+                  Plan usage <Info id="plan-usage" tip="How much of your Max plan's 5-hour and weekly limits you have used; each resets at the time shown." align="left" />
+                </div>
+                <PlanMeters limits={rateLimits} />
+              </>
+            )}
+            <div className={cn("flex items-center gap-3 text-[11px] text-ink-3", rateLimits.length > 0 && "mt-3")}>{links}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
