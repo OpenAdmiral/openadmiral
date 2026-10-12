@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentStatus, CliAgent, AdmiralDelegation, AdmiralSession } from "./types";
+import type { Agent, AgentStatus, CliAgent, AdmiralDelegation, AdmiralSession, DiscoveredSession } from "./types";
 import { basename } from "./utils";
 import type { QueueEntry } from "./queue";
 import type { Artifact } from "./artifacts";
@@ -62,7 +62,14 @@ export function supersededMap(sessions: AdmiralSession[], cli: CliAgent[]) {
   return map;
 }
 
-export function mergeAgents(sessions: AdmiralSession[], cli: CliAgent[], now = Date.now(), names: Map<string, string> = new Map(), misses: Map<string, number> = new Map()): Agent[] {
+export function mergeAgents(
+  sessions: AdmiralSession[],
+  cli: CliAgent[],
+  now = Date.now(),
+  names: Map<string, string> = new Map(),
+  misses: Map<string, number> = new Map(),
+  discovered: DiscoveredSession[] = [],
+): Agent[] {
   const byId = new Map<string, Agent>();
   const cliById = new Map(cli.map((c) => [c.sessionId, c]));
   const superseded = supersededMap(sessions, cli);
@@ -97,6 +104,33 @@ export function mergeAgents(sessions: AdmiralSession[], cli: CliAgent[], now = D
       cli: c,
     });
   }
+  // Running without the plugin: what its transcript says, read-only.
+  for (const d of discovered) {
+    if (byId.has(d.sessionId)) continue;
+    byId.set(d.sessionId, {
+      id: d.sessionId,
+      name: d.project,
+      project: d.project,
+      cwd: d.cwd,
+      attachable: false,
+      live: true,
+      status: d.status,
+      session: {
+        v: 1,
+        sessionId: d.sessionId,
+        cwd: d.cwd,
+        project: d.project,
+        branch: d.branch ?? undefined,
+        status: d.status,
+        // The transcript's clock can be ahead of this one (it ticks every 5 s): never in the future.
+        turn: d.status === "working" && d.lastPrompt ? { startedAt: Math.min(d.updatedAt, now), prompt: d.lastPrompt } : undefined,
+        lastReply: d.lastReply ?? undefined,
+        startedAt: Math.min(d.updatedAt, now),
+        updatedAt: now,
+      } as AdmiralSession,
+      unplugged: { via: d.via },
+    });
+  }
   const order: Record<AgentStatus, number> = { waiting: 0, working: 1, starting: 2, idle: 3, ended: 4 };
   return [...byId.values()].sort(
     (a, b) => order[a.status] - order[b.status] || a.project.localeCompare(b.project) || a.name.localeCompare(b.name),
@@ -119,6 +153,14 @@ export function useAdmiral() {
   const [cliReady, setCliReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // Sessions running without the plugin, and whether the plugin is installed (every 10 s).
+  const [discovery, setDiscovery] = useState<{ pluginInstalled: boolean; sessions: DiscoveredSession[] }>({ pluginInstalled: true, sessions: [] });
+  useEffect(() => {
+    const check = () => invoke<{ pluginInstalled: boolean; sessions: DiscoveredSession[] }>("discover_sessions").then(setDiscovery, () => {});
+    check();
+    const t = setInterval(check, 10_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     invoke<Snapshot>("load_snapshot")
@@ -161,8 +203,8 @@ export function useAdmiral() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cli]);
   const agents = useMemo(
-    () => (cliReady ? mergeAgents(snapshot.sessions, cli, now, names.current, misses.current) : mergeAgents(snapshot.sessions, cli, now, names.current, new Map())),
-    [snapshot.sessions, cli, now, cliReady],
+    () => mergeAgents(snapshot.sessions, cli, now, names.current, cliReady ? misses.current : new Map(), discovery.sessions),
+    [snapshot.sessions, cli, now, cliReady, discovery.sessions],
   );
   const superseded = useMemo(() => supersededMap(snapshot.sessions, cli), [snapshot.sessions, cli]);
   const delegations = useMemo(
@@ -212,5 +254,5 @@ export function useAdmiral() {
     if (agents.length || delegations.length) prev.current = { agents: agentMap, dlg: dlgMap };
   }, [agents, delegations]);
 
-  return { agents, delegations, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, hasData: snapshot.sessions.length > 0 || cli.length > 0 };
+  return { agents, delegations, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, pluginInstalled: discovery.pluginInstalled, hasData: snapshot.sessions.length > 0 || cli.length > 0 };
 }

@@ -38,9 +38,10 @@ import { isTimed } from "@/lib/schedule";
 import { UnderwayContext, useUnderway } from "@/lib/underway";
 import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { UnderwayPill } from "@/components/UnderwayPill";
+import { PluginSetup } from "@/components/PluginSetup";
 
 export default function App() {
-  const { agents: rawAgents, delegations, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded } = useAdmiral();
+  const { agents: rawAgents, delegations, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded, pluginInstalled } = useAdmiral();
   const [view, setView] = useState<View | null>(null);
   // A new agent from the + sheet: open it as soon as the CLI lists it (give up after a minute).
   const [openWhenListed, setOpenWhenListed] = useState<{ shortId: string; at: number } | null>(null);
@@ -408,6 +409,10 @@ export default function App() {
         scheduledCount={scheduledCount}
         update={update ? { ...update, install: installUpdate } : undefined}
         pluginBehind={{ count: behindIds.length, reload: () => void reloadPlugins(behindIds) }}
+        unplugged={(() => {
+          const list = agents.filter((a) => a.unplugged);
+          return { installed: pluginInstalled, count: list.length, open: () => list[0] && setView({ kind: "agent", id: list[0].id }) };
+        })()}
         groups={order.groups}
         queues={queues}
         unseen={seen.unseen}
@@ -498,9 +503,10 @@ export default function App() {
                 onClaudeLink={openClaude}
                 renaming={ui.leftCollapsed && rename.editing === selected.id ? { save: rename.commit, cancel: rename.cancel } : undefined}
                 pluginBehind={behindIds.includes(selected.id) ? { reload: () => void reloadPlugins([selected.id]) } : undefined}
+                pluginInstalled={pluginInstalled}
               />
             ) : (
-              <Empty onNew={() => setSheet(true)} />
+              <Empty onNew={() => setSheet(true)} pluginInstalled={pluginInstalled} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -516,15 +522,20 @@ export default function App() {
   );
 }
 
-function Empty({ onNew }: { onNew: () => void }) {
+function Empty({ onNew, pluginInstalled }: { onNew: () => void; pluginInstalled: boolean }) {
   return (
     <div data-tauri-drag-region className="relative flex h-full flex-col items-center justify-center text-center">
       <div className="absolute top-3.5 right-5">
         <UnderwayPill />
       </div>
       <img src="/icon.png" alt="" className="mb-4 size-16 opacity-90" />
-      <h1 className="text-xl font-semibold text-ink">Your fleet is quiet</h1>
-      <p className="mt-1 max-w-sm text-sm text-ink-3">Agents appear here as soon as a Claude Code session with the OpenAdmiral plugin starts, or when you start one.</p>
+      <h1 className="text-xl font-semibold text-ink">{pluginInstalled ? "Your fleet is quiet" : "Connect your Claude Code sessions"}</h1>
+      <p className="mt-1 max-w-sm text-sm text-ink-3">
+        {pluginInstalled
+          ? "Agents appear here as soon as a Claude Code session with the OpenAdmiral plugin starts, or when you start one."
+          : "OpenAdmiral shows every Claude Code session that runs its plugin. Install it once and your sessions appear here."}
+      </p>
+      <PluginSetup installed={pluginInstalled} className="mt-5 w-full max-w-md" />
       <button
         onClick={onNew}
         className="mt-5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"

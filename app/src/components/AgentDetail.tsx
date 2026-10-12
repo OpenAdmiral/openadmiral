@@ -41,6 +41,7 @@ import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript"
 import { Chip, DelegationPill, KIND, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
 import { UnderwayPill } from "@/components/UnderwayPill";
+import { PluginSetup } from "@/components/PluginSetup";
 
 type Props = {
   agent: Agent;
@@ -79,12 +80,14 @@ type Props = {
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
   /** This session runs an older OpenAdmiral plugin than the one installed: offer /reload-plugins. */
   pluginBehind?: { reload: () => void };
+  /** The OpenAdmiral plugin is installed (for a session found running without it). */
+  pluginInstalled?: boolean;
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true }: Props) {
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
   const tasks = pickTasks(s, transcript);
@@ -239,7 +242,11 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
               className="h-full"
             />
           ) : (
-            <ReadOnly agent={agent} now={now} handoff={handoff} request={request} />
+            agent.unplugged ? (
+              <Unplugged agent={agent} installed={pluginInstalled} />
+            ) : (
+              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} />
+            )
           )}
         </div>
           {tab === "conversation" && (
@@ -289,7 +296,11 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
                 tone: "brand",
                 icon: <ListArrowDownLinearIcon size={14} className="text-brand-600 dark:text-brand-400" />,
                 aside: pending(queue).length ? `${pending(queue).length} pending` : undefined,
-                body: <UpNext agent={agent} entry={queue} agents={agents} delegations={delegations} onError={onError} />,
+                body: agent.unplugged ? (
+                  <p className="px-4 py-3 text-xs leading-relaxed text-ink-3">Up next needs the OpenAdmiral plugin in this session: it is the plugin that submits queued prompts.</p>
+                ) : (
+                  <UpNext agent={agent} entry={queue} agents={agents} delegations={delegations} onError={onError} />
+                ),
               },
               {
                 id: "prompts",
@@ -533,6 +544,13 @@ function Header({
             <Info tip={KIND.terminal.hint + "."} />
           </Chip>
         )}
+        {agent.unplugged && (
+          <Tip side="bottom" content={<TipLabel label={`Running in ${agent.unplugged.via} without the OpenAdmiral plugin: its conversation is here, live status and the rest need the plugin.`} />}>
+            <Chip icon={<MonitorLinearIcon size={13} />} className="text-brand-700 dark:text-brand-300">
+              In {agent.unplugged.via} · not connected
+            </Chip>
+          </Tip>
+        )}
         {pluginBehind && (
           <Tip side="bottom" content={<TipLabel label="This session runs an older OpenAdmiral plugin. Reload runs /reload-plugins in it as soon as it is idle." />}>
             <Chip icon={<RefreshLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={pluginBehind.reload}>
@@ -677,6 +695,23 @@ function Activity({ session, now }: { session?: AdmiralSession; now: number }) {
         </ol>
       )}
     </>
+  );
+}
+
+/** A session found running without the plugin: what OpenAdmiral can and cannot do, and how to connect it. */
+function Unplugged({ agent, installed }: { agent: Agent; installed: boolean }) {
+  const via = agent.unplugged?.via ?? "Claude Code";
+  return (
+    <div className="flex h-full flex-col overflow-y-auto p-6">
+      <div className="max-w-xl rounded-xl border border-line bg-panel p-5">
+        <p className="text-sm font-semibold text-ink">Running in {via}, not connected</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink-2">
+          OpenAdmiral found this session through its transcript, so you can follow it here and read the whole conversation in the Conversation tab. To see when it
+          needs you, get its notifications, queue prompts with Up next, and hand work between agents, connect it with the OpenAdmiral plugin.
+        </p>
+        <PluginSetup installed={installed} className="mt-4" />
+      </div>
+    </div>
   );
 }
 

@@ -1,4 +1,5 @@
 mod artifacts;
+mod discover;
 mod handoff;
 mod jobs;
 mod lifecycle;
@@ -945,6 +946,7 @@ pub fn run() {
             plugin_files::plugin_changed_at,
             plugin_files::plugin_reload,
             tray::tray_today,
+            discover::discover_sessions,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

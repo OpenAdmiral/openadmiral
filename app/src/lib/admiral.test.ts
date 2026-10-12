@@ -41,3 +41,22 @@ describe("/clear gives a running session a new id", () => {
     expect(agents.map((a) => a.id)).toEqual(["b89c59a5-new"]);
   });
 });
+
+describe("sessions found without the plugin", () => {
+  it("join the fleet read-only, unless the plugin or the CLI already knows them", async () => {
+    const { mergeAgents } = await import("./admiral");
+    const now = 1_000_000;
+    const found = [
+      { sessionId: "vs1", cwd: "/w/api", project: "api", branch: "main", status: "working" as const, lastPrompt: "Fix the tests", lastReply: null, updatedAt: now - 5_000, via: "VS Code" },
+      { sessionId: "known", cwd: "/w/app", project: "app", branch: null, status: "idle" as const, lastPrompt: null, lastReply: null, updatedAt: now, via: "Terminal" },
+    ];
+    const cli = [{ pid: 1, cwd: "/w/app", kind: "background", startedAt: 0, sessionId: "known", name: "app-agent", status: "idle" }];
+    const agents = mergeAgents([], cli, now, new Map(), new Map(), found);
+    const vs = agents.find((a) => a.id === "vs1")!;
+    expect(vs.unplugged).toEqual({ via: "VS Code" });
+    expect(vs.status).toBe("working");
+    expect(vs.session?.turn?.prompt).toBe("Fix the tests");
+    expect(vs.attachable).toBe(false);
+    expect(agents.find((a) => a.id === "known")!.unplugged).toBeUndefined();
+  });
+});

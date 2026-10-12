@@ -84,4 +84,19 @@ export type Agent = {
   status: AgentStatus;
   session?: AdmiralSession;
   cli?: CliAgent;
+  /** Found running without the OpenAdmiral plugin (src-tauri/src/discover.rs): read-only, from its transcript. */
+  unplugged?: { via: string };
+};
+
+/** A Claude Code session running without the plugin, as discover_sessions finds it. */
+export type DiscoveredSession = {
+  sessionId: string;
+  cwd: string;
+  project: string;
+  branch: string | null;
+  status: "working" | "idle";
+  lastPrompt: string | null;
+  lastReply: string | null;
+  updatedAt: number;
+  via: string;
 };

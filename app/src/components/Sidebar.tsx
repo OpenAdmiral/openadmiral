@@ -61,6 +61,8 @@ type Props = {
   update?: { version: string; installing: boolean; install: () => void };
   /** Running sessions on an older OpenAdmiral plugin than the installed one. */
   pluginBehind?: { count: number; reload: () => void };
+  /** Sessions found running without the plugin, and whether it is installed at all. */
+  unplugged?: { installed: boolean; count: number; open: () => void };
   /** The agent whose name is being edited in its row, and what to do with the result. */
   renaming?: { id: string; save: (a: Agent, name: string) => void; cancel: () => void };
 };
@@ -85,7 +87,8 @@ const collision: CollisionDetection = (args) => {
 };
 
 export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
-  pluginBehind }: Props) {
+  pluginBehind,
+  unplugged }: Props) {
   const newArtifacts = Object.values(unseen).reduce((n, x) => n + x, 0);
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
@@ -243,6 +246,17 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       </div>
 
       <footer className="shrink-0 border-t border-line px-5 pt-3.5 pb-2.5">
+        {unplugged && unplugged.count > 0 && (
+          <div className="mb-3 rounded-lg bg-brand-500/10 px-3 py-2 text-xs ring-1 ring-brand-500/25">
+            <div className="font-semibold text-ink">
+              {unplugged.count === 1 ? "1 session isn't" : `${unplugged.count} sessions aren't`} connected to OpenAdmiral
+            </div>
+            <div className="mt-0.5 text-ink-3">{unplugged.installed ? "They need /reload-plugins." : "They need the OpenAdmiral plugin."}</div>
+            <button onClick={unplugged.open} className="mt-1 font-semibold text-brand-700 hover:underline dark:text-brand-300">
+              How to connect
+            </button>
+          </div>
+        )}
         {pluginBehind && pluginBehind.count > 0 && (
           <div className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs ring-1 ring-amber-500/25">
             <div className="font-semibold text-ink">
@@ -431,7 +445,13 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
     <button
       {...handle}
       onClick={onSelect}
-      title={a.cli ? `${a.name} · ${KIND[a.attachable ? "openadmiral" : "terminal"].label}: ${KIND[a.attachable ? "openadmiral" : "terminal"].hint}` : `${a.name} · not running`}
+      title={
+        a.unplugged
+          ? `${a.name} · in ${a.unplugged.via}, not connected: it needs the OpenAdmiral plugin`
+          : a.cli
+            ? `${a.name} · ${KIND[a.attachable ? "openadmiral" : "terminal"].label}: ${KIND[a.attachable ? "openadmiral" : "terminal"].hint}`
+            : `${a.name} · not running`
+      }
       className={cn(
         "relative flex w-full flex-col gap-1 rounded-lg px-2.5 py-2 text-left outline-none transition-colors duration-200 hover:bg-line focus-visible:ring-2 focus-visible:ring-brand-500",
         a.status === "ended" && !lifted && "opacity-70 dark:opacity-55",
@@ -466,7 +486,7 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
         </span>
       )}
       <span className="relative flex items-center gap-2 pl-[18px] text-xs text-ink-3">
-        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.cli ? KIND[a.attachable ? "openadmiral" : "terminal"].label : "ended")}</span>
+        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.unplugged ? `in ${a.unplugged.via}` : a.cli ? KIND[a.attachable ? "openadmiral" : "terminal"].label : "ended")}</span>
         {!!a.session?.dirty && <span className="text-amber-600 dark:text-amber-400 tabular">±{a.session.dirty}</span>}
         <span className="flex-1" />
         {ctx !== undefined && (

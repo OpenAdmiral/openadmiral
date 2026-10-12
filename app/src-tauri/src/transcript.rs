@@ -93,7 +93,7 @@ struct Tail {
 #[derive(Default)]
 pub struct Transcripts(Mutex<HashMap<String, Arc<Mutex<Tail>>>>);
 
-fn escape(path: &str) -> String {
+pub(crate) fn escape(path: &str) -> String {
     path.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
