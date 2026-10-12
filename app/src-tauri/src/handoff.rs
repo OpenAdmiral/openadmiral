@@ -99,11 +99,15 @@ fn in_extension(session_id: &str) -> bool {
         .is_some_and(|s| s.pointer("/host/kind").and_then(Value::as_str) == Some("extension"))
 }
 
+/// Still open in an editor's panel: it would never exit. Once its tab (or the editor)
+/// is closed its process is gone, and it resumes like any ended session.
+pub fn panel_open(session_id: &str) -> bool {
+    in_extension(session_id) && crate::discover::session_running(session_id)
+}
+
 #[tauri::command]
 pub async fn handoff_start(app: AppHandle, session_id: String, name: String, cwd: String) -> Result<(), String> {
-    // Still open in an editor's panel: it would never exit. Once its tab (or the editor)
-    // is closed its process is gone, and it resumes like any ended session.
-    if in_extension(&session_id) && crate::discover::session_running(&session_id) {
+    if panel_open(&session_id) {
         return Err(format!("{name} is still open in its editor's Claude Code panel, which can't hand it over: close its tab there, then resume it here."));
     }
     let agents = crate::claude_agents().ok_or("could not ask claude which sessions are running")?;
@@ -299,5 +303,27 @@ mod tests {
         std::fs::write(&path, r#"{"action":"handoff","at":1}"#).unwrap();
         assert!(!waiting("s1"));
         std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod e2e {
+    /// A session in an editor's panel, end to end (scratch session only):
+    /// E2E_SESSION=<id> E2E_PHASE=open|closed cargo test handoff::e2e -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn editor_panel_session() {
+        let id = std::env::var("E2E_SESSION").expect("E2E_SESSION");
+        match std::env::var("E2E_PHASE").as_deref() {
+            Ok("open") => assert!(super::panel_open(&id), "an open panel session must be refused"),
+            Ok("closed") => {
+                assert!(!super::panel_open(&id), "a closed panel session must resume");
+                let cwd = std::env::var("E2E_CWD").expect("E2E_CWD");
+                let resumed = crate::resume_session(&id, "e2e-panel-probe", &cwd).expect("resume");
+                println!("resumed as {resumed}");
+                assert_eq!(resumed, id, "same conversation, same id");
+            }
+            other => panic!("E2E_PHASE: {other:?}"),
+        }
     }
 }
