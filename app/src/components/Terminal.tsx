@@ -204,6 +204,11 @@ async function spawn(key: string, t: Live, argv: string[], cwd: string) {
   t.left = false;
   t.detect = agentViewDetector();
   await invoke("pty_open", { key, argv, cwd, cols: t.term.cols, rows: t.term.rows });
+  // Attaching to a session mid-turn, Claude Code only sends what changes next, so the
+  // screen can stay empty until something new arrives. Ask for a full redraw once the
+  // attach has settled, and again a little later for a slow one.
+  repaintTerminal(key, 1200);
+  setTimeout(() => repaintTerminal(key), 4000);
 }
 
 export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession }: { agentKey: string; argv: string[]; cwd: string; className?: string; onCloseSession?: () => void }) {
@@ -274,9 +279,8 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession }
     t.term.writeln("\r\n\x1b[2m— reattaching —\x1b[0m");
     setExited(false);
     setLeft(false);
-    spawn(agentKey, t, argv, cwd)
-      .then(() => repaintTerminal(agentKey, 400))
-      .catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
+    // spawn asks for the full redraws itself.
+    spawn(agentKey, t, argv, cwd).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
     t.term.focus();
   };
 
