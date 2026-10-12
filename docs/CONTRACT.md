@@ -60,6 +60,14 @@ the newest file under the plugin's `hooks/` and `.claude-plugin/` (this repo's
 `./plugin` for a directory marketplace, else the installed copy); a running session
 that loaded before them shows "Plugin outdated · Reload", and Reload puts
 `/reload-plugins` first in its queue as Run now (`src-tauri/src/plugin_files.rs`).
+`plugin.json` sets no `version`, so a GitHub install's version is the commit; the app
+runs `claude plugin marketplace update openadmiral` and `claude plugin update
+openadmiral@openadmiral` at launch and every six hours (Claude Code auto-updates only
+its own marketplaces), which is what makes those sessions outdated.
+
+**Hand-off and exit requests** are never served in an editor's Claude Code panel
+(`host.kind` "extension"): /exit does not close it. The app refuses to start one there
+and drops any left from older versions.
 
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).
