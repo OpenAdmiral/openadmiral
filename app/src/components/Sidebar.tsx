@@ -27,13 +27,14 @@ import { pending, type QueueEntry } from "@/lib/queue";
 import type { AdmiralRequest } from "@/lib/admiral";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
 import { activeOpenCount } from "@/lib/delegations";
-import { branchTone, cn, contextUsed, fillText, projectColor, projectLabel } from "@/lib/utils";
+import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel } from "@/lib/utils";
 import { PlanMeters } from "./PlanMeters";
 import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
 import { KIND, Kbd, Meter } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
 import { runsElsewhere, whereLabel } from "@/lib/host";
+import { lastActivity, type SortMode } from "@/lib/recent";
 
 export type View = { kind: "agent"; id: string } | { kind: "agents" } | { kind: "delegations" } | { kind: "costs" } | { kind: "artifacts" } | { kind: "queue" };
 
@@ -64,6 +65,8 @@ type Props = {
   pluginBehind?: { count: number; reload: () => void };
   /** Sessions found running without the plugin, and whether it is installed at all. */
   unplugged?: { installed: boolean; count: number; open: () => void };
+  /** My order (projects, as arranged) or Recent (flat, by last activity, App sorts it). */
+  sort?: { mode: SortMode; set: (m: SortMode) => void; recent: Agent[]; now: number };
   /** The agent whose name is being edited in its row, and what to do with the result. */
   renaming?: { id: string; save: (a: Agent, name: string) => void; cancel: () => void };
 };
@@ -89,7 +92,8 @@ const collision: CollisionDetection = (args) => {
 
 export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
   pluginBehind,
-  unplugged }: Props) {
+  unplugged,
+  sort }: Props) {
   const newArtifacts = Object.values(unseen).reduce((n, x) => n + x, 0);
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
@@ -133,8 +137,9 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   const menus = listMenus(actions, { onClearEnded, onResetOrder });
 
   // ⌘1–9 count agents in the order drawn.
+  const recent = sort?.mode === "recent";
   const numbers = new Map<string, number>();
-  groups.flatMap((g) => g.agents).forEach((a, i) => numbers.set(a.id, i + 1));
+  (recent ? sort!.recent : groups.flatMap((g) => g.agents)).forEach((a, i) => numbers.set(a.id, i + 1));
   const activeGroup = active?.startsWith("p:") ? groups.find((g) => pid(g.key) === active) : undefined;
   const activeAgent = active?.startsWith("a:") ? groups.flatMap((g) => g.agents).find((a) => a.id === parseAid(active).agentId) : undefined;
 
@@ -189,11 +194,56 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       </nav>
 
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4" onContextMenu={menus.empty}>
+        {groups.length > 0 && sort && (
+          <div className="mb-2 flex items-center justify-between px-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Agents</span>
+            <div className="flex rounded-md bg-line p-0.5 text-[11px]" role="radiogroup" aria-label="Order the agents">
+              {(["order", "recent"] as const).map((m) => (
+                <button
+                  key={m}
+                  role="radio"
+                  aria-checked={sort.mode === m}
+                  onClick={() => sort.set(m)}
+                  title={m === "order" ? "By project, in the order you arranged" : "By last activity, the ones that need you first"}
+                  className={cn("rounded px-2 py-0.5 font-medium transition-colors", sort.mode === m ? "bg-canvas text-ink shadow-sm dark:bg-white/10" : "text-ink-3 hover:text-ink-2")}
+                >
+                  {m === "order" ? "My order" : "Recent"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {recent && (
+          <div>
+            {sort!.recent.map((a) => (
+              <div key={a.id} className="mb-0.5" onContextMenu={(e) => menus.agent(e, a)}>
+                {renaming?.id === a.id ? (
+                  <div className="flex items-center gap-2.5 rounded-lg bg-canvas px-2.5 py-2 ring-1 ring-line-strong dark:bg-white/[0.07]">
+                    <StatusIcon status={a.status} />
+                    <NameEditor value={a.name} onSave={(name) => renaming.save(a, name)} onCancel={renaming.cancel} className="text-sm" />
+                  </div>
+                ) : (
+                  <AgentRow
+                    agent={a}
+                    n={numbers.get(a.id)!}
+                    queued={pending(queues[a.id]).length}
+                    request={a.cli ? requests[a.id] : undefined}
+                    selected={view?.kind === "agent" && view.id === a.id}
+                    onSelect={() => onSelect({ kind: "agent", id: a.id })}
+                    recent={{ at: lastActivity(a), now: sort!.now }}
+                  />
+                )}
+              </div>
+            ))}
+            <p className="mt-2 px-2 text-[11px] text-ink-3">Switch to My order to arrange them by hand.</p>
+          </div>
+        )}
         {groups.length === 0 && (
           <div className="mx-1 mt-6 rounded-xl border border-dashed border-line-strong p-4 text-center text-xs leading-relaxed text-ink-3">
             No agents yet. Start one with <span className="font-semibold text-ink-2">+</span>, or open Claude Code with the OpenAdmiral plugin.
           </div>
         )}
+        {!recent && (
         <DndContext
           sensors={sensors}
           collisionDetection={collision}
@@ -244,6 +294,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
             ) : null}
           </DragOverlay>
         </DndContext>
+        )}
       </div>
 
       <footer className="shrink-0 border-t border-line px-5 pt-3.5 pb-2.5">
@@ -440,7 +491,28 @@ function SortableAgent({ id, agent, n, queued, request, selected, onSelect, onMe
   );
 }
 
-function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle, lifted }: { agent: Agent; n: number; queued?: number; request?: AdmiralRequest; selected?: boolean; onSelect?: () => void; handle?: HTMLAttributes<HTMLButtonElement>; lifted?: boolean }) {
+function AgentRow({
+  agent: a,
+  n,
+  queued = 0,
+  request,
+  selected,
+  onSelect,
+  handle,
+  lifted,
+  recent,
+}: {
+  agent: Agent;
+  n: number;
+  queued?: number;
+  request?: AdmiralRequest;
+  selected?: boolean;
+  onSelect?: () => void;
+  handle?: HTMLAttributes<HTMLButtonElement>;
+  lifted?: boolean;
+  /** In the Recent list: show how long ago it was active, and its project. */
+  recent?: { at: number; now: number };
+}) {
   const ctx = contextUsed(a.session?.context);
   return (
     <button
@@ -478,6 +550,10 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
         )}
         {a.status === "waiting" ? (
           <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold leading-4 text-amber-700 dark:text-amber-300">needs you</span>
+        ) : recent ? (
+          <span title={n <= 9 ? `⌘${n}` : undefined} className="ml-1 text-[11px] text-ink-3 tabular">
+            {recent.at && recent.now - recent.at < 60_000 ? "now" : ago(recent.at, recent.now)}
+          </span>
         ) : n <= 9 ? (
           <span className="ml-1 text-[10px] text-ink-3/70 tabular">⌘{n}</span>
         ) : null}
@@ -492,7 +568,12 @@ function AgentRow({ agent: a, n, queued = 0, request, selected, onSelect, handle
         <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.unplugged || runsElsewhere(a) ? `in ${whereLabel(a) ?? "Terminal"}` : a.cli ? KIND.openadmiral.label : "ended")}</span>
         {!!a.session?.dirty && <span className="text-amber-600 dark:text-amber-400 tabular">±{a.session.dirty}</span>}
         <span className="flex-1" />
-        {ctx !== undefined && (
+        {recent ? (
+          <span className="flex max-w-[45%] items-center gap-1.5 text-[11px] text-ink-3">
+            <span className="size-1.5 shrink-0 rounded-full" style={{ background: projectColor(a.project) }} />
+            <span className="truncate">{projectLabel(a.project)}</span>
+          </span>
+        ) : ctx !== undefined && (
           <span className="flex w-14 items-center gap-1.5">
             <Meter value={ctx} className="flex-1" />
             <span className={cn("w-6 text-right text-[10px] tabular", fillText(ctx))}>{Math.round(ctx)}%</span>

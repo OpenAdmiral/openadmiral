@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, MotionGlobalConfig, motion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Agent } from "@/lib/types";
 import { AboutSheet } from "@/components/AboutSheet";
 import { AgentDetail } from "@/components/AgentDetail";
@@ -37,6 +37,7 @@ import { pending, useQueueJanitor, type SchedulerEvent } from "@/lib/queue";
 import { isTimed } from "@/lib/schedule";
 import { UnderwayContext, useUnderway } from "@/lib/underway";
 import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
+import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
 
@@ -78,6 +79,10 @@ export default function App() {
   const agents = rename.agents;
   const behindIds = agents.filter((a) => pluginBehind(a, pluginChangedAt)).map((a) => a.id);
   const order = useSidebarOrder(agents, cliReady);
+  // My order (projects, as arranged) or Recent (flat, by last activity): the
+  // sidebar, the rail and ⌘1–9 / ⌥↑↓ all follow the one shown.
+  const [sortMode, setSortMode] = useSortMode();
+  const shown = useMemo(() => (sortMode === "recent" ? recentOrder(order.flat) : order.flat), [sortMode, order.flat]);
   useEffect(() => {
     if (!openWhenListed) return;
     if (Date.now() - openWhenListed.at > 60_000) return setOpenWhenListed(null);
@@ -237,6 +242,7 @@ export default function App() {
       if (d.select) setView({ kind: "agent", id: d.select });
       if (d.view === "agents" || d.view === "delegations" || d.view === "costs" || d.view === "artifacts" || d.view === "queue") setView({ kind: d.view });
       if (d.view === "about") setAbout(true);
+      if (d.sort === "recent" || d.sort === "order") setSortMode(d.sort);
       if (d.rail) ui.toggleLeft();
       if (d.inspectorHidden) ui.toggleRight();
       // A webview snapshot leaves out the window's vibrancy: paint it (index.css).
@@ -298,7 +304,7 @@ export default function App() {
 
   // The agent before/after the selected one, in sidebar order (no wrapping).
   const nextInOrder = (dir: 1 | -1) => {
-    const list = order.flat;
+    const list = shown;
     const i = view?.kind === "agent" ? list.findIndex((a) => a.id === view.id) : -1;
     if (i === -1) return dir === 1 ? list[0] : list.at(-1);
     return list[i + dir];
@@ -307,9 +313,9 @@ export default function App() {
   // artifacts or a delegation of theirs that just finished or got blocked.
   const nextNeedingYou = (dir: 1 | -1) => {
     const recent = Date.now() - 30 * 60_000;
-    const flagged = (a: (typeof order.flat)[number]) =>
+    const flagged = (a: (typeof shown)[number]) =>
       (seen.unseen[a.id] ?? 0) > 0 || delegations.some((d) => d.from.sessionId === a.id && (d.status === "done" || d.status === "blocked") && d.updatedAt > recent);
-    const list = [...order.flat.filter((a) => a.status === "waiting"), ...order.flat.filter((a) => a.status !== "waiting" && flagged(a))];
+    const list = [...shown.filter((a) => a.status === "waiting"), ...shown.filter((a) => a.status !== "waiting" && flagged(a))];
     if (!list.length) return undefined;
     const i = view?.kind === "agent" ? list.findIndex((a) => a.id === view.id) : -1;
     if (i === -1) return dir === 1 ? list[0] : list.at(-1);
@@ -357,7 +363,7 @@ export default function App() {
         },
       };
       if (id === "agent-n") {
-        const a = order.flat[Number(e.key) - 1];
+        const a = shown[Number(e.key) - 1];
         if (a) {
           e.preventDefault();
           setView({ kind: "agent", id: a.id });
@@ -372,7 +378,7 @@ export default function App() {
     // Capture: xterm swallows keys once it has focus.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [order.flat, view, agents, life.actions, ui, seen.unseen, delegations]);
+  }, [shown, view, agents, life.actions, ui, seen.unseen, delegations]);
 
   const selected = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
   // With the sidebar collapsed to a rail, the name is edited in the header: show that agent.
@@ -392,7 +398,7 @@ export default function App() {
         {ui.leftCollapsed ? (
           <Rail
             onShortcuts={() => setShortcuts(true)}
-            groups={order.groups}
+            groups={sortMode === "recent" ? [{ key: "recent", label: "Recent", agents: shown }] : order.groups}
             view={view}
             onSelect={setView}
             onExpand={ui.toggleLeft}
@@ -414,6 +420,7 @@ export default function App() {
           return { installed: pluginInstalled, count: list.length, open: () => list[0] && setView({ kind: "agent", id: list[0].id }) };
         })()}
         groups={order.groups}
+        sort={{ mode: sortMode, set: setSortMode, recent: sortMode === "recent" ? shown : [], now }}
         queues={queues}
         unseen={seen.unseen}
         requests={requests}

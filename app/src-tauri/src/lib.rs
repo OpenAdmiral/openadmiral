@@ -114,6 +114,8 @@ struct DevEnv {
     tip: Option<String>,
     /// Preview only: snapshotting itself (OPENADMIRAL_SHOT, see shot.rs).
     shot: bool,
+    /// Preview only: the agent list's order (OPENADMIRAL_SORT=recent).
+    sort: Option<String>,
 }
 
 /// Uncaught errors and unhandled rejections from the webview, next to Rust's own
@@ -138,6 +140,7 @@ fn dev_env() -> DevEnv {
         probe: p && std::env::var_os("OPENADMIRAL_TERM_PROBE").is_some(),
         tip: if p { std::env::var("OPENADMIRAL_TIP").ok() } else { None },
         shot: p && std::env::var_os("OPENADMIRAL_SHOT").is_some(),
+        sort: if p { std::env::var("OPENADMIRAL_SORT").ok() } else { None },
     }
 }
 
