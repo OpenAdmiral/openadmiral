@@ -40,7 +40,10 @@ ID_FILE="$HOME/.config/openadmiral/signing-identity"
 if (( BUILD )); then
   export PATH="$HOME/.cargo/bin:$PATH"
   if [[ -n "$IDENTITY" ]]; then
-    export APPLE_SIGNING_IDENTITY="$IDENTITY"
+    # Sign by the certificate's SHA-1, not its name: a name with accents ("César")
+    # reaches codesign garbled when the shell's locale is not UTF-8.
+    HASH=$(LC_ALL=en_US.UTF-8 security find-identity -v -p codesigning | LC_ALL=en_US.UTF-8 grep -F "\"$IDENTITY\"" | awk '{print $2}' | head -1)
+    export APPLE_SIGNING_IDENTITY="${HASH:-$IDENTITY}"
     echo "Signing with $IDENTITY"
   fi
   # No update packages for a local install: they need the release signing key.
