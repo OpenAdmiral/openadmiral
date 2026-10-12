@@ -71,7 +71,9 @@ fn is_session(command: &str) -> bool {
     }
     let first = args.next();
     // Helpers that are not conversations: the Chrome bridge, MCP servers, one-shot prints.
-    if command.contains("--chrome-native-host") || command.contains(" mcp serve") {
+    // Background jobs' pty hosts and spares (`--bg-pty-host`, `--bg-spare`) belong to jobs
+    // `claude agents` lists, and have no session of their own.
+    if command.contains("--chrome-native-host") || command.contains(" mcp serve") || command.contains(" --bg-pty-host") || command.contains(" --bg-spare") {
         return false;
     }
     !matches!(first, Some("daemon" | "bg-pty-host" | "bg-spare" | "attach" | "agents" | "plugin" | "mcp" | "config" | "update" | "doctor" | "install" | "setup-token"))
@@ -362,6 +364,8 @@ mod tests {
         assert!(!is_session("claude bg-spare --bg-spare /tmp/x.sock"));
         assert!(!is_session("/Users/x/.local/bin/claude daemon run"));
         assert!(!is_session("claude attach aee3888e"));
+        assert!(!is_session("/Users/a/.local/share/claude/ClaudeCode.app/Contents/MacOS/claude --bg-pty-host /tmp/cc-daemon-502/eed50524/spare/37"));
+        assert!(!is_session("claude --bg-spare /tmp/x.sock"));
         assert!(!is_session("/usr/bin/grep claude"));
         assert!(!is_session("/Users/x/.local/bin/claude --chrome-native-host"));
         assert_eq!(label("VS Code", "/Users/x/.vscode/extensions/anthropic.claude-code-2/resources/native-binary/claude --output-format stream-json"), "VS Code");
