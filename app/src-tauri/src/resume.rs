@@ -58,9 +58,14 @@ pub fn stalled_on(lines: &[&str]) -> Option<(String, i64)> {
 }
 
 pub(crate) fn tail(path: &Path) -> Option<String> {
+    tail_bytes(path, TAIL_BYTES)
+}
+
+/// The last `bytes` of a file (its first line may be cut: callers skip what does not parse).
+pub(crate) fn tail_bytes(path: &Path, bytes: u64) -> Option<String> {
     let mut f = std::fs::File::open(path).ok()?;
     let len = f.metadata().ok()?.len();
-    f.seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES))).ok()?;
+    f.seek(SeekFrom::Start(len.saturating_sub(bytes))).ok()?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).ok()?;
     Some(String::from_utf8_lossy(&buf).into_owned())

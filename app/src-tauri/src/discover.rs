@@ -11,8 +11,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// A transcript written this recently means the session is mid-turn.
-const BUSY_MS: i64 = 30_000;
+/// An open turn whose transcript has not moved for this long is not working (a
+/// session left mid-turn, or a process the transcript no longer belongs to).
+const STUCK_MS: i64 = 10 * 60_000;
 /// Transcripts older than this are not the live session of a process in that folder.
 const LIVE_MS: i64 = 12 * 3600 * 1000;
 
@@ -116,8 +117,9 @@ fn mtime_ms(p: &Path) -> Option<i64> {
     p.metadata().ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
 }
 
-/// The `n` most recently written transcripts in this folder's project directory.
-fn newest_transcripts(cwd: &str, n: usize, now: i64) -> Vec<(PathBuf, i64)> {
+/// The `n` most recently written transcripts in this folder's project directory,
+/// leaving out sessions already known (a connected session in the same folder).
+fn newest_transcripts(cwd: &str, n: usize, now: i64, known: &std::collections::HashSet<String>) -> Vec<(PathBuf, i64)> {
     let dir = crate::claude_home().join("projects").join(crate::transcript::escape(cwd));
     let mut all: Vec<(PathBuf, i64)> = std::fs::read_dir(&dir)
         .into_iter()
@@ -125,6 +127,7 @@ fn newest_transcripts(cwd: &str, n: usize, now: i64) -> Vec<(PathBuf, i64)> {
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .filter(|p| p.file_stem().is_none_or(|s| !known.contains(s.to_string_lossy().as_ref())))
         .filter_map(|p| mtime_ms(&p).map(|m| (p, m)))
         .filter(|(_, m)| now - m < LIVE_MS)
         .collect();
@@ -226,12 +229,21 @@ fn discover() -> Discovery {
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let sessions_procs: Vec<&Proc> = procs.iter().filter(|p| is_session(&p.command)).collect();
     let dirs = cwds(&sessions_procs.iter().map(|p| p.pid).collect::<Vec<_>>());
-    // Known already: sessions whose plugin writes a fresh file.
-    let known: std::collections::HashSet<String> = crate::read_dir_json(&crate::admiral_dir().join("sessions"))
+    // Known already: sessions whose plugin writes a fresh file. Those that are not
+    // background jobs run as one of the processes found here, in their folder.
+    let fresh: Vec<(String, String)> = crate::read_dir_json(&crate::admiral_dir().join("sessions"))
         .iter()
         .filter(|s| s.get("updatedAt").and_then(Value::as_f64).is_some_and(|u| now - (u as i64) < 90_000))
-        .filter_map(|s| s.get("sessionId").and_then(Value::as_str).map(String::from))
+        .filter_map(|s| Some((s.get("sessionId")?.as_str()?.to_string(), s.get("cwd")?.as_str()?.to_string())))
         .collect();
+    let known: std::collections::HashSet<String> = fresh.iter().map(|(id, _)| id.clone()).collect();
+    let background: std::collections::HashSet<String> = crate::claude_agents()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|r| r.get("sessionId").and_then(Value::as_str).map(String::from))
+        .collect();
+    let connected_here = |cwd: &str| fresh.iter().filter(|(id, c)| c == cwd && !background.contains(id)).count();
     // Processes per folder: each takes one of that folder's newest transcripts.
     let mut by_cwd: HashMap<String, Vec<&Proc>> = HashMap::new();
     for p in &sessions_procs {
@@ -251,17 +263,27 @@ fn discover() -> Discovery {
             }
         }
         let taken: Vec<PathBuf> = pinned.iter().map(|(p, _, _)| p.clone()).collect();
-        let free: Vec<(PathBuf, i64)> = newest_transcripts(&cwd, ps.len(), now).into_iter().filter(|(p, _)| !taken.contains(p)).collect();
+        let free: Vec<(PathBuf, i64)> = newest_transcripts(&cwd, rest.len().saturating_sub(connected_here(&cwd)), now, &known).into_iter().filter(|(p, _)| !taken.contains(p)).collect();
         let found = pinned.into_iter().chain(free.into_iter().zip(rest).map(|((path, m), p)| (path, m, p)));
         for (path, mtime, p) in found {
             let id = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             if id.is_empty() || known.contains(&id) {
                 continue;
             }
-            let text = crate::resume::tail(&path).unwrap_or_default();
-            let lines: Vec<&str> = text.lines().collect();
-            let (branch, last_prompt, last_reply, open) = read_tail(&lines);
-            let working = now - mtime < BUSY_MS || (open && now - mtime < 10 * 60_000);
+            // Attachment lines (skill and tool lists) are large: when the last prompt is
+            // not in the usual tail, look further back once.
+            let read = |bytes| {
+                let text = crate::resume::tail_bytes(&path, bytes).unwrap_or_default();
+                read_tail(&text.lines().collect::<Vec<_>>())
+            };
+            let mut found = read(256 * 1024);
+            if found.1.is_none() {
+                found = read(4 * 1024 * 1024);
+            }
+            let (branch, last_prompt, last_reply, open) = found;
+            // An idle session keeps writing housekeeping lines, so the file's age says
+            // nothing: a turn is under way while its last word is not a final reply.
+            let working = open && now - mtime < STUCK_MS;
             out.push(Discovered {
                 session_id: id,
                 project: Path::new(&cwd).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| cwd.clone()),
@@ -321,5 +343,18 @@ mod live {
         for s in &d.sessions {
             println!("{} {} [{}] via {} · {:?} · {:?}", &s.session_id[..8], s.project, s.status, s.via, s.branch, s.last_prompt);
         }
+    }
+}
+
+#[cfg(test)]
+mod tail_file {
+    /// OPENADMIRAL_TAIL=<transcript.jsonl> cargo test discover::tail_file -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_tail() {
+        let p = std::path::PathBuf::from(std::env::var("OPENADMIRAL_TAIL").unwrap());
+        let text = crate::resume::tail_bytes(&p, 4 * 1024 * 1024).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        println!("{:?}", super::read_tail(&lines));
     }
 }
