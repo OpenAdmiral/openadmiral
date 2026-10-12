@@ -37,6 +37,8 @@ type Live = {
   /** The attach client dropped into Claude's agent view (/exit typed in the session). */
   left: boolean;
   detect: (chunk: string) => boolean;
+  /** While a redraw nudge has the pty one column narrower: that frame is not shown. */
+  muted?: boolean;
   onExit?: () => void;
   onLeft?: () => void;
 };
@@ -59,7 +61,7 @@ function wire() {
       t.onLeft?.();
       return;
     }
-    if (!t.left) t.term.write(e.payload.data);
+    if (!t.left && !t.muted) t.term.write(e.payload.data);
   });
   listen<{ key: string }>("pty://exit", (e) => {
     const t = live.get(e.payload.key);
@@ -139,6 +141,8 @@ const repaints = new Map<string, ReturnType<typeof setTimeout>>();
  * redraws everything; then repaint xterm's own rows. Debounced per terminal.
  * The TUI coalesces resizes: back within one frame (16 ms) it sees no change and
  * redraws nothing, from 60 ms on it redraws in full (measured on `claude attach`).
+ * The narrow frame it draws meanwhile is not shown (it would flash text reflowed one
+ * column narrower): the redraw at the restored width clears the screen and paints it all.
  */
 export function repaintTerminal(key: string, delay = 140) {
   clearTimeout(repaints.get(key));
@@ -155,10 +159,16 @@ export function repaintTerminal(key: string, delay = 140) {
         return;
       }
       if (t.term.cols === cols && t.term.rows === rows) {
+        const unmute = () => (t.muted = false);
+        t.muted = true;
+        setTimeout(unmute, 1000); // never stays silent, whatever happens below
         invoke("pty_resize", { key, cols: Math.max(2, cols - 1), rows })
           .then(() => new Promise((r) => setTimeout(r, 150)))
-          .then(() => invoke("pty_resize", { key, cols, rows }))
-          .catch(() => {});
+          .then(() => {
+            unmute();
+            return invoke("pty_resize", { key, cols, rows });
+          })
+          .catch(unmute);
       }
       t.term.refresh(0, t.term.rows - 1);
     }, delay),
