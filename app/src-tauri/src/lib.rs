@@ -1046,6 +1046,9 @@ pub fn run() {
             if let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main").cloned() {
                 let started = Mutex::new(HashMap::<String, PathBuf>::new());
                 tauri::WebviewWindowBuilder::from_config(app, &config)?
+                    // Opens filling the screen (zoomed, not full screen); a preview keeps the
+                    // configured size so its screenshots stay comparable.
+                    .maximized(!preview())
                     .on_download(move |webview, event| {
                         match event {
                             // WebKit's own pick: ~/Downloads, renamed rather than overwriting.
