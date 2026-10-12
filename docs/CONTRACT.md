@@ -66,8 +66,10 @@ openadmiral@openadmiral` at launch and every six hours (Claude Code auto-updates
 its own marketplaces), which is what makes those sessions outdated.
 
 **Hand-off and exit requests** are never served in an editor's Claude Code panel
-(`host.kind` "extension"): /exit does not close it. The app refuses to start one there
-and drops any left from older versions.
+(`host.kind` "extension"): /exit does not close it. While its process runs (its
+`~/.claude/sessions/<pid>.json`; `claude agents` lists only background jobs) the app
+refuses to start one and drops any left from older versions; once the tab or editor is
+closed it resumes like any ended session.
 
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).

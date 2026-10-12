@@ -101,8 +101,10 @@ fn in_extension(session_id: &str) -> bool {
 
 #[tauri::command]
 pub async fn handoff_start(app: AppHandle, session_id: String, name: String, cwd: String) -> Result<(), String> {
-    if in_extension(&session_id) {
-        return Err(format!("{name} runs in its editor's Claude Code panel, which can't hand it over: keep working on it there."));
+    // Still open in an editor's panel: it would never exit. Once its tab (or the editor)
+    // is closed its process is gone, and it resumes like any ended session.
+    if in_extension(&session_id) && crate::discover::session_running(&session_id) {
+        return Err(format!("{name} is still open in its editor's Claude Code panel, which can't hand it over: close its tab there, then resume it here."));
     }
     let agents = crate::claude_agents().ok_or("could not ask claude which sessions are running")?;
     let from = match crate::agent_row(&agents, &session_id) {

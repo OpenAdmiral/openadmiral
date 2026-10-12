@@ -141,6 +141,17 @@ fn session_file(pid: u32) -> Option<(String, Option<String>)> {
     Some((id, v.get("status").and_then(Value::as_str).map(String::from)))
 }
 
+/// Whether a process of this session is running now, by Claude Code's own
+/// `~/.claude/sessions/<pid>.json` (it covers sessions `claude agents` does not list:
+/// terminals and editor panels).
+pub fn session_running(session_id: &str) -> bool {
+    crate::read_dir_json(&crate::claude_home().join("sessions")).iter().any(|s| {
+        s.get("sessionId").and_then(Value::as_str) == Some(session_id)
+            // kill(pid, 0) only asks whether the process exists.
+            && s.get("pid").and_then(Value::as_i64).is_some_and(|pid| unsafe { libc::kill(pid as libc::pid_t, 0) } == 0)
+    })
+}
+
 fn mtime_ms(p: &Path) -> Option<i64> {
     p.metadata().ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
 }
@@ -376,6 +387,15 @@ mod tests {
 #[cfg(test)]
 mod live {
     /// What this Mac shows right now: cargo test discover::live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn running_sessions_are_seen() {
+        // This session, run from a Claude Code session: cargo test discover::live -- --ignored
+        let me = std::env::var("CLAUDE_CODE_SESSION_ID").expect("run from a Claude Code session");
+        assert!(super::session_running(&me));
+        assert!(!super::session_running("00000000-0000-4000-8000-000000000000"));
+    }
+
     #[test]
     #[ignore]
     fn print_discovery() {
