@@ -69,7 +69,12 @@ fn is_session(command: &str) -> bool {
     if bin.rsplit('/').next() != Some("claude") {
         return false;
     }
-    !matches!(args.next(), Some("daemon" | "bg-pty-host" | "bg-spare" | "attach" | "agents" | "plugin" | "mcp" | "config" | "update" | "doctor" | "install" | "setup-token"))
+    let first = args.next();
+    // Helpers that are not conversations: the Chrome bridge, MCP servers, one-shot prints.
+    if command.contains("--chrome-native-host") || command.contains(" mcp serve") {
+        return false;
+    }
+    !matches!(first, Some("daemon" | "bg-pty-host" | "bg-spare" | "attach" | "agents" | "plugin" | "mcp" | "config" | "update" | "doctor" | "install" | "setup-token"))
 }
 
 /// The app it runs in, from its ancestors.
@@ -315,6 +320,7 @@ mod tests {
         assert!(!is_session("/Users/x/.local/bin/claude daemon run"));
         assert!(!is_session("claude attach aee3888e"));
         assert!(!is_session("/usr/bin/grep claude"));
+        assert!(!is_session("/Users/x/.local/bin/claude --chrome-native-host"));
         assert_eq!(session_arg("claude --resume 0123456789abcdef0123456789abcdef0123"), Some("0123456789abcdef0123456789abcdef0123".into()));
         assert_eq!(session_arg("claude -r short"), None);
     }
