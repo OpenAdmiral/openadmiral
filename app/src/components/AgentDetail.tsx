@@ -239,6 +239,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
               agentKey={agent.id}
               argv={["claude", "attach", agent.cli?.id ?? agent.id.slice(0, 8)]}
               onCloseSession={() => actions.close(agent)}
+              instance={agent.cli?.startedAt}
               cwd={agent.cwd}
               className="h-full"
             />

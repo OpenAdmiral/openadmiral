@@ -39,6 +39,8 @@ type Live = {
   detect: (chunk: string) => boolean;
   /** While a redraw nudge has the pty one column narrower: that frame is not shown. */
   muted?: boolean;
+  /** Which run of the session the attach was opened against (see AgentTerminal's `instance`). */
+  instance?: string | number;
   onExit?: () => void;
   onLeft?: () => void;
 };
@@ -210,8 +212,9 @@ export function disposeTerminal(key: string) {
   t.el.remove();
 }
 
-async function spawn(key: string, t: Live, argv: string[], cwd: string) {
+async function spawn(key: string, t: Live, argv: string[], cwd: string, instance?: string | number) {
   t.spawned = true;
+  t.instance = instance;
   t.exited = false;
   t.left = false;
   t.detect = agentViewDetector();
@@ -223,7 +226,12 @@ async function spawn(key: string, t: Live, argv: string[], cwd: string) {
   setTimeout(() => repaintTerminal(key), 4000);
 }
 
-export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession }: { agentKey: string; argv: string[]; cwd: string; className?: string; onCloseSession?: () => void }) {
+/**
+ * `instance` names the session's current process (its start time): when the daemon
+ * restarts, every attach ends with "Session … has exited" while the daemon brings the
+ * job back as a new process. A detached terminal whose session came back reattaches itself.
+ */
+export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, instance }: { agentKey: string; argv: string[]; cwd: string; className?: string; onCloseSession?: () => void; instance?: string | number }) {
   const host = useRef<HTMLDivElement>(null);
   const [exited, setExited] = useState(false);
   const [left, setLeft] = useState(false);
@@ -239,7 +247,7 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession }
     // Fit after layout so the PTY starts at the size it is shown at.
     const frame = requestAnimationFrame(() => {
       try { t.fit.fit(); } catch { /* host not laid out yet */ }
-      if (!t.spawned) spawn(agentKey, t, argv, cwd).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
+      if (!t.spawned) spawn(agentKey, t, argv, cwd, instance).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
       t.term.focus();
     });
     // Refit and repaint once the size settles (a panel's animation ends, the tab shows
@@ -292,9 +300,15 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession }
     setExited(false);
     setLeft(false);
     // spawn asks for the full redraws itself.
-    spawn(agentKey, t, argv, cwd).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
+    spawn(agentKey, t, argv, cwd, instance).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
     t.term.focus();
   };
+
+  useEffect(() => {
+    const t = live.get(agentKey);
+    if (exited && !left && t?.spawned && instance !== undefined && t.instance !== instance) reattach();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exited, left, instance, agentKey]);
 
   return (
     <div className={cn("relative min-h-0", className)}>
