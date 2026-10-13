@@ -95,4 +95,10 @@ fi
 
 rm -rf "$DEST"
 mv "$STAGE" "$DEST"
+# --when-quit promised a reopen: the app may have been quit while this was building.
+if (( WHEN_QUIT )); then
+  env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/open "$DEST"
+  echo "Installed $DEST and opened it (it was already quit)."
+  exit 0
+fi
 echo "Installed $DEST. Open it with:  open ~/Applications/OpenAdmiral.app"
