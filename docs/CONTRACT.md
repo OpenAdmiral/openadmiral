@@ -121,7 +121,9 @@ when the session is idle and the request is under 10 min old it writes back
 would stop at a confirmation nobody can answer): then it writes `waiting`
 ("2 background agents still running") and retries until they finish. The app then resumes the session with
 `claude --bg --resume <sessionId> -n <name>` once `claude agents --json` no
-longer lists it (`handoff` only; `exit` just closes the session).
+longer lists it (`handoff` only; `exit` just closes the session). A session that had no
+message yet has no transcript to resume (`--resume` fails with "source session … not
+found"): the app starts `claude --bg -n <name>` in its folder instead, and that new id replaces it.
 
 ## attached.json (app → statusline)
 

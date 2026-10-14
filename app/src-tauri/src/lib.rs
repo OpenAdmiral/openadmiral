@@ -453,6 +453,19 @@ pub fn resume_session(session_id: &str, name: &str, cwd: &str) -> Result<String,
     }
     let job = claude_agents_all().and_then(|all| jobs::job_of(&all, session_id));
     let target = job.as_ref().map_or(session_id, |j| j.session_id.as_str());
+    // A session closed before its first message has no transcript, and `--resume` fails on
+    // it ("source session … not found"): there is nothing to continue, so start a new
+    // session in its folder under its name.
+    if transcript::locate(target, cwd).is_none() {
+        let mut cmd = claude_cmd();
+        cmd.current_dir(cwd).arg("--bg");
+        if !name.trim().is_empty() {
+            cmd.args(["-n", name.trim()]);
+        }
+        let out = run_cli_within(cmd, Duration::from_secs(30))?;
+        let id = backgrounded_id(&out).ok_or("claude started a new session but did not say which.")?;
+        return listed_full_id(&id);
+    }
     let mut cmd = claude_cmd();
     cmd.current_dir(cwd).args(["--bg", "--resume", target]);
     if job.is_none() && !name.trim().is_empty() {
@@ -461,23 +474,8 @@ pub fn resume_session(session_id: &str, name: &str, cwd: &str) -> Result<String,
     let out = run_cli_within(cmd, Duration::from_secs(30))?;
     let same = |id: &str| session_id.starts_with(id) || target.starts_with(id) || job.as_ref().is_some_and(|j| j.id == id);
     match backgrounded_id(&out) {
-        Some(id) if !same(&id) => {
-            // A copy: find its full id in the CLI's list (it registers within seconds).
-            let start = std::time::Instant::now();
-            while start.elapsed() < Duration::from_secs(30) {
-                if let Some(full) = claude_agents().and_then(|a| {
-                    a.as_array()?.iter().find_map(|r| {
-                        let sid = r.get("sessionId").and_then(Value::as_str)?;
-                        let rid = r.get("id").and_then(Value::as_str).unwrap_or("");
-                        (rid == id || sid.starts_with(&id)).then(|| sid.to_string())
-                    })
-                }) {
-                    return Ok(full);
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            Err(format!("claude started it as {id}, but that session did not show up within 30 s."))
-        }
+        // A copy: the caller cleans up the old row.
+        Some(id) if !same(&id) => listed_full_id(&id),
         _ => {
             // The same job: wait until the CLI lists it, so the UI can open its terminal,
             // and answer the id it runs under now (the post-/clear one, after a /clear).
@@ -496,6 +494,24 @@ pub fn resume_session(session_id: &str, name: &str, cwd: &str) -> Result<String,
             Err("claude accepted the resume, but the session did not start within 30 s. Check `claude agents`, then retry or cancel.".into())
         }
     }
+}
+
+/// The full id of a session claude just started as `short` (it registers within seconds).
+fn listed_full_id(short: &str) -> Result<String, String> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(30) {
+        if let Some(full) = claude_agents().and_then(|a| {
+            a.as_array()?.iter().find_map(|r| {
+                let sid = r.get("sessionId").and_then(Value::as_str)?;
+                let rid = r.get("id").and_then(Value::as_str).unwrap_or("");
+                (rid == short || sid.starts_with(short)).then(|| sid.to_string())
+            })
+        }) {
+            return Ok(full);
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    Err(format!("claude started it as {short}, but that session did not show up within 30 s."))
 }
 
 /// Drops what is left of a session that continues under another id: its exited

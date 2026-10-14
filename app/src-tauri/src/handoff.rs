@@ -326,4 +326,17 @@ mod e2e {
             other => panic!("E2E_PHASE: {other:?}"),
         }
     }
+
+    /// A session brought in before its first message (no transcript) starts anew in its
+    /// folder (scratch folder only; stop and rm the job it prints):
+    /// E2E_CWD=<folder> cargo test handoff::e2e::empty -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn empty_session() {
+        let cwd = std::env::var("E2E_CWD").expect("E2E_CWD");
+        let id = "00000000-e2e0-4e00-8000-000000000000";
+        let started = crate::resume_session(id, "e2e-empty-probe", &cwd).expect("a new session");
+        println!("started {started}");
+        assert_ne!(started, id);
+    }
 }
