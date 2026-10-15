@@ -14,7 +14,7 @@ type TaskStatus = 'pending' | 'in_progress' | 'completed'
 
 type ProgressReport = { percent: number; step?: string; at: number }
 type Task = { id: string; subject: string; status: TaskStatus; activeForm?: string }
-type Subagent = { id: string; type?: string; description?: string; status: 'running' | 'done' | 'failed'; startedAt: number }
+type Subagent = { id: string; type?: string; description?: string; status: 'running' | 'done' | 'failed'; startedAt: number; progress?: ProgressReport[] }
 
 type AdmiralSession = {
   v: 1
@@ -29,6 +29,8 @@ type AdmiralSession = {
   status: Status
   waiting?: { reason: 'permission' | 'question' | 'idle_prompt'; detail?: string; since: number }
   turn?: { startedAt: number; prompt: string; progress?: ProgressReport[] }
+  // The last turn that ran long or reported progress: done, or stopped short of 100.
+  lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string }
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }
@@ -419,8 +421,8 @@ The user watches this session in the OpenAdmiral app, which can display artifact
 // Percent weighted by effort, and a report before long output: a trial showed counting phases
 // runs far ahead of the real work (docs/CONTRACT.md, turn.progress).
 const PROGRESS_GUIDANCE = `# Progress of long work (OpenAdmiral)
-The user follows this session in OpenAdmiral, which shows a progress bar and how long is left for long turns, measured from your reports. Whenever a request takes more than about 30 seconds of work (several tool calls, a change across files, an investigation, a batch of items), report with the openadmiral \`progress\` tool: once you know the scope, then at each milestone, and 100 right before your final answer.
-\`percent\` is the share of the total time the work will take, not the share of phases done. Weigh each part by how long it takes: reading and planning are usually quick, while writing a long file or a long answer, editing many files, and running builds or tests are slow and deserve most of the share. So after reading the code you are often only at 15–30 %, not halfway. Right before you start writing a long file or your final long answer, report (that is the longest stretch with no tool calls), and lower the percent if the scope grows. When unsure, report lower. \`step\` says what you are doing now in a few words, in the user's language. Never estimate time: OpenAdmiral measures the pace. Skip it for quick answers, and don't mention it in your reply.`
+The user follows this session in OpenAdmiral, which shows a progress bar and how long is left for long turns, measured from your reports; they often step away and rely on it to know how far along you are. Whenever a request takes more than about 30 seconds of work (several tool calls, a change across files, an investigation, a batch of items), report with the openadmiral \`progress\` tool: once you have sized up the work, before the first change (say 5), then after each real milestone (a file finished, a step done, a test run; not after every tool call), and 100 only when everything is finished and verified, as your last action before the final answer. A subagent reports the share of its own task.
+\`percent\` is the share of the total time the work will take, not the share of phases done. Weigh each part by how long it takes: reading and planning are usually quick, while writing a long file or a long answer, editing many files, and running builds or tests are slow and deserve most of the share. So after reading the code you are often only at 15–30 %, not halfway. Right before you start writing a long file or your final long answer, report (that is the longest stretch with no tool calls), and if you find more work than you thought, lower the percent rather than leave a number you no longer believe. When unsure, report lower. \`step\` says what you are doing now in a few words, in the user's language. Never estimate time: OpenAdmiral measures the pace. Skip it for quick answers, and don't mention it in your reply.`
 
 // A plugin tool answers the model with text; `result` must be a string too.
 const answer = (text: string) => ({ result: text, text })
@@ -529,7 +531,7 @@ async function refreshSubagents($: EngineInterface) {
       : a.status === 'failed' || a.status === 'killed' ? 'failed'
       : 'done'
     const prev = before.get(a.id)
-    return { id: a.id, type: a.type, description: a.description || a.name || prev?.description, status, startedAt: prev?.startedAt ?? now }
+    return { id: a.id, type: a.type, description: a.description || a.name || prev?.description, status, startedAt: prev?.startedAt ?? now, progress: prev?.progress }
   })
   // Agents the engine has dropped stay in the history, no longer running.
   for (const prev of before.values()) {
@@ -626,6 +628,8 @@ let lastNudgeAt = 0
 const NUDGE_AFTER_MS = 30_000
 const NUDGE_GAP_MS = 45_000
 const NUDGE_TAG = 'OpenAdmiral progress'
+// A turn this long is remembered once it ends (lastTurn), even without reports.
+const LAST_TURN_MIN_MS = 30_000
 
 function progressNudgeText(now: number): string | undefined {
   const turn = me?.turn
@@ -731,11 +735,11 @@ export const register: Register = on => {
       isDeferred: false,
       description:
         'Report how far along a long piece of work is, so the user sees a progress bar and an ETA in OpenAdmiral. ' +
-        'Use it whenever the work takes more than about 30 seconds: once the scope is clear, at each milestone, and with 100 just before the final answer.',
+        'Use it whenever the work takes more than about 30 seconds: once the scope is clear, at each milestone, and with 100 as the last action when everything is finished and verified.',
       inputSchema: {
         type: 'object',
         properties: {
-          percent: { type: 'number', minimum: 0, maximum: 100, description: 'Share of the work done, in concrete units (files, checks, items), 0–100.' },
+          percent: { type: 'number', minimum: 0, maximum: 100, description: 'Share of the whole task done, weighted by effort and counting work still ahead (tests, verification), 0–100.' },
           step: { type: 'string', description: 'What you are doing now, in a few words.' },
         },
         required: ['percent'],
@@ -784,10 +788,13 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
+    // A subagent's turn is not the person's: it must not restart the main turn (its prompt,
+    // clock and progress) nor log its brief as a prompt.
+    if ((e as { agentId?: string }).agentId !== undefined) return next(e)
     const now = await $.clock.now()
     idleSince = undefined
     const label = promptLabel(e.text)
-    touch($, { status: 'working', waiting: undefined, turn: { startedAt: now, prompt: label } })
+    touch($, { status: 'working', waiting: undefined, turn: { startedAt: now, prompt: label }, lastTurn: undefined })
     if (e.text.trim()) await log($, 'prompt', label)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -795,7 +802,11 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       idleSince = await $.clock.now()
-      touch($, { status: 'idle', waiting: undefined, turn: undefined, lastReply: e.answer ? clip(e.answer, 200) : me?.lastReply })
+      const turn = me?.turn
+      const last = turn?.progress?.at(-1)
+      // Kept until the next prompt: the app shows "done in 9m" or where it stopped short.
+      const lastTurn = turn && (last || idleSince - turn.startedAt >= LAST_TURN_MIN_MS) ? { startedAt: turn.startedAt, endedAt: idleSince, percent: last?.percent, step: last?.step } : undefined
+      touch($, { status: 'idle', waiting: undefined, turn: undefined, lastTurn, lastReply: e.answer ? clip(e.answer, 200) : me?.lastReply })
       if (e.answer) await log($, 'reply', e.answer)
       await refreshGit($, true)
       await refreshUsage($)
@@ -1061,11 +1072,19 @@ export const register: Register = on => {
     const args = e as unknown as { percent?: unknown; step?: unknown }
     const percent = Number(args.percent)
     if (!Number.isFinite(percent)) return answer('`percent` must be a number from 0 to 100.')
-    // The bar describes the whole task: a subagent's share is the main conversation's to report.
-    if ((e as { agentId?: string }).agentId !== undefined) return answer('Only the main conversation reports progress; no need to call this here.')
-    if (me?.turn) {
-      const report: ProgressReport = { percent: Math.max(0, Math.min(100, Math.round(percent))), at: await $.clock.now() }
-      if (typeof args.step === 'string' && args.step.trim()) report.step = clip(args.step.trim(), 80)
+    const report: ProgressReport = { percent: Math.max(0, Math.min(100, Math.round(percent))), at: await $.clock.now() }
+    if (typeof args.step === 'string' && args.step.trim()) report.step = clip(args.step.trim(), 80)
+    const agentId = (e as { agentId?: string }).agentId
+    if (agentId !== undefined) {
+      // A subagent's own task: the app shows it while agents work on after the main turn.
+      if (!me) return answer('ok')
+      const list = me.subagents ?? []
+      const known = list.some(x => x.id === agentId)
+      const next = (known ? list : [...list, { id: agentId, status: 'running' as const, startedAt: report.at }]).map(x =>
+        x.id === agentId ? { ...x, progress: [...(x.progress ?? []), report].slice(-20) } : x,
+      )
+      touch($, { subagents: next })
+    } else if (me?.turn) {
       touch($, { turn: { ...me.turn, progress: [...(me.turn.progress ?? []), report].slice(-40) } })
     }
     return answer('ok')

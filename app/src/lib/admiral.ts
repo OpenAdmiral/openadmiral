@@ -6,7 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, AgentStatus, CliAgent, AdmiralDelegation, AdmiralSession, DiscoveredSession } from "./types";
 import { basename } from "./utils";
 import type { QueueEntry } from "./queue";
+import { formatElapsed } from "./progress";
 import type { Artifact } from "./artifacts";
+
+/** A turn at least this long gets a notification when it ends. */
+const DONE_NOTICE_MIN_MS = 2 * 60_000;
 
 /** A pending hand-off or exit request (docs/CONTRACT.md "requests/"); `waiting` is the mod's note while it cannot exit yet. */
 export type AdmiralRequest = { action: "handoff" | "exit"; at: number; servedAt?: number; waiting?: string };
@@ -236,10 +240,11 @@ export function useAdmiral() {
   }, [attention]);
 
   // Notify on transitions only: the first snapshot is the baseline.
-  const prev = useRef<{ agents: Map<string, AgentStatus>; dlg: Map<string, string> } | null>(null);
+  const prev = useRef<{ agents: Map<string, AgentStatus>; dlg: Map<string, string>; ended: Map<string, number> } | null>(null);
   useEffect(() => {
     const agentMap = new Map(agents.map((a) => [a.id, a.status]));
     const dlgMap = new Map(delegations.map((d) => [d.id, d.status]));
+    const ended = new Map(agents.flatMap((a) => (a.session?.lastTurn ? [[a.id, a.session.lastTurn.endedAt] as const] : [])));
     const before = prev.current;
     if (before) {
       for (const a of agents) {
@@ -249,6 +254,15 @@ export function useAdmiral() {
           notify(`${a.name} needs you`, w?.detail ?? (w?.reason === "permission" ? "Waiting for a permission" : "Waiting for your answer"));
         }
       }
+      for (const a of agents) {
+        // A long turn just ended: say how it went, so nobody has to keep checking.
+        const t = a.session?.lastTurn;
+        if (t && before.ended.get(a.id) !== t.endedAt && Date.now() - t.endedAt < 60_000 && t.endedAt - t.startedAt >= DONE_NOTICE_MIN_MS) {
+          const took = formatElapsed(t.endedAt - t.startedAt);
+          if (t.percent !== undefined && t.percent < 100) notify(`${a.name} stopped at ${t.percent}%`, `After ${took}${t.step ? ` · ${t.step}` : ""}`);
+          else notify(`${a.name} is done`, `Finished in ${took}`);
+        }
+      }
       for (const d of delegations) {
         const was = before.dlg.get(d.id);
         if (was !== d.status && (d.status === "done" || d.status === "blocked")) {
@@ -256,7 +270,7 @@ export function useAdmiral() {
         }
       }
     }
-    if (agents.length || delegations.length) prev.current = { agents: agentMap, dlg: dlgMap };
+    if (agents.length || delegations.length) prev.current = { agents: agentMap, dlg: dlgMap, ended };
   }, [agents, delegations]);
 
   return { agents, delegations, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, pluginInstalled: discovery.pluginInstalled, hasData: snapshot.sessions.length > 0 || cli.length > 0 };

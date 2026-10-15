@@ -63,6 +63,24 @@ fn span(ms: i64) -> String {
     }
 }
 
+/// "2 agents · 40% · 3m · Reading the docs": subagents still running after the main turn,
+/// with the slowest one's last report when they report.
+fn agents_at_work(s: &Value, now: i64) -> Option<String> {
+    let running: Vec<&Value> = s.get("subagents")?.as_array()?.iter().filter(|a| a.get("status").and_then(Value::as_str) == Some("running")).collect();
+    let since = running.iter().filter_map(|a| num(a, "startedAt")).min()?;
+    let count = if running.len() == 1 { "1 agent".to_string() } else { format!("{} agents", running.len()) };
+    let last = |a: &&Value| a.get("progress").and_then(Value::as_array).and_then(|l| l.last()).cloned();
+    let slowest = running.iter().filter_map(|a| last(a).map(|p| (num(&p, "percent").unwrap_or(0), p))).min_by_key(|(pct, _)| *pct);
+    let step = |p: Option<&Value>| p.and_then(|p| p.get("step")).and_then(Value::as_str).map(|t| format!(" · {}", clip(t, 26)));
+    Some(match slowest {
+        Some((pct, p)) => format!("{count} · {pct}% · {}{}", span(now - since), step(Some(&p)).unwrap_or_default()),
+        None => {
+            let what = running.iter().find_map(|a| a.get("description").and_then(Value::as_str)).map(|d| format!(" · {}", clip(d, 26))).unwrap_or_default();
+            format!("{count} · {}{what}", span(now - since))
+        }
+    })
+}
+
 fn num(v: &Value, k: &str) -> Option<i64> {
     v.get(k).and_then(Value::as_f64).map(|f| f as i64)
 }
@@ -122,7 +140,11 @@ pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<
                 };
                 r.working.push(Row { session_id: id, name, detail });
             }
-            "idle" => r.idle += 1,
+            "idle" => match agents_at_work(s, now) {
+                // The main turn is over but backgrounded subagents work on.
+                Some(detail) => r.working.push(Row { session_id: id, name, detail }),
+                None => r.idle += 1,
+            },
             _ => {}
         }
     }
@@ -438,6 +460,22 @@ mod tests {
         assert_eq!(detail(turn(json!([{ "percent": 43, "at": now - 60_000 }]))), "43% · 5m · Ship it");
         // A report from before this turn says nothing about it.
         assert_eq!(detail(turn(json!([{ "percent": 90, "at": now - 9 * 60_000 }]))), "5m · Ship it");
+    }
+
+    #[test]
+    fn subagents_working_on_after_the_turn_keep_a_row() {
+        let now = 1_800_000_000_000_i64;
+        let idle = |subagents: Value| json!({ "sessionId": "a", "project": "app", "status": "idle", "updatedAt": now, "subagents": subagents });
+        let r = report(&[idle(json!([{ "id": "x", "status": "running", "startedAt": now - 3 * 60_000, "description": "Market scan" }]))], &json!([]), &[], &[], now);
+        assert_eq!((r.idle, r.working[0].detail.as_str()), (0, "1 agent · 3m · Market scan"));
+        let r = report(&[idle(json!([
+            { "id": "x", "status": "running", "startedAt": now - 3 * 60_000, "progress": [{ "percent": 70, "at": now, "step": "Writing" }] },
+            { "id": "y", "status": "running", "startedAt": now - 60_000, "progress": [{ "percent": 40, "at": now, "step": "Reading the docs" }] },
+            { "id": "z", "status": "done", "startedAt": now - 9 * 60_000 },
+        ]))], &json!([]), &[], &[], now);
+        assert_eq!(r.working[0].detail, "2 agents · 40% · 3m · Reading the docs");
+        let r = report(&[idle(json!([{ "id": "z", "status": "done", "startedAt": now - 9 * 60_000 }]))], &json!([]), &[], &[], now);
+        assert_eq!((r.idle, r.working.len()), (1, 0));
     }
 
     #[test]

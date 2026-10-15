@@ -16,6 +16,8 @@ export type AdmiralSession = {
   status: SessionStatus;
   waiting?: { reason: "permission" | "question" | "idle_prompt"; detail?: string; since: number };
   turn?: { startedAt: number; prompt: string; progress?: { percent: number; step?: string; at: number }[] };
+  /** The last turn that ran long or reported progress, until the next prompt. */
+  lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string };
   lastTool?: { name: string; summary: string; at: number };
   lastReply?: string;
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number };
@@ -34,7 +36,7 @@ export type AdmiralSession = {
   /** Where it runs (from its environment); absent from older mods. */
   host?: { app: string; kind: "extension" | "terminal" };
   tasks?: { id: string; subject: string; status: "pending" | "in_progress" | "completed"; activeForm?: string }[];
-  subagents?: { id: string; type?: string; description?: string; status: "running" | "done" | "failed"; startedAt: number; endedAt?: number }[];
+  subagents?: { id: string; type?: string; description?: string; status: "running" | "done" | "failed"; startedAt: number; endedAt?: number; progress?: { percent: number; step?: string; at: number }[] }[];
   activity?: { at: number; kind: "prompt" | "tool" | "reply" | "sent" | "received" | "permission"; text: string }[];
   startedAt: number;
   updatedAt: number;

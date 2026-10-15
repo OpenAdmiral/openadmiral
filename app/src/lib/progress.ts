@@ -30,6 +30,10 @@ export type ProgressView = {
   eta?: string;
   /** "last update 3m ago", instead of an ETA, when the reports stopped. */
   stale?: string;
+  /** Waiting for the person: the clock runs, the ETA pauses. */
+  paused?: boolean;
+  /** The main turn is over and subagents work on: how many. */
+  agents?: number;
 };
 
 export function formatElapsed(ms: number) {
@@ -81,7 +85,8 @@ export function estimate(reports: Report[], now: number): Pick<ProgressView, "et
 /** The progress line for a session's running turn, or nothing for a quick or idle one. */
 export function progressOf(s: AdmiralSession | undefined, now = Date.now()): ProgressView | undefined {
   const turn = s?.turn;
-  if (!s || !turn || (s.status !== "working" && s.status !== "waiting")) return undefined;
+  if (!s || s.status === "ended") return undefined;
+  if (!turn || (s.status !== "working" && s.status !== "waiting")) return agentsOf(s, now);
   if (now - turn.startedAt < SHOW_AFTER_MS) return undefined;
   const view: ProgressView = { elapsed: formatElapsed(now - turn.startedAt) };
   const tasks = s.tasks ?? [];
@@ -102,12 +107,52 @@ export function progressOf(s: AdmiralSession | undefined, now = Date.now()): Pro
   } else if (view.steps) {
     view.percent = (done / view.steps.total) * 100;
   }
+  if (s.status === "waiting") {
+    // Its time waiting for the person says nothing about the work left.
+    view.paused = true;
+    delete view.eta;
+    delete view.stale;
+  }
   return view;
+}
+
+/**
+ * Subagents still at work after the main turn ended (backgrounded agents): how long the
+ * batch has run and, from their own reports, how far along the slowest one is.
+ */
+function agentsOf(s: AdmiralSession, now: number): ProgressView | undefined {
+  const running = (s.subagents ?? []).filter((a) => a.status === "running");
+  if (!running.length) return undefined;
+  const since = Math.min(...running.map((a) => a.startedAt));
+  if (now - since < SHOW_AFTER_MS) return undefined;
+  const view: ProgressView = { elapsed: formatElapsed(now - since), agents: running.length };
+  const reporting = running.filter((a) => a.progress?.length);
+  const slowest = reporting.sort((a, b) => a.progress!.at(-1)!.percent - b.progress!.at(-1)!.percent)[0];
+  const lead = slowest ?? running[0];
+  view.step = slowest?.progress!.at(-1)!.step ?? lead.description;
+  if (slowest) {
+    view.percent = slowest.progress!.at(-1)!.percent;
+    view.reported = true;
+    Object.assign(view, estimate(slowest.progress!, now));
+  }
+  return view;
+}
+
+/** How long ago a finished turn stays worth a line on the card. */
+const LAST_TURN_SHOWN_MS = 6 * 60 * 60_000;
+
+/** How the last long turn ended, until the next prompt: "Done in 9m 41s", "Stopped at 43% after 9m 41s". */
+export function lastTurnOf(s: AdmiralSession | undefined, now = Date.now()): { text: string; stopped: boolean } | undefined {
+  const t = s?.lastTurn;
+  if (!s || !t || s.turn || s.status !== "idle" || now - t.endedAt > LAST_TURN_SHOWN_MS) return undefined;
+  const took = formatElapsed(t.endedAt - t.startedAt);
+  if (t.percent === undefined || t.percent >= 100) return { text: `Done in ${took}`, stopped: false };
+  return { text: `Stopped at ${t.percent}% after ${took}${t.step ? ` · ${t.step}` : ""}`, stopped: true };
 }
 
 /** One line for the menu bar and tooltips: "43% · ≈ 4 min", "3/7 · 2m 14s", "2m 14s". */
 export function progressLabel(v: ProgressView) {
   const head = v.reported ? `${Math.round(v.percent!)}%` : v.steps ? `${v.steps.done}/${v.steps.total}` : undefined;
-  const tail = v.eta && v.eta !== "estimating…" ? v.eta : v.elapsed;
+  const tail = v.paused ? "needs you" : v.eta && v.eta !== "estimating…" ? v.eta : v.elapsed;
   return head ? `${head} · ${tail}` : tail;
 }

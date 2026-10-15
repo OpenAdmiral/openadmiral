@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimate, formatElapsed, progressLabel, progressOf, type Report } from "./progress";
+import { estimate, formatElapsed, lastTurnOf, progressLabel, progressOf, type Report } from "./progress";
 import type { AdmiralSession } from "./types";
 
 const T0 = 1_800_000_000_000;
@@ -83,5 +83,54 @@ describe("progressOf", () => {
   it("forgets a finished task list", () => {
     const tasks = [{ id: "1", subject: "Read", status: "completed" as const }, { id: "2", subject: "Edit", status: "completed" as const }];
     expect(progressOf(s({ turn: turn(30), tasks }), T0)).toEqual({ elapsed: "30s" });
+  });
+});
+
+describe("while it waits for you", () => {
+  it("keeps the clock and the share, and pauses the ETA", () => {
+    const turn = { startedAt: T0 - 300_000, prompt: "p", progress: [r(-250, 20), r(-200, 35), r(-150, 50)] };
+    const v = progressOf(s({ status: "waiting", turn }), T0)!;
+    expect(v).toMatchObject({ elapsed: "5m 00s", percent: 50, paused: true });
+    expect(v.eta).toBeUndefined();
+    expect(progressLabel(v)).toBe("50% · needs you");
+  });
+});
+
+describe("subagents working on after the turn", () => {
+  const agent = (o: object) => ({ id: "x", status: "running" as const, startedAt: T0 - 120_000, ...o });
+
+  it("shows how long they have run and what they do", () => {
+    const v = progressOf(s({ status: "idle", subagents: [agent({ description: "Market scan" }), { id: "y", status: "done" as const, startedAt: T0 - 9e5 }] }), T0)!;
+    expect(v).toEqual({ elapsed: "2m 00s", agents: 1, step: "Market scan" });
+  });
+
+  it("follows the slowest one that reports", () => {
+    const v = progressOf(
+      s({ status: "idle", subagents: [agent({ progress: [r(-60, 70, "Writing")] }), agent({ id: "y", progress: [r(-30, 40, "Reading the docs")] })] }),
+      T0,
+    )!;
+    expect(v).toMatchObject({ agents: 2, percent: 40, reported: true, step: "Reading the docs" });
+  });
+
+  it("stays quiet once they are done", () => {
+    expect(progressOf(s({ status: "idle", subagents: [{ id: "y", status: "done", startedAt: T0 - 9e5 }] }), T0)).toBeUndefined();
+  });
+});
+
+describe("lastTurnOf", () => {
+  const ended = (o: object) => s({ status: "idle", lastTurn: { startedAt: T0 - 600_000, endedAt: T0 - 19_000, ...o } });
+
+  it("says it finished, and how long it took", () => {
+    expect(lastTurnOf(ended({ percent: 100 }), T0)).toEqual({ text: "Done in 9m 41s", stopped: false });
+    expect(lastTurnOf(ended({}), T0)).toEqual({ text: "Done in 9m 41s", stopped: false });
+  });
+
+  it("says where it stopped short", () => {
+    expect(lastTurnOf(ended({ percent: 43, step: "Updating the tests" }), T0)).toEqual({ text: "Stopped at 43% after 9m 41s · Updating the tests", stopped: true });
+  });
+
+  it("goes once a new turn starts, or after a few hours", () => {
+    expect(lastTurnOf({ ...ended({ percent: 100 }), status: "working", turn: { startedAt: T0, prompt: "p" } }, T0)).toBeUndefined();
+    expect(lastTurnOf(ended({ percent: 100 }), T0 + 7 * 3_600_000)).toBeUndefined();
   });
 });

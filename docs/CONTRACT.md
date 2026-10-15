@@ -36,13 +36,14 @@ type AdmiralSession = {
   waiting?: { reason: 'permission' | 'question' | 'idle_prompt'; detail?: string; since: number }
   turn?: { startedAt: number; prompt: string;  // present while status === 'working'
     progress?: { percent: number; step?: string; at: number }[] }  // the model's reports this turn, oldest first (≤ 40)
+  lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string }  // the last turn that ran ≥ 30 s or reported; cleared at the next prompt
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string           // first ~200 chars of the last assistant text
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }  // usablePercent: share of the window left before auto-compaction (100% = compacts), as the GSD statusline shows
   rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]  // five_hour, seven_day…
   costUsd?: number
   tasks?: { id: string; subject: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }[]
-  subagents?: { id: string; type?: string; description?: string; status: 'running' | 'done' | 'failed'; startedAt: number }[]
+  subagents?: { id: string; type?: string; description?: string; status: 'running' | 'done' | 'failed'; startedAt: number; progress?: { percent: number; step?: string; at: number }[] }[]
   activity?: { at: number; kind: 'prompt' | 'tool' | 'reply' | 'sent' | 'received' | 'permission'; text: string }[]  // newest last, max 40
   remote?: { enabled?: boolean; clients: number }  // Remote Control: switched on (from /config) and remote clients attached (phone, claude.ai)
   commands?: string[]          // which of model/usage/cost/status/compact/context/clear/remote-control/rename this build has
@@ -76,7 +77,11 @@ closed it resumes like any ended session.
 always loaded) with a system-prompt section asking for reports during work longer than
 about 30 s, the percent weighted by effort (writing and testing count most). Once a turn
 has run 30 s with no report, or its last one is over 45 s old, the mod adds a reminder
-beside the next tool result (at most every 45 s). Only the main conversation reports.
+beside the next tool result (at most every 45 s). A subagent's reports go to its own
+`subagents[i].progress` (≤ 20): once the main turn is over, cards and the menu bar show the
+subagents still running, their time and the slowest one's report. While the session waits
+for the person the ETA pauses. A turn of 2 min or more notifies when it ends ("done", or
+"stopped at 43%" from `lastTurn`).
 `OPENADMIRAL_PROGRESS=0` in a session's environment turns it off. The app draws
 the bar and measures the ETA from the pace (`app/src/lib/progress.ts`); without reports a
 task list (`tasks`) gives done/total. The model never estimates time.
