@@ -94,7 +94,8 @@ task list (`tasks`) gives done/total. The model never estimates time.
 last "118/240" or "45%" gives the bar and, from the pace, the time left; no output for
 5× its usual gap (2 min at least) shows it stalled (`app/src/lib/jobs.ts`). The mod fills
 `jobs` from the Bash result ("Output is being written to: …") and the
-`<task-notification>` that ends it. And the `turn_duration` rows of the project's
+`<task-notification>` that ends it; the system-prompt section asks Claude to run commands
+longer than about two minutes that way. And the `turn_duration` rows of the project's
 transcripts (last 90 days) give how long its turns usually run on from the current
 elapsed time: "usually ≈ 4 min left" before any report, "longer than usual" past nearly all.
 
