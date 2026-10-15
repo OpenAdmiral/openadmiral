@@ -16,6 +16,8 @@ export type AdmiralSession = {
   status: SessionStatus;
   waiting?: { reason: "permission" | "question" | "idle_prompt"; detail?: string; since: number };
   turn?: { startedAt: number; prompt: string; progress?: { percent: number; step?: string; at: number }[] };
+  /** Shell commands run in the background; the app measures their progress from their output. */
+  jobs?: { id: string; label?: string; output?: string; startedAt: number; endedAt?: number; status: "running" | "completed" | "failed" | "killed"; exitCode?: number }[];
   /** The last turn that ran long or reported progress, until the next prompt. */
   lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string };
   lastTool?: { name: string; summary: string; at: number };

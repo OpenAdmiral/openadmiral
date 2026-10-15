@@ -2,6 +2,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { ICON, parseAnswer, slugOf } from './card'
 import { classifyQueueText, isDone, isDueByTime, isTimed, nextDue, queueCommandsFrom, runNowPending, type QueueCommand, type QueueCondition, type QueueItemCore, type SentEntry } from './queue'
 import { hostOf, type Host } from './host'
+import { backgroundStart, taskNotification, upsertJob, type Job } from './jobs'
 
 const OPENS_IN_APP = new Set(['html', 'image', 'pdf'])
 
@@ -31,6 +32,8 @@ type AdmiralSession = {
   turn?: { startedAt: number; prompt: string; progress?: ProgressReport[] }
   // The last turn that ran long or reported progress: done, or stopped short of 100.
   lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string }
+  // Shell commands run in the background: the app measures their progress from their output.
+  jobs?: Job[]
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }
@@ -329,6 +332,29 @@ async function serveRequest($: EngineInterface) {
   await $.command.run({ command: 'exit' }).catch(() => {
     exiting = false
   })
+}
+
+// Background commands: where their output goes (from the Bash result) and how they end
+// (from the <task-notification> the session receives).
+async function noteJobs($: EngineInterface, message: { type?: string; content?: unknown }) {
+  if (!me || message.type !== 'user') return
+  const texts = typeof message.content === 'string' ? [message.content]
+    : Array.isArray(message.content) ? message.content.flatMap(b => {
+        const block = b as { type?: string; text?: unknown; content?: unknown }
+        const c = block.type === 'tool_result' ? block.content : block.text
+        return typeof c === 'string' ? [c] : Array.isArray(c) ? c.map(x => String((x as { text?: unknown }).text ?? '')) : []
+      })
+    : []
+  let jobs = me.jobs ?? []
+  const now = await $.clock.now()
+  for (const text of texts) {
+    const started = backgroundStart(text)
+    if (started) jobs = upsertJob(jobs, started, now)
+    const ended = taskNotification(text)
+    // Only jobs this session started: a notification about a subagent is not a shell job.
+    if (ended && jobs.some(j => j.id === ended.id)) jobs = upsertJob(jobs, { ...ended, endedAt: ended.status === 'running' ? undefined : now }, now)
+  }
+  if (jobs !== (me.jobs ?? [])) touch($, { jobs })
 }
 
 async function readJson<T>($: EngineInterface, path: string): Promise<T | undefined> {
@@ -848,6 +874,10 @@ export const register: Register = on => {
         }
         touch($, { tasks: [...todoIds.values()] })
       }
+    } else if (tool === 'Bash' && args.run_in_background === true) {
+      const id = (ran.result as { backgroundTaskId?: string } | undefined)?.backgroundTaskId
+      const label = clip(String(args.description || args.command || ''), 80) || undefined
+      if (id && me) touch($, { jobs: upsertJob(me.jobs ?? [], { id, label }, await $.clock.now()) })
     } else if (tool === 'Agent') {
       // The engine's list has it now, with its real id and status.
       await refreshSubagents($)
@@ -1182,6 +1212,7 @@ export const register: Register = on => {
   // Turning it on arrives as a notice of its own (bridge_status: "/remote-control is
   // active · …"), not as the command's answer: watch the rows the session keeps.
   on('session.append', async ($, e, next) => {
+    await noteJobs($, e.message as { type?: string; content?: unknown }).catch(() => undefined)
     // Rides along with a tool result, the way Claude Code adds its own reminders.
     const content = (e.message as { type?: string; content?: unknown }).content
     if (progressOn && e.message.type === 'user' && Array.isArray(content) && content.some(b => (b as { type?: string })?.type === 'tool_result')) {
@@ -1208,6 +1239,9 @@ export const register: Register = on => {
       me.status = 'ended'
       me.turn = undefined
       me.waiting = undefined
+      // Its background commands go with it; no notification will say so.
+      const now = await $.clock.now()
+      if (me.jobs?.some(j => j.status === 'running')) me.jobs = me.jobs.map(j => (j.status === 'running' ? { ...j, status: 'killed' as const, endedAt: now } : j))
       await flush($)
     }
     return next(e)

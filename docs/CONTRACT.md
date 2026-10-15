@@ -37,6 +37,8 @@ type AdmiralSession = {
   turn?: { startedAt: number; prompt: string;  // present while status === 'working'
     progress?: { percent: number; step?: string; at: number }[] }  // the model's reports this turn, oldest first (≤ 40)
   lastTurn?: { startedAt: number; endedAt: number; percent?: number; step?: string }  // the last turn that ran ≥ 30 s or reported; cleared at the next prompt
+  jobs?: { id: string; label?: string; output?: string; startedAt: number; endedAt?: number;  // Bash run_in_background (≤ 10)
+    status: 'running' | 'completed' | 'failed' | 'killed'; exitCode?: number }[]
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string           // first ~200 chars of the last assistant text
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }  // usablePercent: share of the window left before auto-compaction (100% = compacts), as the GSD statusline shows
@@ -85,6 +87,16 @@ for the person the ETA pauses. A turn of 2 min or more notifies when it ends ("d
 `OPENADMIRAL_PROGRESS=0` in a session's environment turns it off. The app draws
 the bar and measures the ETA from the pace (`app/src/lib/progress.ts`); without reports a
 task list (`tasks`) gives done/total. The model never estimates time.
+
+**Measured progress (app).** Two signals need no report from Claude
+(`src-tauri/src/measure.rs`). A background command's `output` file (only Claude Code's
+`…/tasks/*.output` under the temp folder can be read) is polled every 2 s while it runs: its
+last "118/240" or "45%" gives the bar and, from the pace, the time left; no output for
+5× its usual gap (2 min at least) shows it stalled (`app/src/lib/jobs.ts`). The mod fills
+`jobs` from the Bash result ("Output is being written to: …") and the
+`<task-notification>` that ends it. And the `turn_duration` rows of the project's
+transcripts (last 90 days) give how long its turns usually run on from the current
+elapsed time: "usually ≈ 4 min left" before any report, "longer than usual" past nearly all.
 
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).

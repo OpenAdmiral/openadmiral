@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimate, formatElapsed, lastTurnOf, progressLabel, progressOf, type Report } from "./progress";
+import { estimate, formatElapsed, lastTurnOf, progressLabel, progressOf, usualEta, type Report } from "./progress";
 import type { AdmiralSession } from "./types";
 
 const T0 = 1_800_000_000_000;
@@ -132,5 +132,30 @@ describe("lastTurnOf", () => {
   it("goes once a new turn starts, or after a few hours", () => {
     expect(lastTurnOf({ ...ended({ percent: 100 }), status: "working", turn: { startedAt: T0, prompt: "p" } }, T0)).toBeUndefined();
     expect(lastTurnOf(ended({ percent: 100 }), T0 + 7 * 3_600_000)).toBeUndefined();
+  });
+});
+
+describe("usualEta", () => {
+  const MIN = 60_000;
+  // This project's turns: many short ones, some of 5–8 minutes.
+  const history = [...Array(20).fill(0.5 * MIN), 5 * MIN, 6 * MIN, 6 * MIN, 7 * MIN, 8 * MIN, 8 * MIN];
+
+  it("needs some history", () => {
+    expect(usualEta([MIN, 2 * MIN], 30_000)).toEqual({});
+  });
+
+  it("looks only at turns that ran at least this long", () => {
+    // Past 1 min, the turns left are 5–8 min long: about 6 min more.
+    expect(usualEta(history, MIN).eta).toMatch(/^(≈ \d+ min|\d+–\d+ min)$/);
+  });
+
+  it("says when this turn is longer than nearly all of them", () => {
+    expect(usualEta([...Array(30).fill(MIN), 9 * MIN], 10 * MIN)).toEqual({ long: true });
+  });
+
+  it("fills in before Claude reports, marked as usual", () => {
+    const v = progressOf(s({ cwd: "/x", turn: { startedAt: T0 - MIN, prompt: "p" } }), T0, history)!;
+    expect(v.usual).toBe(true);
+    expect(progressLabel(v)).not.toContain("estimating");
   });
 });

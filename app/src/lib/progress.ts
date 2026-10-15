@@ -34,7 +34,26 @@ export type ProgressView = {
   paused?: boolean;
   /** The main turn is over and subagents work on: how many. */
   agents?: number;
+  /** The ETA comes from how long this project's turns usually take, not from reports. */
+  usual?: boolean;
+  /** Already longer than nearly all of this project's turns. */
+  long?: boolean;
 };
+
+const quantile = (sorted: number[], q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+
+/**
+ * Time left from this project's past turns (their durations, in ms), given how long this
+ * one has run: among the turns that lasted at least this long, how much longer they went.
+ */
+export function usualEta(history: number[] | undefined, elapsedMs: number): { eta?: string; long?: boolean } {
+  if (!history || history.length < 10) return {};
+  const longer = history.filter((d) => d > elapsedMs).sort((a, b) => a - b);
+  if (longer.length < 5) return longer.length / history.length < 0.05 ? { long: true } : {};
+  const [lo, mid, hi] = [0.25, 0.5, 0.75].map((q) => (quantile(longer, q) - elapsedMs) / 60_000);
+  if (hi < 1) return { eta: "< 1 min" };
+  return { eta: hi / Math.max(lo, 0.5) > 2.5 ? range(lo, hi) : minutes(mid) };
+}
 
 export function formatElapsed(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -61,14 +80,14 @@ function range(lo: number, hi: number) {
 const pace = (a: Report, b: Report) => (b.percent - a.percent) / ((b.at - a.at) / 60_000);
 
 /** What is left, from the reports so far: an ETA, or why there is none yet. */
-export function estimate(reports: Report[], now: number): Pick<ProgressView, "eta" | "stale"> {
+export function estimate(reports: Report[], now: number, { paceFrom = PACE_FROM, finishingFrom = FINISHING_FROM } = {}): Pick<ProgressView, "eta" | "stale"> {
   const last = reports.at(-1);
   if (!last) return {};
   const gaps = reports.slice(1).map((r, i) => r.at - reports[i].at).sort((a, b) => a - b);
   const usualGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
   if (now - last.at > Math.max(STALE_MIN_MS, 3 * usualGap)) return { stale: `last update ${formatElapsed(now - last.at).split(" ")[0]} ago` };
-  if (last.percent >= FINISHING_FROM) return { eta: "finishing up" };
-  const later = reports.filter((r) => r.percent >= PACE_FROM);
+  if (last.percent >= finishingFrom) return { eta: "finishing up" };
+  const later = reports.filter((r) => r.percent >= paceFrom);
   if (later.length < 2 || later.at(-1)!.at - later[0].at < PACE_MIN_SPAN_MS) return { eta: "estimating…" };
   const overall = pace(later[0], later.at(-1)!);
   const recentFrom = later[Math.max(0, later.length - 3)];
@@ -83,7 +102,7 @@ export function estimate(reports: Report[], now: number): Pick<ProgressView, "et
 }
 
 /** The progress line for a session's running turn, or nothing for a quick or idle one. */
-export function progressOf(s: AdmiralSession | undefined, now = Date.now()): ProgressView | undefined {
+export function progressOf(s: AdmiralSession | undefined, now = Date.now(), history?: number[]): ProgressView | undefined {
   const turn = s?.turn;
   if (!s || s.status === "ended") return undefined;
   if (!turn || (s.status !== "working" && s.status !== "waiting")) return agentsOf(s, now);
@@ -106,6 +125,15 @@ export function progressOf(s: AdmiralSession | undefined, now = Date.now()): Pro
     Object.assign(view, estimate(reports, now));
   } else if (view.steps) {
     view.percent = (done / view.steps.total) * 100;
+  }
+  if (!view.eta && !view.stale && !view.reported) {
+    // Nothing measured yet: how long this project's turns usually run on from here.
+    const u = usualEta(history, now - turn.startedAt);
+    if (u.eta) Object.assign(view, { eta: u.eta, usual: true });
+    if (u.long) view.long = true;
+  } else if (view.eta === "estimating…") {
+    const u = usualEta(history, now - turn.startedAt);
+    if (u.eta) Object.assign(view, { eta: u.eta, usual: true });
   }
   if (s.status === "waiting") {
     // Its time waiting for the person says nothing about the work left.

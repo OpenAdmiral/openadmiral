@@ -40,7 +40,7 @@ import { matchShortcut } from "@/lib/shortcuts";
 import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript";
 import { Chip, DelegationPill, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
-import { ProgressLine } from "./Progress";
+import { hasNow, NowPanel } from "./Progress";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
 import { inExtension, runsElsewhere, whereLabel } from "@/lib/host";
@@ -292,7 +292,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
             onOrder={layout.setBlockOrder}
             onReset={layout.resetLayout}
             blocks={[
-              { id: "tasks", title: "Tasks", aside: tasks.length ? `${tasks.filter((t) => t.status === "completed").length}/${tasks.length}` : undefined, body: <Tasks tasks={tasks} /> },
+              { id: "tasks", title: "Tasks", aside: tasks.length ? `${tasks.filter((t) => t.status === "completed").length}/${tasks.length}` : undefined, body: <Tasks tasks={tasks} session={s} /> },
               {
                 id: "upnext",
                 title: "Up next",
@@ -457,7 +457,6 @@ function Header({
           )}
         />
       </div>
-      <ProgressLine session={s} large className="pl-[30px]" />
       <div data-tauri-drag-region className="flex flex-wrap items-center gap-1.5">
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
@@ -600,12 +599,20 @@ function Header({
   );
 }
 
-function Tasks({ tasks }: { tasks: TranscriptTask[] }) {
+function Tasks({ tasks, session }: { tasks: TranscriptTask[]; session: AdmiralSession | undefined }) {
   const done = tasks.filter((t) => t.status === "completed").length;
+  const now = hasNow(session);
   return (
     <div className="px-3 pb-3">
+      {/* The main work first; the sub-tasks Claude listed apart, below. */}
+      {now && (
+        <div className="mb-3 border-b border-line pb-3">
+          <NowPanel session={session} />
+        </div>
+      )}
+      {now && <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">Sub-tasks</div>}
       {tasks.length === 0 ? (
-        <p className="px-1 text-xs text-ink-3">No task list in this session.</p>
+        <p className="px-1 text-xs text-ink-3">No sub-tasks in this session.</p>
       ) : (
         <>
           <Meter value={(done / tasks.length) * 100} tone="brand" className="mx-1 mb-2.5" />
@@ -805,7 +812,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
       {s?.turn && agent.status === "working" && (
         <Block label={`Working · ${ago(s.turn.startedAt, now)}`}>
           <p className="selectable text-sm text-ink">{s.turn.prompt}</p>
-          <ProgressLine session={s} large className="mt-3" />
+          <NowPanel session={s} />
           {s.lastTool && (
             <p className="mt-2 font-mono text-xs text-ink-3">
               {s.lastTool.name} · {s.lastTool.summary}

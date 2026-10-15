@@ -112,6 +112,11 @@ def sessions(now):
             a["startedAt"] = now + a["startedAt"] * MIN
         if status == "working":
             s["turn"] = {"startedAt": now - (3 + n) * MIN, "prompt": text}
+            if n == 4:
+                # A background command whose own output says how far along it is.
+                log_file = "/tmp/openadmiral-demo/tasks/demo-tests.output"
+                write(log_file, "".join(f"test {i}/240 ... ok\n" for i in range(1, 119)))
+                s["jobs"] = [{"id": "demo-tests", "label": "Run the integration tests", "output": log_file, "startedAt": now - 4 * MIN, "status": "running"}]
             if n % 2:
                 # Claude's progress reports at an even pace: the app shows the percent and an ETA.
                 span = (3 + n) * MIN

@@ -3,6 +3,7 @@ mod discover;
 mod handoff;
 mod jobs;
 mod lifecycle;
+mod measure;
 mod migrate;
 mod netwatch;
 mod plugin_files;
@@ -995,11 +996,14 @@ pub fn run() {
         .manage(updater::Pending::default())
         .manage(pty::Ptys::default())
         .manage(handoff::Handoffs::default())
+        .manage(measure::History::default())
         .manage(transcript::Transcripts::default())
         .manage(underway::Underway::default())
         .manage(tray::Tray::default())
         .invoke_handler(tauri::generate_handler![
             load_snapshot,
+            measure::job_tails,
+            measure::turn_history,
             claude_available,
             install_plugin,
             open_vscode_plugin_install,
