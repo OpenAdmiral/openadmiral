@@ -42,8 +42,9 @@ pub fn read_links(sessions_dir: &Path) -> Vec<(String, String)> {
 /// Every id this session has had, newest first: `[session_id, …, first id]`.
 pub fn chain(session_id: &str, links: &[(String, String)]) -> Vec<String> {
     let mut out = vec![session_id.to_string()];
-    // Bounded: a link cycle (never expected) cannot hang the caller.
-    for _ in 0..20 {
+    // Ends by itself: each step adds an id not yet in `out`, so a link cycle cannot hang it.
+    // No step limit: a job cleared after every task for weeks has a long chain.
+    loop {
         let cur = out.last().unwrap();
         match links.iter().find(|(old, new)| new == cur && !out.contains(old)) {
             Some((old, _)) => out.push(old.clone()),
@@ -184,5 +185,17 @@ mod tests {
         ]);
         let copy = find(&rows, &["0076ba14-c88a-4a20-b438-74d475691bbb".to_string()]).unwrap();
         assert_eq!(copy.id, "0076ba14");
+    }
+
+    #[test]
+    fn a_long_lived_job_cleared_many_times_still_reaches_its_origin() {
+        // A job kept for weeks: /clear after every task, 40 times.
+        let ids: Vec<String> = (0..=40).map(|n| format!("{n:08x}-0000-4000-8000-000000000000")).collect();
+        let links: Vec<(String, String)> = ids.windows(2).map(|w| (w[0].clone(), w[1].clone())).collect();
+        let got = chain(ids.last().unwrap(), &links);
+        assert_eq!(got.len(), 41);
+        assert_eq!(got.last(), ids.first());
+        let rows = json!([{ "id": "00000000", "kind": "background", "sessionId": ids[0], "state": "done" }]);
+        assert_eq!(find(&rows, &got).map(|j| j.id), Some("00000000".into()));
     }
 }
