@@ -33,6 +33,7 @@ import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
 import { KIND, Kbd, Meter } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { ProgressLine } from "./Progress";
 import { runsElsewhere, whereLabel } from "@/lib/host";
 import { lastActivity, type SortMode } from "@/lib/recent";
 
@@ -664,6 +665,7 @@ function AgentRow({
           </span>
         )}
       </span>
+      <ProgressLine session={a.session} />
     </button>
   );
 }

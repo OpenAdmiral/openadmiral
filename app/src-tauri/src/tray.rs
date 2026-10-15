@@ -109,7 +109,18 @@ pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<
                 let turn = s.get("turn");
                 let since = turn.and_then(|t| num(t, "startedAt")).map(|t| span(now - t)).unwrap_or_default();
                 let on = turn.and_then(|t| t.get("prompt")).and_then(Value::as_str).map(|p| format!(" · {}", clip(p, 26))).unwrap_or_default();
-                r.working.push(Row { session_id: id, name, detail: format!("{since}{on}") });
+                // Claude's last progress report this turn (docs/CONTRACT.md): its percent and step.
+                // The ETA needs the measured pace, which only the window draws.
+                let started = turn.and_then(|t| num(t, "startedAt")).unwrap_or(0);
+                let report = turn.and_then(|t| t.get("progress")).and_then(Value::as_array).and_then(|l| l.last()).filter(|p| num(p, "at").is_some_and(|at| at >= started));
+                let detail = match report.and_then(|p| Some((num(p, "percent")?, p))) {
+                    Some((pct, p)) => {
+                        let step = p.get("step").and_then(Value::as_str).map(|s| format!(" · {}", clip(s, 26))).unwrap_or(on);
+                        format!("{pct}% · {since}{step}")
+                    }
+                    None => format!("{since}{on}"),
+                };
+                r.working.push(Row { session_id: id, name, detail });
             }
             "idle" => r.idle += 1,
             _ => {}
@@ -416,6 +427,17 @@ mod tests {
         assert_eq!(r.idle, 1);
         assert!(r.next.as_deref().unwrap().starts_with("Next: Run the e2e suite · docs at "));
         assert_eq!(r.delegations, (1, 1));
+    }
+
+    #[test]
+    fn a_working_row_shows_this_turns_progress() {
+        let now = 1_800_000_000_000_i64;
+        let turn = |progress: Value| json!({ "sessionId": "a", "project": "app", "status": "working", "updatedAt": now, "turn": { "startedAt": now - 5 * 60_000, "prompt": "Ship it", "progress": progress } });
+        let detail = |s: Value| report(&[s], &json!([]), &[], &[], now).working[0].detail.clone();
+        assert_eq!(detail(turn(json!([{ "percent": 43, "step": "Editing lib.rs", "at": now - 60_000 }]))), "43% · 5m · Editing lib.rs");
+        assert_eq!(detail(turn(json!([{ "percent": 43, "at": now - 60_000 }]))), "43% · 5m · Ship it");
+        // A report from before this turn says nothing about it.
+        assert_eq!(detail(turn(json!([{ "percent": 90, "at": now - 9 * 60_000 }]))), "5m · Ship it");
     }
 
     #[test]

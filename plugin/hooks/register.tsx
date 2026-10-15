@@ -12,6 +12,7 @@ type DelegationStatus = 'draft' | 'sent' | 'accepted' | 'in_progress' | 'blocked
 type ActivityKind = 'prompt' | 'tool' | 'reply' | 'sent' | 'received' | 'permission'
 type TaskStatus = 'pending' | 'in_progress' | 'completed'
 
+type ProgressReport = { percent: number; step?: string; at: number }
 type Task = { id: string; subject: string; status: TaskStatus; activeForm?: string }
 type Subagent = { id: string; type?: string; description?: string; status: 'running' | 'done' | 'failed'; startedAt: number }
 
@@ -27,7 +28,7 @@ type AdmiralSession = {
   model?: string
   status: Status
   waiting?: { reason: 'permission' | 'question' | 'idle_prompt'; detail?: string; since: number }
-  turn?: { startedAt: number; prompt: string }
+  turn?: { startedAt: number; prompt: string; progress?: ProgressReport[] }
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }
@@ -415,6 +416,12 @@ const slug = (title: string) =>
 const SHOW_GUIDANCE = `# Showing things to the user (OpenAdmiral)
 The user watches this session in the OpenAdmiral app, which can display artifacts beside the terminal. Whenever you produce something meant to be looked at rather than read in the chat — a report, plan, comparison, diagram, chart, image, mockup, rendered page, or a long document — call the openadmiral \`show\` tool with it instead of (or in addition to) describing it, and do not open it with \`open\`/Preview. Pass a file you wrote (\`path\`) or inline \`content\`. Re-show with the same \`title\` to publish a new version (say what changed in \`note\`). HTML must be self-contained (inline CSS/JS/images; CDN scripts are fine). Keep the chat reply to a short summary.`
 
+// Percent weighted by effort, and a report before long output: a trial showed counting phases
+// runs far ahead of the real work (docs/CONTRACT.md, turn.progress).
+const PROGRESS_GUIDANCE = `# Progress of long work (OpenAdmiral)
+The user follows this session in OpenAdmiral, which shows a progress bar and how long is left for long turns, measured from your reports. Whenever a request takes more than about 30 seconds of work (several tool calls, a change across files, an investigation, a batch of items), report with the openadmiral \`progress\` tool: once you know the scope, then at each milestone, and 100 right before your final answer.
+\`percent\` is the share of the total time the work will take, not the share of phases done. Weigh each part by how long it takes: reading and planning are usually quick, while writing a long file or a long answer, editing many files, and running builds or tests are slow and deserve most of the share. So after reading the code you are often only at 15–30 %, not halfway. Right before you start writing a long file or your final long answer, report (that is the longest stretch with no tool calls), and lower the percent if the scope grows. When unsure, report lower. \`step\` says what you are doing now in a few words, in the user's language. Never estimate time: OpenAdmiral measures the pace. Skip it for quick answers, and don't mention it in your reply.`
+
 // A plugin tool answers the model with text; `result` must be a string too.
 const answer = (text: string) => ({ result: text, text })
 
@@ -612,6 +619,24 @@ const DELEGATE_TOOL = 'delegate'
 const UPDATE_TOOL = 'delegation_update'
 const STATUS_TOOL = 'status'
 const SHOW_TOOL = 'show'
+const PROGRESS_TOOL = 'progress'
+let progressOn = false
+let lastNudgeAt = 0
+// A long turn with no recent report gets a reminder beside the next tool result.
+const NUDGE_AFTER_MS = 30_000
+const NUDGE_GAP_MS = 45_000
+const NUDGE_TAG = 'OpenAdmiral progress'
+
+function progressNudgeText(now: number): string | undefined {
+  const turn = me?.turn
+  if (!progressOn || !turn || now - turn.startedAt < NUDGE_AFTER_MS || now - lastNudgeAt < NUDGE_GAP_MS) return undefined
+  const last = turn.progress?.at(-1)
+  if (last && (last.percent >= 100 || now - last.at < NUDGE_GAP_MS)) return undefined
+  const secs = Math.round((now - turn.startedAt) / 1000)
+  return last
+    ? `<system-reminder>${NUDGE_TAG}: this turn has run ${secs} s and your last progress report (${last.percent}%) is ${Math.round((now - last.at) / 1000)} s old. If the work goes on, call mcp__openadmiral__progress with the updated percent and step. Don't mention this reminder.</system-reminder>`
+    : `<system-reminder>${NUDGE_TAG}: this turn has run ${secs} s with no progress report. If the work goes on, call mcp__openadmiral__progress now with percent and step, and keep reporting at each milestone. Don't mention this reminder.</system-reminder>`
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -695,6 +720,25 @@ export const register: Register = on => {
           note: { type: 'string', description: 'What this version shows or changed.' },
         },
         required: ['title'],
+      },
+    })
+
+    // OPENADMIRAL_PROGRESS=0 turns progress reports off for a session.
+    progressOn = (await $.env.get('OPENADMIRAL_PROGRESS').catch(() => undefined)) !== '0'
+    lastNudgeAt = 0
+    if (progressOn) await $.tool.register({
+      name: PROGRESS_TOOL,
+      isDeferred: false,
+      description:
+        'Report how far along a long piece of work is, so the user sees a progress bar and an ETA in OpenAdmiral. ' +
+        'Use it whenever the work takes more than about 30 seconds: once the scope is clear, at each milestone, and with 100 just before the final answer.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          percent: { type: 'number', minimum: 0, maximum: 100, description: 'Share of the work done, in concrete units (files, checks, items), 0–100.' },
+          step: { type: 'string', description: 'What you are doing now, in a few words.' },
+        },
+        required: ['percent'],
       },
     })
 
@@ -1006,9 +1050,26 @@ export const register: Register = on => {
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    if (!e.tools.includes(`mcp__openadmiral__${SHOW_TOOL}`)) return composed
-    return { sections: [...composed.sections, { id: 'openadmiral:show', text: SHOW_GUIDANCE, scope: 'session' as const }] }
+    const sections = [...composed.sections]
+    if (e.tools.includes(`mcp__openadmiral__${SHOW_TOOL}`)) sections.push({ id: 'openadmiral:show', text: SHOW_GUIDANCE, scope: 'session' as const })
+    if (e.tools.includes(`mcp__openadmiral__${PROGRESS_TOOL}`)) sections.push({ id: 'openadmiral:progress', text: PROGRESS_GUIDANCE, scope: 'session' as const })
+    return sections.length === composed.sections.length ? composed : { ...composed, sections }
   }).catch(($, e, next) => next(e))
+
+  // Kept per turn: the app measures the pace from these reports (docs/CONTRACT.md).
+  on('tool.call', { tool: `mcp__openadmiral__${PROGRESS_TOOL}` }, async ($, e) => {
+    const args = e as unknown as { percent?: unknown; step?: unknown }
+    const percent = Number(args.percent)
+    if (!Number.isFinite(percent)) return answer('`percent` must be a number from 0 to 100.')
+    // The bar describes the whole task: a subagent's share is the main conversation's to report.
+    if ((e as { agentId?: string }).agentId !== undefined) return answer('Only the main conversation reports progress; no need to call this here.')
+    if (me?.turn) {
+      const report: ProgressReport = { percent: Math.max(0, Math.min(100, Math.round(percent))), at: await $.clock.now() }
+      if (typeof args.step === 'string' && args.step.trim()) report.step = clip(args.step.trim(), 80)
+      touch($, { turn: { ...me.turn, progress: [...(me.turn.progress ?? []), report].slice(-40) } })
+    }
+    return answer('ok')
+  })
 
   on('tool.call', { tool: 'mcp__openadmiral__show' }, async ($, e) => {
     if (!me) return { deny: 'OpenAdmiral is not ready yet' }
@@ -1102,6 +1163,16 @@ export const register: Register = on => {
   // Turning it on arrives as a notice of its own (bridge_status: "/remote-control is
   // active · …"), not as the command's answer: watch the rows the session keeps.
   on('session.append', async ($, e, next) => {
+    // Rides along with a tool result, the way Claude Code adds its own reminders.
+    const content = (e.message as { type?: string; content?: unknown }).content
+    if (progressOn && e.message.type === 'user' && Array.isArray(content) && content.some(b => (b as { type?: string })?.type === 'tool_result')) {
+      const now = await $.clock.now()
+      const text = progressNudgeText(now)
+      if (text) {
+        lastNudgeAt = now
+        return next({ ...e, message: { ...e.message, content: [...content, { type: 'text', text }] } } as typeof e)
+      }
+    }
     const stored = await next(e)
     if (e.message.type === 'system' && e.message.name === 'bridge_status') {
       const text = JSON.stringify(e.message.content ?? '')

@@ -15,7 +15,7 @@ export type AdmiralSession = {
   model?: string;
   status: SessionStatus;
   waiting?: { reason: "permission" | "question" | "idle_prompt"; detail?: string; since: number };
-  turn?: { startedAt: number; prompt: string };
+  turn?: { startedAt: number; prompt: string; progress?: { percent: number; step?: string; at: number }[] };
   lastTool?: { name: string; summary: string; at: number };
   lastReply?: string;
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number };

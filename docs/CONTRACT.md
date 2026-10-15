@@ -34,7 +34,8 @@ type AdmiralSession = {
   model?: string
   status: 'starting' | 'idle' | 'working' | 'waiting' | 'ended'
   waiting?: { reason: 'permission' | 'question' | 'idle_prompt'; detail?: string; since: number }
-  turn?: { startedAt: number; prompt: string }  // present while status === 'working'
+  turn?: { startedAt: number; prompt: string;  // present while status === 'working'
+    progress?: { percent: number; step?: string; at: number }[] }  // the model's reports this turn, oldest first (≤ 40)
   lastTool?: { name: string; summary: string; at: number }
   lastReply?: string           // first ~200 chars of the last assistant text
   context?: { tokens?: number; window: number; percent?: number; usablePercent?: number }  // usablePercent: share of the window left before auto-compaction (100% = compacts), as the GSD statusline shows
@@ -70,6 +71,15 @@ its own marketplaces), which is what makes those sessions outdated.
 `~/.claude/sessions/<pid>.json`; `claude agents` lists only background jobs) the app
 refuses to start one and drops any left from older versions; once the tab or editor is
 closed it resumes like any ended session.
+
+**Progress (`turn.progress`).** The mod registers the `progress` tool (`{ percent, step? }`,
+always loaded) with a system-prompt section asking for reports during work longer than
+about 30 s, the percent weighted by effort (writing and testing count most). Once a turn
+has run 30 s with no report, or its last one is over 45 s old, the mod adds a reminder
+beside the next tool result (at most every 45 s). Only the main conversation reports.
+`OPENADMIRAL_PROGRESS=0` in a session's environment turns it off. The app draws
+the bar and measures the ETA from the pace (`app/src/lib/progress.ts`); without reports a
+task list (`tasks`) gives done/total. The model never estimates time.
 
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).

@@ -40,6 +40,7 @@ import { matchShortcut } from "@/lib/shortcuts";
 import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript";
 import { Chip, DelegationPill, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { ProgressLine } from "./Progress";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
 import { inExtension, runsElsewhere, whereLabel } from "@/lib/host";
@@ -456,6 +457,7 @@ function Header({
           )}
         />
       </div>
+      <ProgressLine session={s} large className="pl-[30px]" />
       <div data-tauri-drag-region className="flex flex-wrap items-center gap-1.5">
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
@@ -803,6 +805,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
       {s?.turn && agent.status === "working" && (
         <Block label={`Working · ${ago(s.turn.startedAt, now)}`}>
           <p className="selectable text-sm text-ink">{s.turn.prompt}</p>
+          <ProgressLine session={s} large className="mt-3" />
           {s.lastTool && (
             <p className="mt-2 font-mono text-xs text-ink-3">
               {s.lastTool.name} · {s.lastTool.summary}

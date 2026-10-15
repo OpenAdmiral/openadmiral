@@ -112,6 +112,11 @@ def sessions(now):
             a["startedAt"] = now + a["startedAt"] * MIN
         if status == "working":
             s["turn"] = {"startedAt": now - (3 + n) * MIN, "prompt": text}
+            if n % 2:
+                # Claude's progress reports at an even pace: the app shows the percent and an ETA.
+                span = (3 + n) * MIN
+                steps = ((0.05, 5, "Reading the code involved"), (0.3, 25, "Making the change"), (0.6, 45, "Updating the tests"), (0.9, 62, "Running the tests"))
+                s["turn"]["progress"] = [{"at": now - span + int(span * f), "percent": p, "step": st} for f, p, st in steps]
             s["activity"] = [
                 {"at": now - (3 + n) * MIN, "kind": "prompt", "text": text},
                 {"at": now - 2 * MIN, "kind": "tool", "text": "Read · package.json"},
