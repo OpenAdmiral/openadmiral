@@ -91,8 +91,8 @@ task list (`tasks`) gives done/total. The model never estimates time.
 **Measured progress (app).** Two signals need no report from Claude
 (`src-tauri/src/measure.rs`). A background command's `output` file (only Claude Code's
 `…/tasks/*.output` under the temp folder can be read) is polled every 2 s while it runs: its
-last "118/240" or "45%" gives the bar and, from the pace, the time left; no output for
-5× its usual gap (2 min at least) shows it stalled (`app/src/lib/jobs.ts`). The mod fills
+last "118/240" or "45%" gives the bar and, from the pace, the time left; once it has written a few times, no output for
+5× its usual gap (2 min at least) shows it stalled (a command that prints nothing never is) (`app/src/lib/jobs.ts`). The mod fills
 `jobs` from the Bash result ("Output is being written to: …") and the
 `<task-notification>` that ends it; the system-prompt section asks Claude to run commands
 longer than about two minutes that way. And the `turn_duration` rows of the project's

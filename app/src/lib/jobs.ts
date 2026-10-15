@@ -53,10 +53,13 @@ export function observe(seen: Seen | undefined, tail: Tail, parsed: Parsed, now:
   const grew = tail.size !== s.size;
   const last = s.reports.at(-1);
   const reports = parsed.percent !== undefined && parsed.percent !== last?.percent ? [...s.reports, { percent: parsed.percent, at: now }].slice(-30) : s.reports;
-  return { reports, grewAt: grew ? [...s.grewAt, tail.modifiedAt || now].slice(-30) : s.grewAt, size: tail.size };
+  // An empty file appearing is not output.
+  return { reports, grewAt: grew && tail.size > 0 ? [...s.grewAt, tail.modifiedAt || now].slice(-30) : s.grewAt, size: tail.size };
 }
 
 const STALL_MIN_MS = 120_000;
+/** Output growths seen before silence can mean a stall. */
+export const STALL_MIN_WRITES = 3;
 
 export type JobView = {
   id: string;
@@ -83,7 +86,9 @@ export function jobView(job: Job, parsed: Parsed | undefined, seen: Seen | undef
   if (parsed?.total !== undefined) v.count = `${parsed.done}/${parsed.total}`;
   const grew = seen?.grewAt ?? [];
   const lastGrew = grew.at(-1);
-  if (lastGrew) {
+  // Only a command that has been writing has a rhythm to fall silent from: one that prints
+  // nothing on purpose (output sent elsewhere, a watcher) is just running.
+  if (lastGrew && grew.length >= STALL_MIN_WRITES) {
     // Quiet for longer than 5× its usual gap between writes (and 2 min at least).
     const gaps = grew.slice(1).map((t, i) => t - grew[i]).sort((a, b) => a - b);
     const usual = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;

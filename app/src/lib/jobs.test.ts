@@ -36,10 +36,17 @@ describe("jobView", () => {
   });
 
   it("flags a command that has gone quiet for far longer than usual", () => {
-    let seen = observe(undefined, tail(10, T0 - 400_000), {}, T0 - 400_000);
+    let seen = observe(undefined, tail(10, T0 - 410_000), {}, T0 - 410_000);
+    seen = observe(seen, tail(15, T0 - 400_000), {}, T0 - 400_000);
     seen = observe(seen, tail(20, T0 - 390_000), {}, T0 - 390_000);
     expect(jobView(job, {}, seen, T0).stalled).toBe("no output for 6m");
     expect(jobView(job, {}, seen, T0 - 380_000).stalled).toBeUndefined();
+  });
+
+  it("never calls a command that prints nothing stalled", () => {
+    const seen = observe(observe(undefined, tail(0, T0 - 600_000), {}, T0 - 600_000), tail(0, T0 - 300_000), {}, T0 - 300_000);
+    expect(jobView(job, {}, seen, T0)).toMatchObject({ elapsed: "2m 00s" });
+    expect(jobView(job, {}, seen, T0).stalled).toBeUndefined();
   });
 
   it("says how it failed", () => {
