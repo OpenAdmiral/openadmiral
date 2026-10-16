@@ -669,6 +669,29 @@ function progressNudgeText(now: number): string | undefined {
     : `<system-reminder>${NUDGE_TAG}: this turn has run ${secs} s with no progress report. If the work goes on, call mcp__openadmiral__progress now with percent and step, and keep reporting at each milestone. Don't mention this reminder.</system-reminder>`
 }
 
+// A delegation call's row: what happened, the result's first line, and whether Claude sends it.
+// Takes the resolved elements, not $ (a hook's $ stays at its call site).
+function delegationRow(ui: { Box: any; Text: any }, card: ReturnType<typeof delegationCard>, running: boolean) {
+  const { Box, Text } = ui
+  if (running) {
+    return (
+      <Box paddingX={1}>
+        <Text dimColor>⇄ {card.head}…</Text>
+      </Box>
+    )
+  }
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
+      <Box gap={1}>
+        <Text color="#a9c1ff">⇄</Text>
+        <Text bold>{card.head}</Text>
+      </Box>
+      {card.detail ? <Text dimColor>{card.detail}</Text> : null}
+      {card.warn ? <Text color="#e0a030">{card.warn}</Text> : null}
+    </Box>
+  )
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await admiralRoot($)
@@ -1066,30 +1089,14 @@ export const register: Register = on => {
   })
 
   // Delegation calls: a card instead of every argument and the plugin's long answer.
-  for (const tool of [DELEGATE_TOOL, UPDATE_TOOL] as const) {
-    on('ui.render', { component: 'ToolUse', props: { tool: `mcp__openadmiral__${tool}` } }, ($, e, next) => {
-      if (e.props.isErrored || e.props.isInterrupted) return next(e)
-      const { Box, Text } = $.ui.resolve(e)
-      const card = delegationCard(tool, e.props.input, e.props.output)
-      if (e.props.isRunning) {
-        return (
-          <Box paddingX={1}>
-            <Text dimColor>⇄ {card.head}…</Text>
-          </Box>
-        )
-      }
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
-          <Box gap={1}>
-            <Text color="#a9c1ff">⇄</Text>
-            <Text bold>{card.head}</Text>
-          </Box>
-          {card.detail ? <Text dimColor>{card.detail}</Text> : null}
-          {card.warn ? <Text color="#e0a030">{card.warn}</Text> : null}
-        </Box>
-      )
-    })
-  }
+  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__delegate' } }, ($, e, next) => {
+    if (e.props.isErrored || e.props.isInterrupted) return next(e)
+    return delegationRow($.ui.resolve(e), delegationCard('delegate', e.props.input, e.props.output), e.props.isRunning)
+  })
+  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__delegation_update' } }, ($, e, next) => {
+    if (e.props.isErrored || e.props.isInterrupted) return next(e)
+    return delegationRow($.ui.resolve(e), delegationCard('delegation_update', e.props.input, e.props.output), e.props.isRunning)
+  })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__show' } }, ($, e, next) => {
     if (!me) return next(e)
