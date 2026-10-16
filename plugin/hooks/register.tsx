@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { ICON, parseAnswer, slugOf } from './card'
+import { delegationCard, ICON, parseAnswer, slugOf } from './card'
 import { classifyQueueText, isDone, isDueByTime, isTimed, nextDue, queueCommandsFrom, runNowPending, type QueueCommand, type QueueCondition, type QueueItemCore, type SentEntry } from './queue'
 import { hostOf, type Host } from './host'
 import { backgroundStart, taskNotification, upsertJob, type Job } from './jobs'
@@ -1064,6 +1064,32 @@ export const register: Register = on => {
     }
     return next(e)
   })
+
+  // Delegation calls: a card instead of every argument and the plugin's long answer.
+  for (const tool of [DELEGATE_TOOL, UPDATE_TOOL] as const) {
+    on('ui.render', { component: 'ToolUse', props: { tool: `mcp__openadmiral__${tool}` } }, ($, e, next) => {
+      if (e.props.isErrored || e.props.isInterrupted) return next(e)
+      const { Box, Text } = $.ui.resolve(e)
+      const card = delegationCard(tool, e.props.input, e.props.output)
+      if (e.props.isRunning) {
+        return (
+          <Box paddingX={1}>
+            <Text dimColor>⇄ {card.head}…</Text>
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
+          <Box gap={1}>
+            <Text color="#a9c1ff">⇄</Text>
+            <Text bold>{card.head}</Text>
+          </Box>
+          {card.detail ? <Text dimColor>{card.detail}</Text> : null}
+          {card.warn ? <Text color="#e0a030">{card.warn}</Text> : null}
+        </Box>
+      )
+    })
+  }
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__show' } }, ($, e, next) => {
     if (!me) return next(e)

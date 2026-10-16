@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { delegationCard } from '../hooks/card'
 
 // Stands in for the machine: an in-memory ~/.claude/openadmiral and a recorded peer inbox.
 function engine(
@@ -595,4 +596,19 @@ test('a queued /clear keeps the rest of the queue: the files follow the new sess
   expect(files.has(`${dir}/sess-new.json`)).toBe(true)
   expect(JSON.parse(files.get('/home/t/.claude/openadmiral/sessions/sess-old.json')!).supersededBy).toBe('sess-new')
   expect(prompts).toEqual(['Start the next task'])
+})
+
+test('delegation tool calls draw as one line and a detail', () => {
+  const sent = delegationCard('delegate', { to: 'api', title: 'Add rate limits' }, 'Delegated as dlg_ab12cd34 to api. You will be messaged on status changes.')
+  expect(sent).toEqual({ head: 'Delegated “Add rate limits” to api', detail: 'dlg_ab12cd34', warn: undefined })
+  const updated = delegationCard(
+    'delegation_update',
+    { id: 'dlg_cc6f8xq8', status: 'done', note: 'Follow-up', result: 'Fix deployed to sandbox.\nMore lines' },
+    'dlg_cc6f8xq8 is now done on the OpenAdmiral board, but OpenAdmiral could not notify applivery-intelligence (auto mode does not let OpenAdmiral send for this session). Tell them yourself…',
+  )
+  expect(updated).toEqual({
+    head: 'dlg_cc6f8xq8 → done',
+    detail: 'Fix deployed to sandbox.',
+    warn: 'OpenAdmiral could not deliver it to applivery-intelligence: Claude sends it with SendMessage',
+  })
 })
