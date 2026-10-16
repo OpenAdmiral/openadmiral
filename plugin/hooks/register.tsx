@@ -1034,6 +1034,37 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // The show tool's transcript row: a card with buttons, not the raw call.
+  // Rows of the chat the plugin itself put there: keep them out of the person's way.
+  on('ui.render', { component: 'UserMessage' }, ($, e, next) => {
+    const text = String((e.props as { text?: unknown }).text ?? '')
+    const expanded = !!(e.props as { isExpanded?: boolean }).isExpanded
+    // A progress reminder an older plugin added as a row of its own.
+    if (text.startsWith(`<system-reminder>${NUDGE_TAG}`)) {
+      if (expanded) return next(e)
+      const { Box, Text } = $.ui.resolve(e)
+      return (
+        <Box paddingX={1}>
+          <Text dimColor>◦ OpenAdmiral asked for a progress update</Text>
+        </Box>
+      )
+    }
+    // A delegation brief: a card with its title and sender; ctrl+o shows the whole brief.
+    const brief = text.match(/^\[OpenAdmiral delegation (dlg_[a-z0-9]{8})\] from ([^\n]*)\nTitle: ([^\n]*)/)
+    if (brief && !expanded) {
+      const { Box, Text } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
+          <Box gap={1}>
+            <Text color="#a9c1ff">⇄</Text>
+            <Text bold>{brief[3]}</Text>
+          </Box>
+          <Text dimColor>Delegation from {brief[2]} · {brief[1]} · ctrl+o for the brief</Text>
+        </Box>
+      )
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__show' } }, ($, e, next) => {
     if (!me) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
@@ -1214,14 +1245,22 @@ export const register: Register = on => {
   // active · …"), not as the command's answer: watch the rows the session keeps.
   on('session.append', async ($, e, next) => {
     await noteJobs($, e.message as { type?: string; content?: unknown }).catch(() => undefined)
-    // Rides along with a tool result, the way Claude Code adds its own reminders.
+    // Inside the last tool result, the way Claude Code adds its own reminders: a block of
+    // its own would show in the chat as if the person had typed it.
     const content = (e.message as { type?: string; content?: unknown }).content
-    if (progressOn && e.message.type === 'user' && Array.isArray(content) && content.some(b => (b as { type?: string })?.type === 'tool_result')) {
+    const last = Array.isArray(content) ? content.map(b => (b as { type?: string })?.type).lastIndexOf('tool_result') : -1
+    if (progressOn && e.message.type === 'user' && last !== -1) {
       const now = await $.clock.now()
       const text = progressNudgeText(now)
       if (text) {
         lastNudgeAt = now
-        return next({ ...e, message: { ...e.message, content: [...content, { type: 'text', text }] } } as typeof e)
+        const blocks = content as { type: string; content?: unknown }[]
+        const result = blocks[last]
+        const inner = typeof result.content === 'string' ? `${result.content}\n\n${text}`
+          : Array.isArray(result.content) ? [...result.content, { type: 'text', text }]
+          : text
+        const nextContent = blocks.map((b, i) => (i === last ? { ...b, content: inner } : b))
+        return next({ ...e, message: { ...e.message, content: nextContent } } as typeof e)
       }
     }
     const stored = await next(e)

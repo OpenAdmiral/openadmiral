@@ -79,7 +79,7 @@ closed it resumes like any ended session.
 always loaded) with a system-prompt section asking for reports during work longer than
 about 30 s, the percent weighted by effort (writing and testing count most). Once a turn
 has run 30 s with no report, or its last one is over 45 s old, the mod adds a reminder
-beside the next tool result (at most every 45 s). A subagent's reports go to its own
+inside the next tool result (never a block of its own, which the chat would show as typed) (at most every 45 s). A subagent's reports go to its own
 `subagents[i].progress` (≤ 20): once the main turn is over, cards and the menu bar show the
 subagents still running, their time and the slowest one's report. While the session waits
 for the person the ETA pauses. A turn of 2 min or more notifies when it ends ("done", or
