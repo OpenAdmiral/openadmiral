@@ -46,7 +46,8 @@ type Props = {
   view: View | null;
   todayCost?: number;
   onSelect: (v: View) => void;
-  onNew: () => void;
+  /** A new agent; with a folder, the sheet opens on it. */
+  onNew: (cwd?: string) => void;
   onMoveProject: (from: number, to: number) => void;
   onMoveAgent: (projectKey: string, from: number, to: number) => void;
   onResetOrder: () => void;
@@ -159,7 +160,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
         </Tip>
         <Tip side="bottom" content={<TipLabel label="New agent" kbd="⌘N" />}>
           <button
-            onClick={onNew}
+            onClick={() => onNew()}
             aria-label="New agent"
             className="inline-flex size-7 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line-strong hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
@@ -256,7 +257,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
         >
           <SortableContext items={groups.map((g) => pid(g.key))} strategy={verticalListSortingStrategy}>
             {groups.map((g) => (
-              <SortableGroup key={g.key} group={g} folded={folded.has(g.key)} onFold={() => toggleFolded(g.key)}>
+              <SortableGroup key={g.key} group={g} folded={folded.has(g.key)} onFold={() => toggleFolded(g.key)} onNew={() => onNew(g.key)}>
                 <SortableContext items={g.agents.map((a) => aid(g.key, a.id))} strategy={verticalListSortingStrategy}>
                   {g.agents.map((a) => (
                     <SortableAgent
@@ -491,7 +492,7 @@ function useFolded(): [Set<string>, (key: string) => void] {
 }
 
 /** A project: its header, then its agents indented behind a rail in the project's color. */
-function SortableGroup({ group, folded, onFold, children }: { group: Group; folded: boolean; onFold: () => void; children: React.ReactNode }) {
+function SortableGroup({ group, folded, onFold, onNew, children }: { group: Group; folded: boolean; onFold: () => void; onNew: () => void; children: React.ReactNode }) {
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: pid(group.key) });
   return (
     <section
@@ -499,7 +500,7 @@ function SortableGroup({ group, folded, onFold, children }: { group: Group; fold
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn("mt-2 border-t border-line pt-2 first:mt-0 first:border-t-0 first:pt-0", isDragging && DROP_SLOT)}
     >
-      <GroupHeader group={group} folded={folded} onFold={onFold} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
+      <GroupHeader group={group} folded={folded} onFold={onFold} onNew={onNew} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
       {!folded && (
         <div className="ml-[13px] border-l-2 pl-1.5" style={{ borderColor: `color-mix(in srgb, ${projectColor(group.label)} 45%, transparent)` }}>
           {children}
@@ -509,7 +510,7 @@ function SortableGroup({ group, folded, onFold, children }: { group: Group; fold
   );
 }
 
-function GroupHeader({ group, folded, onFold, handle, lifted }: { group: Group; folded?: boolean; onFold?: () => void; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
+function GroupHeader({ group, folded, onFold, onNew, handle, lifted }: { group: Group; folded?: boolean; onFold?: () => void; onNew?: () => void; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
   const { ref, ...rest } = handle ?? {};
   // Folded away, an agent waiting on you still shows on its project.
   const waiting = folded && group.agents.some((a) => a.status === "waiting");
@@ -519,7 +520,7 @@ function GroupHeader({ group, folded, onFold, handle, lifted }: { group: Group; 
       {...rest}
       aria-label={`${group.label} project. Press space to reorder.`}
       className={cn(
-        "mb-1 flex items-center gap-2 rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
+        "group/project mb-1 flex items-center gap-2 rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
         handle && "cursor-grab active:cursor-grabbing",
         lifted && "cursor-grabbing",
       )}
@@ -541,7 +542,21 @@ function GroupHeader({ group, folded, onFold, handle, lifted }: { group: Group; 
       <span className="size-2 shrink-0 rounded-full" style={{ background: projectColor(group.label) }} />
       <h3 className="truncate text-[13px] font-semibold text-ink">{projectLabel(group.label)}</h3>
       {waiting && <span title="An agent here needs you" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}
-      <span className="ml-auto rounded-full bg-line px-1.5 text-[10px] leading-4 text-ink-3 tabular">{group.agents.length}</span>
+      <span className="ml-auto" />
+      {onNew && (
+        <Tip side="bottom" content={<TipLabel label={`New agent in ${projectLabel(group.label)}`} />}>
+          <button
+            type="button"
+            onClick={onNew}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`New agent in ${group.label}`}
+            className="-my-1 inline-flex size-5 items-center justify-center rounded text-ink-3 opacity-0 transition-all duration-150 hover:bg-line-strong hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 group-hover/project:opacity-100"
+          >
+            <AddLinearIcon size={13} />
+          </button>
+        </Tip>
+      )}
+      <span className="rounded-full bg-line px-1.5 text-[10px] leading-4 text-ink-3 tabular">{group.agents.length}</span>
     </div>
   );
 }

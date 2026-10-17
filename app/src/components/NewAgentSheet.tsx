@@ -7,12 +7,12 @@ import type { Agent } from "@/lib/types";
 import { basename, cn } from "@/lib/utils";
 import { ErrorBox, isUntrusted, TrustPanel } from "./TrustPanel";
 
-type Props = { open: boolean; onClose: () => void; agents: Agent[]; onCreated: (shortId: string) => void };
+type Props = { open: boolean; /** The folder to start on (a project's +). */ initialCwd?: string; onClose: () => void; agents: Agent[]; onCreated: (shortId: string) => void };
 
 const input =
   "w-full rounded-lg border border-line-strong bg-canvas px-3 py-2 text-sm text-ink placeholder:text-ink-3 transition-all duration-200 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30";
 
-export function NewAgentSheet({ open: isOpen, onClose, agents, onCreated }: Props) {
+export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCreated }: Props) {
   const [cwd, setCwd] = useState("");
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -28,8 +28,13 @@ export function NewAgentSheet({ open: isOpen, onClose, agents, onCreated }: Prop
       setError(null);
       setBusy(false);
       setTrust(false);
+      // Opened from a project's +: its folder and name, ready to go.
+      if (initialCwd) {
+        setCwd(initialCwd);
+        setName(basename(initialCwd));
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialCwd]);
 
   const pick = async () => {
     const dir = await open({ directory: true, defaultPath: cwd || undefined });

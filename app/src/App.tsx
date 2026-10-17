@@ -52,7 +52,8 @@ export default function App() {
     const next = superseded.get(view.id);
     if (next) setView({ kind: "agent", id: next });
   }, [superseded, view]);
-  const [sheet, setSheet] = useState(false);
+  // The new-agent sheet: closed, or open (on a folder when a project's + opened it).
+  const [sheet, setSheet] = useState<false | { cwd?: string }>(false);
   const [shortcuts, setShortcuts] = useState(false);
   const [about, setAbout] = useState(false);
   const life = useLifecycle(rawAgents);
@@ -228,7 +229,7 @@ export default function App() {
         if (kind === "agent" && id) setView({ kind: "agent", id });
         else if (kind === "agents" || kind === "costs" || kind === "queue" || kind === "delegations" || kind === "artifacts") setView({ kind });
       }),
-      listen("openadmiral://new-agent", () => setSheet(true)),
+      listen("openadmiral://new-agent", () => setSheet({})),
       listen("openadmiral://underway-panel", () => window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: "underway" }))),
     ];
     return () => offs.forEach((p) => void p.then((off) => off()));
@@ -351,7 +352,7 @@ export default function App() {
         "toggle-sidebar": ui.toggleLeft,
         "focus-mode": ui.toggleFocus,
         shortcuts: () => setShortcuts(true),
-        "new-agent": () => setSheet(true),
+        "new-agent": () => setSheet({}),
         "view-agents": () => setView({ kind: "agents" }),
         "view-delegations": () => setView({ kind: "delegations" }),
         "view-artifacts": () => setView({ kind: "artifacts" }),
@@ -436,7 +437,7 @@ export default function App() {
         onClearEnded={() => life.clearEnded(agents)}
         todayCost={costs?.today}
         onSelect={setView}
-        onNew={() => setSheet(true)}
+        onNew={(cwd) => setSheet({ cwd })}
         renaming={rename.editing ? { id: rename.editing, save: rename.commit, cancel: rename.cancel } : undefined}
       />
         )}
@@ -516,7 +517,7 @@ export default function App() {
                 pluginInstalled={pluginInstalled}
               />
             ) : (
-              <Empty onNew={() => setSheet(true)} pluginInstalled={pluginInstalled} />
+              <Empty onNew={() => setSheet({})} pluginInstalled={pluginInstalled} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -525,7 +526,7 @@ export default function App() {
       <Notices notices={life.notices} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
       <AboutSheet open={about} onClose={() => setAbout(false)} />
-      <NewAgentSheet open={sheet} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
+      <NewAgentSheet open={!!sheet} initialCwd={sheet ? sheet.cwd : undefined} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
     </div>
     </TooltipProvider>
     </UnderwayContext.Provider>
