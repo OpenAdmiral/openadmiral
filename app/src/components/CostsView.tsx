@@ -1,6 +1,6 @@
 import { CloseCircleLinearIcon, DollarLinearIcon, RefreshLinearIcon } from "@solar-icons/react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { money, type Costs, type DayCost } from "@/lib/costs";
+import { bucketDays, localDate, money, useRetention, type Costs, type DayCost, type RangeDays } from "@/lib/costs";
 import type { Agent, AdmiralSession } from "@/lib/types";
 import { ago, cn, compact, projectPalette } from "@/lib/utils";
 import { PlanMeters } from "./PlanMeters";
@@ -11,6 +11,8 @@ import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
   costs: Costs | null;
+  range: RangeDays;
+  onRange: (r: RangeDays) => void;
   fetchedAt?: number;
   loading: boolean;
   error: string | null;
@@ -32,9 +34,17 @@ function palette(keys: string[]) {
   return map;
 }
 
-export function CostsView({ costs, fetchedAt, loading, error, onRefresh, agents, rateLimits, now, onJump }: Props) {
+export function CostsView({ costs, range, onRange, fetchedAt, loading, error, onRefresh, agents, rateLimits, now, onJump }: Props) {
   const [mode, setMode] = useState<"project" | "model">("project");
   const [filter, setFilter] = useState<string | null>(null);
+  const rangeLabel = costs?.allTime ? "all time" : `last ${costs?.rangeDays ?? range} days`;
+  // Long ranges fold days into whole weeks so the bars stay readable.
+  const bucket = costs && costs.days.length > 95 ? 7 * Math.ceil(costs.days.length / 630) : 1;
+
+  // Claude Code deletes transcripts after `retention.days`; a range reaching further
+  // back than that can only ever be partly filled.
+  const retention = useRetention();
+  const neededDays = range === 0 ? RETENTION_OPTIONS[RETENTION_OPTIONS.length - 1][0] : range;
 
   // Projects keep their sidebar color; recomputed each render so a reorder shows at once.
   const projectColors = projectPalette(costs?.projects.map((p) => p.name) ?? [], OTHER);
@@ -76,11 +86,17 @@ export function CostsView({ costs, fetchedAt, loading, error, onRefresh, agents,
           <>
             <Kpis costs={costs} rateLimits={rateLimits} />
 
+            {retention.days !== null && <RetentionControl retention={retention.days} needed={neededDays} onSet={retention.set} />}
+
             <section className="mt-4 rounded-2xl border border-line bg-canvas p-5 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-ink">Daily cost · last 30 days</h2>
-                  <p className="text-xs text-ink-3">Stacked by {mode}{filter ? `, ${filter} only` : ""}</p>
+                  <h2 className="text-sm font-semibold text-ink">{bucket === 1 ? "Daily cost" : "Weekly cost"} · {rangeLabel}</h2>
+                  <p className="text-xs text-ink-3">
+                    Stacked by {mode}
+                    {filter ? `, ${filter} only` : ""}
+                    {bucket > 7 ? ` · each bar is ${bucket} days` : ""}
+                  </p>
                 </div>
                 {filter && (
                   <button
@@ -92,9 +108,10 @@ export function CostsView({ costs, fetchedAt, loading, error, onRefresh, agents,
                   </button>
                 )}
                 <span className="flex-1" />
+                <Segmented value={range} onChange={onRange} options={[[30, "30d"], [60, "60d"], [90, "90d"], [0, "All"]]} />
                 <Segmented value={mode} onChange={setMode} options={[["project", "By project"], ["model", "By model"]]} />
               </div>
-              <StackedBars days={costs.days} mode={mode} filter={filter} order={mode === "project" ? costs.projects.map((p) => p.name) : costs.models} colors={mode === "project" ? projectColors : modelColors} />
+              <StackedBars days={costs.days} bucket={bucket} mode={mode} filter={filter} order={mode === "project" ? costs.projects.map((p) => p.name) : costs.models} colors={mode === "project" ? projectColors : modelColors} />
             </section>
 
             <div className="mt-4 grid grid-cols-[minmax(0,1fr)_300px] gap-4">
@@ -136,12 +153,140 @@ export function CostsView({ costs, fetchedAt, loading, error, onRefresh, agents,
   );
 }
 
+const RETENTION_OPTIONS: [number, string][] = [[30, "30 days"], [90, "90 days"], [365, "1 year"], [3650, "10 years"]];
+
+function retentionLabel(days: number) {
+  return RETENTION_OPTIONS.find(([d]) => d === days)?.[1] ?? `${days} days`;
+}
+
+/**
+ * Claude Code keeps session transcripts for `retention` days (`cleanupPeriodDays`), and
+ * costs are read from them — so that bounds how far back history reaches. A quiet line
+ * normally; a highlighted notice when the selected range reaches further back than that.
+ * Raising or lowering asks for an explicit confirmation first: it changes Claude Code
+ * itself, not just this app, and lowering lets it delete the older transcripts.
+ */
+function RetentionControl({ retention, needed, onSet }: { retention: number; needed: number; onSet: (days: number) => Promise<void> }) {
+  const short = retention < needed;
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirm = async () => {
+    if (pending === null) return;
+    setBusy(true);
+    try {
+      await onSet(pending);
+      setPending(null);
+      setOpen(false);
+      setSaved(true);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const optionButton = (d: number, label: string) => (
+    <button
+      key={d}
+      onClick={() => {
+        setPending(d);
+        setSaved(false);
+      }}
+      className="rounded-full bg-brand-500/15 px-2.5 py-1 font-semibold text-brand-700 transition-colors hover:bg-brand-500/25 dark:text-brand-300"
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      className={cn(
+        "mt-4 rounded-xl border px-4 py-2.5 text-xs text-ink-2",
+        short || pending !== null || open ? "border-brand-500/30 bg-brand-500/[0.08]" : "border-line",
+      )}
+    >
+      {pending !== null ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span>
+            This sets <code className="text-ink">cleanupPeriodDays</code> to {pending} in <code className="text-ink">~/.claude/settings.json</code>, for all of Claude Code.{" "}
+            {pending < retention ? (
+              <b className="text-amber-700 dark:text-amber-300">
+                Claude Code will then delete transcripts older than {retentionLabel(pending)}, and the cost history past that point is gone for good.
+              </b>
+            ) : (
+              <>Transcripts will take more disk space over time.</>
+            )}{" "}
+            Keep them for {retentionLabel(pending)}?
+          </span>
+          <button
+            onClick={confirm}
+            disabled={busy}
+            className="rounded-full bg-brand-600 px-2.5 py-1 font-semibold text-white transition-colors hover:bg-brand-500 disabled:opacity-60"
+          >
+            {busy ? "Saving…" : "Confirm"}
+          </button>
+          <button
+            onClick={() => {
+              setPending(null);
+              setError(null);
+            }}
+            disabled={busy}
+            className="rounded-full px-2.5 py-1 font-semibold text-ink-2 transition-colors hover:bg-line"
+          >
+            Cancel
+          </button>
+          {error && <span className="selectable text-amber-800 dark:text-amber-200">Could not save: {error}</span>}
+        </div>
+      ) : short || open ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span>
+            {short ? (
+              <>
+                Claude Code deletes its session transcripts after <b className="text-ink">{retentionLabel(retention)}</b>, and costs are read
+                from them — so history can only reach back that far. Keep them longer and history builds up from today:
+              </>
+            ) : (
+              <>
+                Claude Code keeps its session transcripts — your cost history — for <b className="text-ink">{retentionLabel(retention)}</b>. Keep them for:
+              </>
+            )}
+          </span>
+          {RETENTION_OPTIONS.filter(([d]) => d !== retention).map(([d, label]) => optionButton(d, label))}
+          {!short && (
+            <button onClick={() => setOpen(false)} className="rounded-full px-2.5 py-1 font-semibold text-ink-2 transition-colors hover:bg-line">
+              Cancel
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-ink-3">
+          <span>
+            Claude Code keeps its session transcripts — your cost history — for <b className="text-ink-2">{retentionLabel(retention)}</b>.
+            {saved && <span className="ml-1.5 font-semibold text-emerald-700 dark:text-emerald-300">Saved.</span>}
+          </span>
+          <button
+            onClick={() => {
+              setOpen(true);
+              setSaved(false);
+            }}
+            className="rounded-full px-2.5 py-1 font-semibold text-brand-700 transition-colors hover:bg-brand-500/15 dark:text-brand-300"
+          >
+            Change
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Kpis({ costs, rateLimits }: { costs: Costs; rateLimits: Props["rateLimits"] }) {
   const tiles: { label: string; value: string; note?: string }[] = [
     { label: "Today", value: money(costs.today) },
     { label: "Last 7 days", value: money(costs.last7) },
     { label: "This month", value: money(costs.month), note: `on pace for ${money(costs.monthProjection)}` },
-    { label: "Daily average", value: money(costs.dailyAvg30), note: "last 30 days" },
+    { label: "Daily average", value: money(costs.dailyAvg), note: costs.allTime ? "all time" : `last ${costs.rangeDays} days` },
   ];
   return (
     <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.35fr)] gap-3">
@@ -173,7 +318,7 @@ function Kpis({ costs, rateLimits }: { costs: Costs; rateLimits: Props["rateLimi
   );
 }
 
-function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) {
+function Segmented<T extends string | number>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) {
   return (
     <div className="inline-flex rounded-lg bg-line p-0.5">
       {options.map(([v, label]) => (
@@ -204,7 +349,7 @@ function shortDate(date: string) {
   return new Date(2000, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; mode: "project" | "model"; filter: string | null; order: string[]; colors: Map<string, string> }) {
+function StackedBars({ days: dailyDays, bucket, mode, filter, order, colors }: { days: DayCost[]; bucket: number; mode: "project" | "model"; filter: string | null; order: string[]; colors: Map<string, string> }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [hover, setHover] = useState<number | null>(null);
@@ -215,6 +360,7 @@ function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; m
     return () => ro.disconnect();
   }, []);
 
+  const days = useMemo(() => bucketDays(dailyDays, bucket), [dailyDays, bucket]);
   // Series: the top slots by name, the rest folded into Other, bottom-up in slot order.
   const series = useMemo(() => {
     const top = order.slice(0, SLOTS);
@@ -247,6 +393,8 @@ function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; m
   const y = (v: number) => top + plotH - (v / max) * plotH;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * max);
   const GAP = 2;
+  // Date labels thin out as bars multiply; ~5 across, like the 30-day view always had.
+  const labelEvery = Math.max(7, Math.ceil(days.length / 6));
 
   return (
     <div>
@@ -294,9 +442,9 @@ function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; m
                     return <rect key={k} x={x} y={y1} width={barW} height={Math.max(0, h - gap)} fill={colors.get(k)} />;
                   })}
                 </g>
-                {(i % 7 === 2 || i === days.length - 1) && (
+                {(i % labelEvery === 2 || i === days.length - 1) && (
                   <text x={cx} y={H - 6} textAnchor="middle" className="fill-[var(--color-ink-3)] text-[10px]">
-                    {i === days.length - 1 ? "Today" : shortDate(days[i].date)}
+                    {i === days.length - 1 && bucket === 1 ? "Today" : shortDate(days[i].date)}
                   </text>
                 )}
                 {/* Hit target: the whole column, wider than the bar. */}
@@ -308,6 +456,7 @@ function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; m
         {hover !== null && totals[hover] > 0 && (
           <Tooltip
             day={days[hover]}
+            bucket={bucket}
             total={totals[hover]}
             rows={shownSeries.filter((k) => (stacks[hover][k] ?? 0) > 0).map((k) => [k, stacks[hover][k]] as [string, number]).sort((a, b) => b[1] - a[1])}
             colors={colors}
@@ -320,13 +469,20 @@ function StackedBars({ days, mode, filter, order, colors }: { days: DayCost[]; m
   );
 }
 
-function Tooltip({ day, total, rows, colors, x, width }: { day: DayCost; total: number; rows: [string, number][]; colors: Map<string, string>; x: number; width: number }) {
+function Tooltip({ day, bucket, total, rows, colors, x, width }: { day: DayCost; bucket: number; total: number; rows: [string, number][]; colors: Map<string, string>; x: number; width: number }) {
   const W = 230;
   const leftPos = x + 14 + W > width ? x - 14 - W : x + 14;
+  // A bucketed bar covers [date, date + bucket), capped at today.
+  const end = useMemo(() => {
+    if (bucket <= 1) return null;
+    const [y, m, d] = day.date.split("-").map(Number);
+    const last = new Date(y, m - 1, d + bucket - 1);
+    return localDate(last) > localDate(new Date()) ? localDate(new Date()) : localDate(last);
+  }, [day.date, bucket]);
   return (
     <div className="pointer-events-none absolute top-2 z-10 rounded-xl border border-line-strong bg-canvas/95 p-3 shadow-lg backdrop-blur" style={{ left: leftPos, width: W }}>
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-xs font-semibold text-ink">{shortDate(day.date)}</span>
+        <span className="text-xs font-semibold text-ink">{end ? `${shortDate(day.date)} – ${shortDate(end)}` : shortDate(day.date)}</span>
         <span className="text-xs font-semibold text-ink tabular">{money(total, true)}</span>
       </div>
       <ul className="space-y-1">
@@ -357,6 +513,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
 function ProjectTable({ costs, colors, filter, onFilter, live, onJump }: { costs: Costs; colors: Map<string, string>; filter: string | null; onFilter: (name: string) => void; live: Agent[]; onJump: (id: string) => void }) {
   const [all, setAll] = useState(false);
   const rows = all ? costs.projects : costs.projects.slice(0, 10);
+  const rangeHead = costs.allTime ? "All time" : `${costs.rangeDays} days`;
   return (
     <section className="min-w-0 rounded-2xl border border-line bg-canvas shadow-sm">
       <div className="flex items-center justify-between px-5 pt-4 pb-2">
@@ -369,16 +526,17 @@ function ProjectTable({ costs, colors, filter, onFilter, live, onJump }: { costs
             <th className="py-2 pl-5 font-semibold">Project</th>
             <th className="py-2 text-right font-semibold">Today</th>
             <th className="py-2 text-right font-semibold">7 days</th>
-            <th className="py-2 text-right font-semibold">30 days</th>
+            <th className="py-2 text-right font-semibold">{rangeHead}</th>
+            {!costs.allTime && <th className="py-2 text-right font-semibold">All time</th>}
             <th className="py-2 pl-4 font-semibold">Share</th>
             <th className="py-2 font-semibold">Top model</th>
-            <th className="py-2 font-semibold">30-day trend</th>
+            <th className="py-2 font-semibold">Trend</th>
             <th className="py-2 pr-5 text-right font-semibold">Tokens</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((p) => {
-            const share = (p.d30 / costs.total30) * 100;
+            const share = costs.rangeTotal > 0 ? (p.inRange / costs.rangeTotal) * 100 : 0;
             const agents = live.filter((a) => a.project === p.name);
             const color = colors.get(p.name) ?? "var(--color-series-other)";
             return (
@@ -412,7 +570,8 @@ function ProjectTable({ costs, colors, filter, onFilter, live, onJump }: { costs
                 </td>
                 <td className="py-2 text-right text-ink-2">{p.today ? money(p.today) : "—"}</td>
                 <td className="py-2 text-right text-ink-2">{p.d7 ? money(p.d7) : "—"}</td>
-                <td className="py-2 text-right font-semibold text-ink">{money(p.d30)}</td>
+                <td className="py-2 text-right font-semibold text-ink">{p.inRange ? money(p.inRange) : "—"}</td>
+                {!costs.allTime && <td className="py-2 text-right text-ink-2">{money(p.total)}</td>}
                 <td className="py-2 pl-4">
                   <span className="flex items-center gap-2">
                     <span className="h-1 w-12 overflow-hidden rounded-full bg-line-strong">
@@ -425,7 +584,7 @@ function ProjectTable({ costs, colors, filter, onFilter, live, onJump }: { costs
                 <td className="py-1">
                   <Sparkline values={p.series} color={color} />
                 </td>
-                <td className="py-2 pr-5 text-right text-ink-3">{compact(p.tokens30)}</td>
+                <td className="py-2 pr-5 text-right text-ink-3">{compact(p.tokensInRange)}</td>
               </tr>
             );
           })}

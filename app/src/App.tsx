@@ -5,7 +5,7 @@ import type { Agent } from "@/lib/types";
 import { AboutSheet } from "@/components/AboutSheet";
 import { AgentDetail } from "@/components/AgentDetail";
 import { CostsView } from "@/components/CostsView";
-import { useCostReport, useCosts } from "@/lib/costs";
+import { useCostReport, useCosts, type RangeDays } from "@/lib/costs";
 import { DelegationsView } from "@/components/DelegationsView";
 import { AgentsMap } from "@/components/AgentsMap";
 import { NewAgentSheet } from "@/components/NewAgentSheet";
@@ -214,7 +214,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const costReport = useCostReport();
-  const costs = useCosts(costReport.report, agents);
+  const [costRange, setCostRange] = useState<RangeDays>(30);
+  const costs = useCosts(costReport.report, agents, costRange);
   // The menu bar's fleet report shows today's cost (src-tauri/src/tray.rs).
   useEffect(() => {
     invoke("tray_today", { usd: costs?.today ?? null }).catch(() => {});
@@ -458,6 +459,8 @@ export default function App() {
             ) : view?.kind === "costs" ? (
               <CostsView
                 costs={costs}
+                range={costRange}
+                onRange={setCostRange}
                 fetchedAt={costReport.report?.fetchedAt}
                 loading={costReport.loading}
                 error={costReport.error}
