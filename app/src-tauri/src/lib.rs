@@ -568,21 +568,26 @@ fn costs_cached(app: AppHandle) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// Runs ccusage for the last `days` days, per project, and caches the result.
+/// Runs ccusage per project — the last `days` days, or all time when `days` is 0 —
+/// and caches the result.
 #[tauri::command]
 async fn costs_refresh(app: AppHandle, days: u32) -> Result<Value, String> {
-    let since = {
+    let since = if days == 0 {
+        None
+    } else {
         let out = Command::new("date")
             .args(["-v", &format!("-{days}d"), "+%Y%m%d"])
             .output()
             .map_err(|e| e.to_string())?;
-        String::from_utf8_lossy(&out.stdout).trim().to_string()
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
     let out = tauri::async_runtime::spawn_blocking(move || {
-        Command::new("npx")
-            .args(["-y", CCUSAGE, "claude", "daily", "--json", "--instances", "--since", &since])
-            .env("PATH", login_path())
-            .output()
+        let mut cmd = Command::new("npx");
+        cmd.args(["-y", CCUSAGE, "claude", "daily", "--json", "--instances"]);
+        if let Some(since) = &since {
+            cmd.args(["--since", since]);
+        }
+        cmd.env("PATH", login_path()).output()
     })
     .await
     .map_err(|e| e.to_string())?
@@ -604,6 +609,120 @@ async fn costs_refresh(app: AppHandle, days: u32) -> Result<Value, String> {
         let _ = std::fs::write(path, report.to_string());
     }
     Ok(report)
+}
+
+/// Claude Code's own user settings, where `cleanupPeriodDays` lives.
+fn claude_settings_path() -> PathBuf {
+    claude_home().join("settings.json")
+}
+
+/// How many days that settings file keeps session transcripts (`cleanupPeriodDays`, default 30).
+fn read_retention(path: &Path) -> u64 {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("cleanupPeriodDays").and_then(Value::as_u64))
+        .unwrap_or(30)
+}
+
+/// Sets `cleanupPeriodDays` in that settings file, keeping every other setting,
+/// and refusing to touch a file it cannot read back intact.
+fn write_retention(path: &Path, days: u64) -> Result<u64, String> {
+    if days == 0 {
+        return Err("Retention must be at least one day.".into());
+    }
+    let mut settings: Value = match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s)
+            .map_err(|e| format!("{} is not valid JSON, leaving it untouched: {e}", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
+    let obj = settings
+        .as_object_mut()
+        .ok_or_else(|| format!("{} is not a JSON object, leaving it untouched", path.display()))?;
+    obj.insert("cleanupPeriodDays".into(), days.into());
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let mut out = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    out.push('\n');
+    std::fs::write(path, out).map_err(|e| e.to_string())?;
+    Ok(days)
+}
+
+/// How many days Claude Code keeps session transcripts. ccusage reads costs from
+/// those transcripts, so this bounds how far back Costs can reach.
+#[tauri::command]
+fn retention_get() -> u64 {
+    read_retention(&claude_settings_path())
+}
+
+/// Sets Claude Code's transcript retention. The Costs view asks the person before
+/// calling this: it changes all of Claude Code, not just this app.
+#[tauri::command]
+fn retention_set(days: u64) -> Result<u64, String> {
+    // A preview must not touch the person's real Claude Code settings.
+    if preview() {
+        return Err("Not available in a preview.".into());
+    }
+    write_retention(&claude_settings_path(), days)
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::{read_retention, write_retention};
+
+    fn temp_settings(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!("admiral-retention-{name}-{}", std::process::id()))
+            .join("settings.json")
+    }
+
+    #[test]
+    fn defaults_to_30_without_a_file_or_key() {
+        let path = temp_settings("defaults");
+        assert_eq!(read_retention(&path), 30);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"model\": \"opus\"}").unwrap();
+        assert_eq!(read_retention(&path), 30);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn writes_and_reads_back_keeping_other_settings() {
+        let path = temp_settings("roundtrip");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\n  \"model\": \"opus\",\n  \"env\": {\"A\": \"1\"}\n}\n").unwrap();
+        assert_eq!(write_retention(&path, 3650), Ok(3650));
+        assert_eq!(read_retention(&path), 3650);
+        // Lowering works the same way; every other setting survives, in order.
+        assert_eq!(write_retention(&path, 365), Ok(365));
+        let text = std::fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["model"], "opus");
+        assert_eq!(v["env"]["A"], "1");
+        assert_eq!(v["cleanupPeriodDays"], 365);
+        assert!(text.find("\"model\"").unwrap() < text.find("\"env\"").unwrap(), "key order kept");
+        assert!(text.ends_with('\n'));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn creates_the_file_when_missing() {
+        let path = temp_settings("missing");
+        assert_eq!(write_retention(&path, 90), Ok(90));
+        assert_eq!(read_retention(&path), 90);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn refuses_zero_days_and_a_broken_file() {
+        let path = temp_settings("broken");
+        assert!(write_retention(&path, 0).is_err());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{not json").unwrap();
+        assert!(write_retention(&path, 90).is_err());
+        // The broken file is left exactly as it was.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }
 
 fn order_path(app: &AppHandle) -> Option<PathBuf> {
@@ -1012,6 +1131,8 @@ pub fn run() {
             resume_agent,
             costs_cached,
             costs_refresh,
+            retention_get,
+            retention_set,
             dev_env,
             frontend_log,
             popup_menu,
