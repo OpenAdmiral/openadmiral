@@ -9,6 +9,8 @@ import { useCostReport, useCosts, type RangeDays } from "@/lib/costs";
 import { DelegationsView } from "@/components/DelegationsView";
 import { AgentsMap } from "@/components/AgentsMap";
 import { NewAgentSheet } from "@/components/NewAgentSheet";
+import { CommandPalette } from "@/components/CommandPalette";
+import { collect, type Target } from "@/lib/search";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { useSidebarOrder } from "@/lib/order";
 import { setProjectOrder } from "@/lib/utils";
@@ -115,6 +117,23 @@ export default function App() {
       off.then((u) => u());
     };
   }, []);
+  // ⌘K: everything searchable, gathered only while it is open.
+  // ⌘K's search: closed, or open on a query ("" from the keyboard).
+  const [palette, setPalette] = useState<false | string>(false);
+  const paletteHits = useMemo(
+    () => (palette !== false ? collect(agents, delegations, artifacts, queues, order.groups.map((g) => ({ key: g.key, label: g.label }))) : []),
+    [palette, agents, delegations, artifacts, queues, order.groups],
+  );
+  const openTarget = (t: Target) => {
+    if (t.kind === "agent") setView({ kind: "agent", id: t.id });
+    else if (t.kind === "view") setView({ kind: t.view });
+    else if (t.kind === "new-agent") setSheet({ cwd: t.cwd });
+    else if (t.kind === "shortcuts") setShortcuts(true);
+    else {
+      setView({ kind: "agent", id: t.sessionId });
+      setArtifactFocus({ sessionId: t.sessionId, key: `${t.sessionId}/${t.artifactId}`, at: Date.now() });
+    }
+  };
   // Clicking a "needs you" notification brings OpenAdmiral forward: open that agent (its terminal shows the prompt).
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
@@ -244,6 +263,8 @@ export default function App() {
       if (d.select) setView({ kind: "agent", id: d.select });
       if (d.view === "agents" || d.view === "delegations" || d.view === "costs" || d.view === "artifacts" || d.view === "queue") setView({ kind: d.view });
       if (d.view === "about") setAbout(true);
+      // OPENADMIRAL_VIEW=search:<query> (preview): ⌘K open on that query, for a screenshot.
+      if (d.view?.startsWith("search")) setTimeout(() => setPalette(d.view!.slice(7)), 1500);
       if (d.sort === "recent" || d.sort === "order") setSortMode(d.sort);
       if (d.rail) ui.toggleLeft();
       if (d.inspectorHidden) ui.toggleRight();
@@ -352,6 +373,7 @@ export default function App() {
         "toggle-sidebar": ui.toggleLeft,
         "focus-mode": ui.toggleFocus,
         shortcuts: () => setShortcuts(true),
+        search: () => setPalette((p) => (p === false ? "" : false)),
         "new-agent": () => setSheet({}),
         "view-agents": () => setView({ kind: "agents" }),
         "view-delegations": () => setView({ kind: "delegations" }),
@@ -525,6 +547,7 @@ export default function App() {
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
       <Notices notices={life.notices} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
+      <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} onClose={() => setPalette(false)} onPick={openTarget} />
       <AboutSheet open={about} onClose={() => setAbout(false)} />
       <NewAgentSheet open={!!sheet} initialCwd={sheet ? sheet.cwd : undefined} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
     </div>

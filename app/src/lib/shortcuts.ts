@@ -12,6 +12,7 @@ export type ShortcutId =
   | "needs-next"
   | "new-agent"
   | "close-agent"
+  | "search"
   | "view-agents"
   | "view-delegations"
   | "view-costs"
@@ -50,6 +51,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
   {
     title: "Views",
     items: [
+      { id: "search", keys: [["⌘", "K"]], description: "Search agents, prompts, delegations, artifacts and Up next", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyK" },
       { id: "view-agents", keys: [["⌘", "E"]], description: "Agents map: every agent and how they relate", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyE" },
       { id: "view-delegations", keys: [["⌘", "D"]], description: "Delegations between agents", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "d" },
       { id: "view-costs", keys: [["⌘", "U"]], description: "Costs and plan usage", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "u" },
