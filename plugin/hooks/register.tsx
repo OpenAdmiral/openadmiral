@@ -1281,7 +1281,14 @@ export const register: Register = on => {
     // Inside the last tool result, the way Claude Code adds its own reminders: a block of
     // its own would show in the chat as if the person had typed it.
     const content = (e.message as { type?: string; content?: unknown }).content
-    const last = Array.isArray(content) ? content.map(b => (b as { type?: string })?.type).lastIndexOf('tool_result') : -1
+    // Only a result of plain text takes it: the API refuses text beside a ToolSearch result's
+    // tool_reference blocks (400 "Tool definitions … cannot be mixed with other content"),
+    // and that row, once stored, broke every later request of the session.
+    const textOnly = (b: unknown) => {
+      const r = b as { type?: string; content?: unknown }
+      return r?.type === 'tool_result' && (typeof r.content === 'string' || (Array.isArray(r.content) && r.content.every(x => (x as { type?: string })?.type === 'text')))
+    }
+    const last = Array.isArray(content) ? content.map(textOnly).lastIndexOf(true) : -1
     if (progressOn && e.message.type === 'user' && last !== -1) {
       const now = await $.clock.now()
       const text = progressNudgeText(now)
@@ -1289,9 +1296,7 @@ export const register: Register = on => {
         lastNudgeAt = now
         const blocks = content as { type: string; content?: unknown }[]
         const result = blocks[last]
-        const inner = typeof result.content === 'string' ? `${result.content}\n\n${text}`
-          : Array.isArray(result.content) ? [...result.content, { type: 'text', text }]
-          : text
+        const inner = typeof result.content === 'string' ? `${result.content}\n\n${text}` : [...(result.content as unknown[]), { type: 'text', text }]
         const nextContent = blocks.map((b, i) => (i === last ? { ...b, content: inner } : b))
         return next({ ...e, message: { ...e.message, content: nextContent } } as typeof e)
       }
