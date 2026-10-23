@@ -625,25 +625,54 @@ fn read_retention(path: &Path) -> u64 {
         .unwrap_or(30)
 }
 
-/// Sets `cleanupPeriodDays` in that settings file, keeping every other setting,
-/// and refusing to touch a file it cannot read back intact.
+/// Sets `cleanupPeriodDays` in that settings file. Only that value's text changes (or one
+/// line is added), so every other setting keeps its order and formatting; the result must
+/// parse back to the same settings plus the new value, or the file is left untouched.
+/// Written to a temporary file and renamed: Claude Code reads (and rewrites) it too.
 fn write_retention(path: &Path, days: u64) -> Result<u64, String> {
     if days == 0 {
         return Err("Retention must be at least one day.".into());
     }
-    let mut settings: Value = match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s)
-            .map_err(|e| format!("{} is not valid JSON, leaving it untouched: {e}", path.display()))?,
-        Err(_) => serde_json::json!({}),
+    let text = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.to_string()),
     };
-    let obj = settings
-        .as_object_mut()
-        .ok_or_else(|| format!("{} is not a JSON object, leaving it untouched", path.display()))?;
-    obj.insert("cleanupPeriodDays".into(), days.into());
+    let before: Value = if text.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&text).map_err(|e| format!("{} is not valid JSON, leaving it untouched: {e}", path.display()))?
+    };
+    let obj = before.as_object().ok_or_else(|| format!("{} is not a JSON object, leaving it untouched", path.display()))?;
+    let out = if obj.is_empty() {
+        format!("{{\n  \"cleanupPeriodDays\": {days}\n}}\n")
+    } else if obj.contains_key("cleanupPeriodDays") {
+        // The key's value: the number after `"cleanupPeriodDays"` and its colon.
+        let key = text.find("\"cleanupPeriodDays\"").ok_or("cleanupPeriodDays not found in the text")?;
+        let colon = key + text[key..].find(':').ok_or("cleanupPeriodDays has no value")?;
+        let start = colon + 1 + text[colon + 1..].len() - text[colon + 1..].trim_start().len();
+        let end = start + text[start..].find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == 'e' || c == 'E' || c == '+')).unwrap_or(text.len() - start);
+        format!("{}{days}{}", &text[..start], &text[end..])
+    } else {
+        // A new first key, indented like the file's own first key.
+        let brace = text.find('{').ok_or("no object in the file")?;
+        let rest = &text[brace + 1..];
+        let indent: String = rest.trim_start_matches(['\r', '\n']).chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let indent = if indent.is_empty() { "  ".to_string() } else { indent };
+        format!("{}{{\n{indent}\"cleanupPeriodDays\": {days},{}", &text[..brace], rest)
+    };
+    let mut expected = obj.clone();
+    expected.insert("cleanupPeriodDays".into(), days.into());
+    if serde_json::from_str::<Value>(&out).ok() != Some(Value::Object(expected)) {
+        return Err(format!("Could not change {} safely, leaving it untouched", path.display()));
+    }
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    let mut out = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    out.push('\n');
-    std::fs::write(path, out).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.openadmiral-tmp");
+    std::fs::write(&tmp, out).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
     Ok(days)
 }
 
@@ -701,6 +730,22 @@ mod retention_tests {
         assert_eq!(v["cleanupPeriodDays"], 365);
         assert!(text.find("\"model\"").unwrap() < text.find("\"env\"").unwrap(), "key order kept");
         assert!(text.ends_with('\n'));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn changes_only_that_value_keeping_the_file_as_written() {
+        let path = temp_settings("format");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = "{\n    \"zeta\": true,\n    \"cleanupPeriodDays\": 30,\n    \"alpha\": [1, 2]\n}\n";
+        std::fs::write(&path, original).unwrap();
+        assert_eq!(write_retention(&path, 365), Ok(365));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original.replace("30", "365"));
+        // Added when missing, with the file's own indent, before the other keys.
+        std::fs::write(&path, "{\n    \"zeta\": true\n}\n").unwrap();
+        assert_eq!(write_retention(&path, 90), Ok(90));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n    \"cleanupPeriodDays\": 90,\n    \"zeta\": true\n}\n");
+        assert!(!path.with_extension("json.openadmiral-tmp").exists());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
