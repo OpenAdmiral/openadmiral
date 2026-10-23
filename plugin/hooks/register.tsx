@@ -357,6 +357,16 @@ async function noteJobs($: EngineInterface, message: { type?: string; content?: 
   if (jobs !== (me.jobs ?? [])) touch($, { jobs })
 }
 
+async function refreshSettings($: EngineInterface) {
+  const settings = await readJson<{ showProgressCalls?: boolean }>($, `${root}/settings.json`)
+  const show = settings?.showProgressCalls === true
+  if (show !== showProgressCalls) {
+    showProgressCalls = show
+    // Already drawn rows follow the new choice.
+    $.ui.invalidate('ui.render')
+  }
+}
+
 async function readJson<T>($: EngineInterface, path: string): Promise<T | undefined> {
   try {
     return JSON.parse(await $.fs.read(path)) as T
@@ -650,6 +660,8 @@ const STATUS_TOOL = 'status'
 const SHOW_TOOL = 'show'
 const PROGRESS_TOOL = 'progress'
 let progressOn = false
+// The app's settings.json (docs/CONTRACT.md): progress calls stay out of the chat unless asked for.
+let showProgressCalls = false
 let lastNudgeAt = 0
 // A long turn with no recent report gets a reminder beside the next tool result.
 const NUDGE_AFTER_MS = 30_000
@@ -800,8 +812,10 @@ export const register: Register = on => {
     await refreshUsage($)
     await flush($)
     // Each step on its own: one failing (git in a vanished folder) must not stop the others.
+    await refreshSettings($).catch(() => undefined)
     $.clock.every(HEARTBEAT_MS, () => {
       void (async () => {
+        await refreshSettings($).catch(() => undefined)
         await refreshGit($).catch(() => undefined)
         await refreshUsage($).catch(() => undefined)
         await refreshSubagents($).catch(() => undefined)
@@ -1089,6 +1103,14 @@ export const register: Register = on => {
   })
 
   // Delegation calls: a card instead of every argument and the plugin's long answer.
+  // Progress reports are for the app's bar, not for reading: hidden in the chat unless the
+  // person turns them on (OpenAdmiral menu → Show Progress Reports in Chat).
+  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__progress' } }, ($, e, next) => {
+    if (showProgressCalls || e.props.isErrored) return next(e)
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__delegate' } }, ($, e, next) => {
     if (e.props.isErrored || e.props.isInterrupted) return next(e)
     return delegationRow($.ui.resolve(e), delegationCard('delegate', e.props.input, e.props.output), e.props.isRunning)

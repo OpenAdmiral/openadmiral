@@ -1071,6 +1071,8 @@ fn handle_menu(app: &AppHandle, id: &str) {
         tauri::async_runtime::spawn(async move {
             let _ = updater::check(&app, true).await;
         });
+    } else if id == "app:progress-calls" {
+        set_show_progress_calls(!show_progress_calls());
     } else if id == "help:telemetry" {
         // The menu toggles its own checkmark; follow it.
         telemetry::set_enabled(app, !telemetry::enabled(app));
@@ -1096,12 +1098,38 @@ fn heartbeat_attached(app: AppHandle) {
     });
 }
 
+/// `~/.claude/openadmiral/settings.json` (app → mod): what the person chose for every session.
+fn admiral_settings() -> serde_json::Map<String, Value> {
+    std::fs::read_to_string(admiral_dir().join("settings.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Whether the plugin's progress calls show in the chat (hidden unless the person asks).
+fn show_progress_calls() -> bool {
+    admiral_settings().get("showProgressCalls").and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn set_show_progress_calls(on: bool) {
+    let mut settings = admiral_settings();
+    settings.insert("showProgressCalls".into(), Value::Bool(on));
+    let path = admiral_dir().join("settings.json");
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, Value::Object(settings).to_string()).is_ok() {
+        let _ = std::fs::rename(tmp, path);
+    }
+}
+
 /// The macOS menu bar without "Close Window", so ⌘W reaches the app (it closes
 /// the selected agent); the red button still hides the window.
 fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     let openadmiral = Submenu::with_items(app, "OpenAdmiral", true, &[
         // Our own About (AboutSheet.tsx): macOS's panel shows credits as a bare text box.
         &MenuItem::with_id(app, "app:about", "About OpenAdmiral", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &CheckMenuItem::with_id(app, "app:progress-calls", "Show Progress Reports in Chat", true, show_progress_calls(), None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &PredefinedMenuItem::hide(app, None)?,
         &PredefinedMenuItem::hide_others(app, None)?,

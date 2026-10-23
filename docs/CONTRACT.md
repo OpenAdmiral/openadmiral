@@ -153,6 +153,13 @@ longer lists it (`handoff` only; `exit` just closes the session). A session that
 message yet has no transcript to resume (`--resume` fails with "source session … not
 found"): the app starts `claude --bg -n <name>` in its folder instead, and that new id replaces it.
 
+## settings.json (app → mod)
+
+`{ showProgressCalls?: boolean }`: what the person chose for every session, from the
+app's OpenAdmiral menu. `showProgressCalls` (default false) shows the `progress` tool
+calls in the chat; hidden, the mod draws them as nothing. The mod reads it at start and
+every heartbeat. The app writes it whole (tmp + rename), keeping keys it does not know.
+
 ## attached.json (app → statusline)
 
 `{ updatedAt: number, sessions: string[] }`: the sessions shown in the app's
