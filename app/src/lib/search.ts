@@ -71,7 +71,8 @@ export function collect(agents: Agent[], delegations: AdmiralDelegation[], artif
   return hits;
 }
 
-const ORDER: Section[] = ["Actions", "Agents", "Prompts", "Delegations", "Artifacts", "Up next"];
+// What is already running comes first: actions (a new agent, a view) are what you reach for least.
+const ORDER: Section[] = ["Agents", "Prompts", "Delegations", "Artifacts", "Up next", "Actions"];
 /** Hits shown per section, so one busy section does not push the others out. */
 const PER_SECTION = 6;
 

@@ -36,6 +36,19 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
     }
   }, [isOpen, initialCwd]);
 
+  // Esc closes it, before the terminal underneath sees the key.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || busy) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [isOpen, busy, onClose]);
+
   const pick = async () => {
     const dir = await open({ directory: true, defaultPath: cwd || undefined });
     if (typeof dir === "string") choose(dir);

@@ -735,6 +735,11 @@ function Unplugged({ agent, installed }: { agent: Agent; installed: boolean }) {
   );
 }
 
+/** Agents this run of the app already resumed on its own: once each, so a failure does not loop. */
+const autoResumed = new Set<string>();
+/** Opened, not passed over: ⌥↓ through the list moves on before this. */
+const AUTO_RESUME_MS = 1000;
+
 function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now: number; handoff?: Handoff; request?: AdmiralRequest }) {
   const s = agent.session;
   const [handoff, setHandoff] = useState(false);
@@ -743,6 +748,19 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
   const inTerminal = runsElsewhere(agent);
   const where = whereLabel(agent) ?? "a terminal window";
   const panel = inExtension(agent);
+  // A closed session opened here resumes by itself, as if Resume had been pressed.
+  // Not one with no conversation to continue: resuming that would start a new session.
+  const stopped = !inTerminal && !panel && !agent.cli && !agent.unplugged && !pending && agent.session?.hasTranscript !== false;
+  useEffect(() => {
+    if (!stopped || autoResumed.has(agent.id)) return;
+    const t = setTimeout(() => {
+      autoResumed.add(agent.id);
+      startHandoff(agent.id, agent.cli?.name ?? agent.session?.name ?? agent.name, agent.cwd).catch((e) => setStartError(String(e)));
+    }, AUTO_RESUME_MS);
+    return () => clearTimeout(t);
+    // Once per opening: the agent's own updates must not restart the clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id, stopped]);
   // The job finished (or was cancelled): close the sheet instead of leaving its last step spinning.
   const hadJob = useRef(false);
   useEffect(() => {

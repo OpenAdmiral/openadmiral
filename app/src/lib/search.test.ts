@@ -28,12 +28,18 @@ describe("search", () => {
     expect(search(hits, "rate")[0]).toMatchObject({ section: "Agents", title: "rate-limits" });
     expect(search(hits, "429")[0]).toMatchObject({ section: "Delegations", target: { kind: "view", view: "delegations" } });
     expect(search(hits, "e2e")[0]).toMatchObject({ section: "Up next", detail: "checkout-redesign" });
-    expect(search(hits, "new agent app")[0]).toMatchObject({ section: "Actions", target: { kind: "new-agent", cwd: "/x/app" } });
+    expect(search(hits, "new agent app").find((h) => h.section === "Actions")).toMatchObject({ target: { kind: "new-agent", cwd: "/x/app" } });
     expect(search(hits, "costs")[0]).toMatchObject({ target: { kind: "view", view: "costs" } });
   });
 
   it("needs every word", () => {
     expect(search(hits, "rate apple")).toEqual([]);
+  });
+
+  it("puts running agents before the actions", () => {
+    const sections = search(hits, "app").map((h) => h.section);
+    expect(sections[0]).toBe("Agents");
+    expect(sections.at(-1)).toBe("Actions");
   });
 
   it("shows the agents and a few actions before any typing", () => {
