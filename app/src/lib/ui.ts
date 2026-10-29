@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clampScale, type SplitState } from "./split";
 
 /** Layout choices kept across restarts (the app data dir's ui-state.json). */
 export type UiState = {
@@ -10,6 +11,10 @@ export type UiState = {
   /** The inspector's blocks: their order (unknown ids go last) and which are folded. Global, not per agent. */
   blockOrder?: string[];
   blockCollapsed?: Record<string, boolean>;
+  /** The chat area split into panes, each showing an agent (see lib/split.ts). */
+  split?: SplitState;
+  /** Text size of the terminal, conversation and artifacts: 1 is the default. */
+  textScale?: number;
 };
 
 const DEFAULTS: UiState = { leftCollapsed: false, rightCollapsed: false };
@@ -42,6 +47,9 @@ export function useUiState() {
     setBlockCollapsed: (id: string, collapsed: boolean) => update((s) => ({ blockCollapsed: { ...s.blockCollapsed, [id]: collapsed } })),
     setBlockOrder: (blockOrder: string[]) => update(() => ({ blockOrder })),
     resetLayout: () => update(() => ({ blockOrder: undefined, blockCollapsed: undefined })),
+    setSplit: (f: (s: SplitState | undefined) => SplitState) => update((s) => ({ split: f(s.split) })),
+    /** A step bigger (1), smaller (-1), or back to the default (0). */
+    stepText: (dir: 1 | -1 | 0) => update((s) => ({ textScale: dir === 0 ? 1 : clampScale((s.textScale ?? 1) + dir * 0.1) })),
     // Focus mode hides both; leaving it puts each panel back as it was.
     toggleFocus: () =>
       update((s) =>

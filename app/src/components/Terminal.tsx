@@ -78,12 +78,27 @@ function wire() {
   });
 }
 
+/** The terminals' font size, from the text size setting (⌘+ / ⌘−). */
+const BASE_FONT = 12.5;
+let fontSize = BASE_FONT;
+
+/** Resizes every terminal's text (and the ones opened later). */
+export function setTerminalScale(scale: number) {
+  const next = Math.round(BASE_FONT * scale * 2) / 2;
+  if (next === fontSize) return;
+  fontSize = next;
+  for (const [key, t] of live) {
+    t.term.options.fontSize = fontSize;
+    repaintTerminal(key, 60);
+  }
+}
+
 function create(key: string): Live {
   const el = document.createElement("div");
   el.style.height = "100%";
   const term = new XTerm({
     fontFamily: '"JetBrains Mono Variable", "SF Mono", Menlo, monospace',
-    fontSize: 12.5,
+    fontSize,
     lineHeight: 1.25,
     cursorBlink: true,
     cursorStyle: "bar",

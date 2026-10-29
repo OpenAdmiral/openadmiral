@@ -42,6 +42,9 @@ import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
+import { PanePicker, SplitPanes, ViewMenu } from "@/components/Split";
+import { setTerminalScale } from "@/components/Terminal";
+import { prune, relayout, show, SINGLE, type SplitLayout } from "@/lib/split";
 
 export default function App() {
   const { agents: rawAgents, delegations, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded, pluginInstalled } = useAdmiral();
@@ -265,6 +268,8 @@ export default function App() {
       if (d.view === "about") setAbout(true);
       // OPENADMIRAL_VIEW=search:<query> (preview): ⌘K open on that query, for a screenshot.
       if (d.view?.startsWith("search")) setTimeout(() => setPalette(d.view!.slice(7)), 1500);
+      // OPENADMIRAL_VIEW=split:<layout> (preview): the chat split, for a screenshot.
+      if (d.view?.startsWith("split:")) setDemoLayout(d.view.slice(6) as SplitLayout);
       if (d.sort === "recent" || d.sort === "order") setSortMode(d.sort);
       if (d.rail) ui.toggleLeft();
       if (d.inspectorHidden) ui.toggleRight();
@@ -345,6 +350,36 @@ export default function App() {
     return list[i + dir];
   };
 
+  // The chat area split into panes: the agent picked goes to the active pane (or focuses the
+  // pane that has it), so the sidebar and the inspector always follow the active pane.
+  const split = ui.split ?? SINGLE;
+  const viewAgent = view?.kind === "agent" ? view.id : null;
+  useEffect(() => {
+    if (viewAgent) ui.setSplit((s) => show(s ?? SINGLE, viewAgent));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewAgent]);
+  useEffect(() => {
+    if (!cliReady || agents.length === 0) return;
+    const alive = new Set(agents.map((a) => a.id));
+    if (prune(split, alive) !== split) ui.setSplit((s) => prune(s ?? SINGLE, alive));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, cliReady, split]);
+  const textScale = ui.textScale ?? 1;
+  useEffect(() => setTerminalScale(textScale), [textScale]);
+  const setLayout = (layout: SplitLayout) => {
+    // New panes take the agents that come next in the sidebar, the ones that need you first.
+    const candidates = [...shown.filter((a) => a.status === "waiting" || a.status === "working"), ...shown.filter((a) => a.status !== "ended")].map((a) => a.id);
+    ui.setSplit((s) => relayout({ ...(s ?? SINGLE), panes: (s ?? SINGLE).panes.map((p, i) => (i === (s ?? SINGLE).active && viewAgent ? viewAgent : p)) }, layout, candidates));
+  };
+  const [demoLayout, setDemoLayout] = useState<SplitLayout | null>(null);
+  useEffect(() => {
+    if (!demoLayout || !viewAgent || shown.length < 4) return;
+    setDemoLayout(null);
+    setLayout(demoLayout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoLayout, viewAgent, shown.length]);
+  const toggleSplit = () => setLayout(split.layout === "1" ? (split.last ?? "2v") : "1");
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Keys come from the shortcuts table (lib/shortcuts.ts), which also draws the ⌘/ sheet.
@@ -380,6 +415,9 @@ export default function App() {
         "view-artifacts": () => setView({ kind: "artifacts" }),
         "view-costs": () => setView({ kind: "costs" }),
         "view-queue": () => setView({ kind: "queue" }),
+        "split-toggle": toggleSplit,
+        "text-bigger": () => ui.stepText(1),
+        "text-smaller": () => ui.stepText(-1),
         // Close the selected agent (the app menu has no Close Window, so ⌘W is ours).
         "close-agent": () => {
           const a = view?.kind === "agent" ? agents.find((x) => x.id === view.id) : undefined;
@@ -402,9 +440,45 @@ export default function App() {
     // Capture: xterm swallows keys once it has focus.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [shown, view, agents, life.actions, ui, seen.unseen, delegations]);
+  }, [shown, view, agents, life.actions, ui, seen.unseen, delegations, split]);
 
   const selected = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
+  const viewMenu = <ViewMenu layout={split.layout} onLayout={setLayout} scale={textScale} onScale={ui.stepText} />;
+  /** An agent's view: on its own, as one pane of the split, or just its inspector beside them. */
+  const detail = (a: Agent, extra: { key?: string; part?: "all" | "main" | "inspector"; pane?: { active: boolean; onClose?: () => void } }) => (
+    <AgentDetail
+                agent={a}
+                delegations={delegations}
+                now={now}
+                onOpenDelegations={() => setView({ kind: "delegations" })}
+                handoff={handoffs.find((h) => h.sessionId === a.id)}
+                request={requests[a.id]}
+                inspectorHidden={ui.rightCollapsed}
+                onToggleInspector={ui.toggleRight}
+                layout={ui}
+                actions={life.actions}
+                closing={life.closing.has(a.id)}
+                preview={preview}
+                previewAttach={previewChecks.attach}
+                probe={previewChecks.probe}
+                agents={agents}
+                queue={queues[a.id]}
+                onError={(m) => life.notify(m, "error")}
+                onNotice={(m) => life.notify(m)}
+                onConfirm={life.setConfirm}
+                artifacts={artifacts.filter((a) => a.sessionId === a.id)}
+                artifactFocus={artifactFocus?.sessionId === a.id ? artifactFocus : undefined}
+                turnFocus={turnFocus?.sessionId === a.id ? turnFocus : undefined}
+                seen={seen}
+                onClaudeLink={openClaude}
+                renaming={ui.leftCollapsed && rename.editing === a.id ? { save: rename.commit, cancel: rename.cancel } : undefined}
+                pluginBehind={behindIds.includes(a.id) ? { reload: () => void reloadPlugins([a.id]) } : undefined}
+                pluginInstalled={pluginInstalled}
+                    viewMenu={viewMenu}
+      textScale={textScale}
+      {...extra}
+    />
+  );
   // With the sidebar collapsed to a rail, the name is edited in the header: show that agent.
   useEffect(() => {
     if (rename.editing && ui.leftCollapsed) setView({ kind: "agent", id: rename.editing });
@@ -471,7 +545,7 @@ export default function App() {
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={view?.kind === "agent" ? view.id : (view?.kind ?? "empty")}
+            key={view?.kind === "agent" ? (split.layout !== "1" ? "split" : view.id) : (view?.kind ?? "empty")}
             className="h-full"
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -509,36 +583,45 @@ export default function App() {
               <QueueView queues={queues} agents={agents} delegations={delegations} now={now} onJump={(id) => setView({ kind: "agent", id })} onError={(m) => life.notify(m, "error")} />
             ) : view?.kind === "delegations" ? (
               <DelegationsView delegations={delegations} agents={agents} now={now} onJump={(id) => setView({ kind: "agent", id })} queues={queues} />
+            ) : selected && split.layout !== "1" ? (
+              <div className="flex h-full">
+                <div className="min-w-0 flex-1 p-1.5">
+                  <SplitPanes
+                    layout={split.layout}
+                    ratios={split.ratios}
+                    onRatios={(ratios) => ui.setSplit((s) => ({ ...(s ?? SINGLE), ratios }))}
+                    render={(i) => {
+                      const a = agents.find((x) => x.id === split.panes[i]);
+                      const isActive = i === split.active;
+                      if (!a)
+                        return (
+                          <PanePicker
+                            agents={shown.filter((x) => !split.panes.includes(x.id))}
+                            active={isActive}
+                            onFocus={() => ui.setSplit((s) => ({ ...(s ?? SINGLE), active: i }))}
+                            onPick={(id) => {
+                              ui.setSplit((s) => ({ ...(s ?? SINGLE), panes: (s ?? SINGLE).panes.map((p, j) => (j === i ? id : p)), active: i }));
+                              setView({ kind: "agent", id });
+                            }}
+                          />
+                        );
+                      return (
+                        // A click anywhere in a pane makes it the active one.
+                        <div className="h-full" onPointerDownCapture={() => !isActive && setView({ kind: "agent", id: a.id })}>
+                          {detail(a, {
+                            key: a.id,
+                            part: "main",
+                            pane: { active: isActive, onClose: () => ui.setSplit((s) => ({ ...(s ?? SINGLE), panes: (s ?? SINGLE).panes.map((p, j) => (j === i ? null : p)) })) },
+                          })}
+                        </div>
+                      );
+                    }}
+                  />
+                </div>
+                {detail(selected, { key: `inspector:${selected.id}`, part: "inspector", pane: { active: false } })}
+              </div>
             ) : selected ? (
-              <AgentDetail
-                agent={selected}
-                delegations={delegations}
-                now={now}
-                onOpenDelegations={() => setView({ kind: "delegations" })}
-                handoff={handoffs.find((h) => h.sessionId === selected.id)}
-                request={requests[selected.id]}
-                inspectorHidden={ui.rightCollapsed}
-                onToggleInspector={ui.toggleRight}
-                layout={ui}
-                actions={life.actions}
-                closing={life.closing.has(selected.id)}
-                preview={preview}
-                previewAttach={previewChecks.attach}
-                probe={previewChecks.probe}
-                agents={agents}
-                queue={queues[selected.id]}
-                onError={(m) => life.notify(m, "error")}
-                onNotice={(m) => life.notify(m)}
-                onConfirm={life.setConfirm}
-                artifacts={artifacts.filter((a) => a.sessionId === selected.id)}
-                artifactFocus={artifactFocus?.sessionId === selected.id ? artifactFocus : undefined}
-                turnFocus={turnFocus?.sessionId === selected.id ? turnFocus : undefined}
-                seen={seen}
-                onClaudeLink={openClaude}
-                renaming={ui.leftCollapsed && rename.editing === selected.id ? { save: rename.commit, cancel: rename.cancel } : undefined}
-                pluginBehind={behindIds.includes(selected.id) ? { reload: () => void reloadPlugins([selected.id]) } : undefined}
-                pluginInstalled={pluginInstalled}
-              />
+              detail(selected, {})
             ) : (
               <Empty onNew={() => setSheet({})} pluginInstalled={pluginInstalled} />
             )}

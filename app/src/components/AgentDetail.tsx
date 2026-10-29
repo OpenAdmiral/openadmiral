@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   BranchingPathsUpLinearIcon,
   CheckCircleLinearIcon,
+  CloseCircleLinearIcon,
   CpuLinearIcon,
   DollarLinearIcon,
   FolderLinearIcon,
@@ -15,7 +16,7 @@ import {
 } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
-import { ago, branchTone, cn, compact, contextUsed, fillText, modelLabel, usd } from "@/lib/utils";
+import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, modelLabel, usd } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
 import { ArtifactsPane } from "./ArtifactsPane";
@@ -84,12 +85,24 @@ type Props = {
   pluginBehind?: { reload: () => void };
   /** The OpenAdmiral plugin is installed (for a session found running without it). */
   pluginInstalled?: boolean;
+  /**
+   * One of several panes (the chat area split): only the active one takes the keys and the
+   * keyboard focus; the header is tighter; `onClose` empties the pane.
+   */
+  pane?: { active: boolean; onClose?: () => void };
+  /** What to draw: everything, the agent without its inspector (a pane), or only the inspector (beside the panes). */
+  part?: "all" | "main" | "inspector";
+  /** The layout and text size control, in the header. */
+  viewMenu?: React.ReactNode;
+  /** Text size of the conversation and artifacts (the terminal's is set on the terminals). */
+  textScale?: number;
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1 }: Props) {
+  const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
   const tasks = pickTasks(s, transcript);
@@ -132,6 +145,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
   // ⌃1 / ⌃2 / ⌃3 switch tabs (⌘1–9 already switch agents in the sidebar).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!active) return;
       const id = matchShortcut(e);
       const t = id === "tab-terminal" ? "main" : id === "tab-conversation" ? "conversation" : id === "tab-artifacts" ? "artifacts" : undefined;
       if (!t) return;
@@ -141,7 +155,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [agent.id, attached]);
+  }, [agent.id, attached, active]);
   useEffect(() => {
     if (artifactFocus && freshFocus(`artifact:${artifactFocus.at}`)) setTab("artifacts");
   }, [artifactFocus?.at]);
@@ -149,11 +163,12 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
   // picked) puts the keyboard there, so one click is enough to start typing.
   useEffect(() => {
     if (tab === "main" && attached) {
-      focusTerminal(agent.id);
+      // Several panes: only the active one takes the keyboard.
+      if (active) focusTerminal(agent.id);
       // Back on screen: the TUI may have been resized while hidden; bring it back in full.
       repaintTerminal(agent.id);
     }
-  }, [tab, agent.id, attached]);
+  }, [tab, agent.id, attached, active]);
   const unseenHere = artifacts.filter(seen.isUnseen).length;
   const mine = delegations.filter(
     (d) => d.from.sessionId === agent.id || d.to.sessionId === agent.id || (!d.to.sessionId && d.to.address === agent.name),
@@ -186,106 +201,10 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
     confirm: onConfirm,
   };
 
-  return (
-    <div className="flex h-full min-w-0 flex-col">
-      <Header
-        agent={agent}
-        now={now}
-        actions={actions}
-        closing={closing}
-        request={request}
-        openMenu={!!preview && turnFocus?.index === -2}
-        inspector={{ hidden: inspectorHidden, attention: inspectorAttention, toggle: onToggleInspector }}
-        cmd={cmd}
-        renaming={renaming}
-        pluginBehind={pluginBehind}
-      />
-      {agent.status === "waiting" && s?.waiting && (
-        <div className="mx-5 mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm">
-          <StatusIcon status="waiting" size={16} tip={false} />
-          <span className="font-semibold text-amber-800 dark:text-amber-200">
-            {s.waiting.reason === "permission" ? "Waiting for a permission" : "Waiting for your answer"}
-          </span>
-          {s.waiting.detail && <span className="truncate text-amber-800/80 dark:text-amber-200/80">{s.waiting.detail}</span>}
-          <span className="ml-auto text-xs text-amber-800/70 tabular dark:text-amber-200/70">{ago(s.waiting.since, now)}</span>
-        </div>
-      )}
-      <div className="flex min-h-0 flex-1 px-3 pb-3">
-        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-sm">
-          <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5">
-            {(["main", "conversation", "artifacts"] as const).map((t, i) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={cn(
-                  "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 pt-1 pb-2 text-xs transition-colors",
-                  tab === t ? "border-brand-500 font-semibold text-ink" : "border-transparent text-ink-3 hover:text-ink",
-                )}
-              >
-                {t === "main" ? (agent.attachable && agent.live ? "Terminal" : "Session") : t === "conversation" ? "Conversation" : "Artifacts"}
-                <span className="text-[10px] font-normal text-ink-3">⌃{i + 1}</span>
-                {t === "artifacts" && artifacts.length > 0 && (
-                  <span className={cn("rounded-full px-1.5 text-[10px] leading-4 tabular", unseenHere ? "bg-brand-600 font-semibold text-white" : "bg-line text-ink-3")}>{artifacts.length}</span>
-                )}
-              </button>
-            ))}
-          </div>
-          {/* The terminal stays mounted behind the Artifacts tab, so switching keeps its session. */}
-          <div className={cn("relative min-h-0 flex-1", tab !== "main" && "hidden", agent.attachable && agent.live && "bg-term")}>
-          {preview && !previewAttach && agent.attachable ? (
-            <div className="flex h-full items-center justify-center text-xs text-ink-3">Terminal not attached in preview mode.</div>
-          ) : agent.attachable && agent.live ? (
-            <AgentTerminal
-              key={agent.id}
-              agentKey={agent.id}
-              argv={["claude", "attach", agent.cli?.id ?? agent.id.slice(0, 8)]}
-              onCloseSession={() => actions.close(agent)}
-              instance={agent.cli?.startedAt}
-              cwd={agent.cwd}
-              className="h-full"
-            />
-          ) : (
-            agent.unplugged ? (
-              <Unplugged agent={agent} installed={pluginInstalled} />
-            ) : (
-              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} />
-            )
-          )}
-        </div>
-          {tab === "conversation" && (
-            <div className="min-h-0 flex-1">
-              <ConversationView
-                transcript={transcript}
-                running={agent.status === "working"}
-                now={now}
-                jump={jump}
-                onActive={setReading}
-                onReply={
-                  attached
-                    ? () => {
-                        setTab("main");
-                        focusTerminal(agent.id);
-                      }
-                    : undefined
-                }
-                onClaudeLink={onClaudeLink}
-              />
-            </div>
-          )}
-          {tab === "artifacts" && (
-            <div className="min-h-0 flex-1">
-              <ArtifactsPane artifacts={artifacts} focus={artifactFocus?.key || undefined} focusVersion={artifactFocus?.version} focusAt={artifactFocus?.at} now={now} isUnseen={seen.isUnseen} markSeen={seen.markSeen} onError={onError} onClaudeLink={onClaudeLink} />
-            </div>
-          )}
-        </div>
-        {/* The inspector slides shut; its content keeps its width so nothing reflows mid-animation. */}
-        <div
-          aria-hidden={inspectorHidden}
-          className="shrink-0 overflow-hidden transition-[width,margin,opacity] duration-200 ease-out motion-reduce:transition-none"
-          style={{ width: inspectorHidden ? 0 : 340, marginLeft: inspectorHidden ? 0 : 12, opacity: inspectorHidden ? 0 : 1 }}
-        >
-        <aside className="h-full w-[340px]">
-          <BlockStack
+  const hideInspector = part === "main" || inspectorHidden;
+  const inspectorEl = (
+    <aside className="h-full w-[340px]">
+      <BlockStack
             order={layout.blockOrder}
             collapsed={layout.blockCollapsed}
             onCollapse={layout.setBlockCollapsed}
@@ -342,8 +261,123 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
               { id: "activity", title: "Activity", defaultCollapsed: true, aside: s?.activity?.length || undefined, body: <div className="px-3 pb-3"><Activity session={s} now={now} /></div> },
             ]}
           />
-        </aside>
+    </aside>
+  );
+  // The inspector slides shut; its content keeps its width so nothing reflows mid-animation.
+  const inspectorSlot = (
+    <div
+      aria-hidden={hideInspector}
+      className="shrink-0 overflow-hidden transition-[width,margin,opacity] duration-200 ease-out motion-reduce:transition-none"
+      style={{ width: hideInspector ? 0 : 340, marginLeft: hideInspector ? 0 : 12, opacity: hideInspector ? 0 : 1 }}
+    >
+      {inspectorEl}
+    </div>
+  );
+  if (part === "inspector") return <div className="flex h-full pt-3 pr-3 pb-3">{inspectorSlot}</div>;
+  const compact = !!pane;
+
+  return (
+    <div className="flex h-full min-w-0 flex-col">
+      <Header
+        agent={agent}
+        now={now}
+        actions={actions}
+        closing={closing}
+        request={request}
+        openMenu={!!preview && turnFocus?.index === -2}
+        inspector={{ hidden: inspectorHidden, attention: inspectorAttention, toggle: onToggleInspector }}
+        cmd={cmd}
+        renaming={renaming}
+        pluginBehind={pluginBehind}
+        compact={compact}
+        active={active}
+        viewMenu={viewMenu}
+        onClosePane={pane?.onClose}
+      />
+      {agent.status === "waiting" && s?.waiting && (
+        <div className={cn("mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm", compact ? "mx-3 py-2 text-xs" : "mx-5")}>
+          <StatusIcon status="waiting" size={16} tip={false} />
+          <span className="shrink-0 font-semibold whitespace-nowrap text-amber-800 dark:text-amber-200">
+            {s.waiting.reason === "permission" ? "Waiting for a permission" : "Waiting for your answer"}
+          </span>
+          {s.waiting.detail && <span className="truncate text-amber-800/80 dark:text-amber-200/80">{s.waiting.detail}</span>}
+          <span className="ml-auto text-xs text-amber-800/70 tabular dark:text-amber-200/70">{ago(s.waiting.since, now)}</span>
         </div>
+      )}
+      <div className={cn("flex min-h-0 flex-1", compact ? "px-1.5 pb-1.5" : "px-3 pb-3")}>
+        <div
+          className={cn(
+            "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-canvas shadow-sm transition-[border-color,box-shadow] duration-150",
+            compact && active ? "border-brand-500/70 ring-[3px] ring-brand-500/15" : "border-line",
+          )}
+        >
+          <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5">
+            {(["main", "conversation", "artifacts"] as const).map((t, i) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 pt-1 pb-2 text-xs transition-colors",
+                  tab === t ? "border-brand-500 font-semibold text-ink" : "border-transparent text-ink-3 hover:text-ink",
+                )}
+              >
+                {t === "main" ? (agent.attachable && agent.live ? "Terminal" : "Session") : t === "conversation" ? "Conversation" : "Artifacts"}
+                <span className="text-[10px] font-normal text-ink-3">⌃{i + 1}</span>
+                {t === "artifacts" && artifacts.length > 0 && (
+                  <span className={cn("rounded-full px-1.5 text-[10px] leading-4 tabular", unseenHere ? "bg-brand-600 font-semibold text-white" : "bg-line text-ink-3")}>{artifacts.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {/* The terminal stays mounted behind the Artifacts tab, so switching keeps its session. */}
+          <div className={cn("relative min-h-0 flex-1", tab !== "main" && "hidden", agent.attachable && agent.live && "bg-term")}>
+          {preview && !previewAttach && agent.attachable ? (
+            <div className="flex h-full items-center justify-center text-xs text-ink-3">Terminal not attached in preview mode.</div>
+          ) : agent.attachable && agent.live ? (
+            <AgentTerminal
+              key={agent.id}
+              agentKey={agent.id}
+              argv={["claude", "attach", agent.cli?.id ?? agent.id.slice(0, 8)]}
+              onCloseSession={() => actions.close(agent)}
+              instance={agent.cli?.startedAt}
+              cwd={agent.cwd}
+              className="h-full"
+            />
+          ) : (
+            agent.unplugged ? (
+              <Unplugged agent={agent} installed={pluginInstalled} />
+            ) : (
+              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} />
+            )
+          )}
+        </div>
+          {tab === "conversation" && (
+            <div className="min-h-0 flex-1" style={textScale !== 1 ? { zoom: textScale } : undefined}>
+              <ConversationView
+                transcript={transcript}
+                running={agent.status === "working"}
+                now={now}
+                jump={jump}
+                onActive={setReading}
+                onReply={
+                  attached
+                    ? () => {
+                        setTab("main");
+                        focusTerminal(agent.id);
+                      }
+                    : undefined
+                }
+                onClaudeLink={onClaudeLink}
+              />
+            </div>
+          )}
+          {tab === "artifacts" && (
+            <div className="min-h-0 flex-1" style={textScale !== 1 ? { zoom: textScale } : undefined}>
+              <ArtifactsPane artifacts={artifacts} focus={artifactFocus?.key || undefined} focusVersion={artifactFocus?.version} focusAt={artifactFocus?.at} now={now} isUnseen={seen.isUnseen} markSeen={seen.markSeen} onError={onError} onClaudeLink={onClaudeLink} />
+            </div>
+          )}
+        </div>
+        {part === "all" && inspectorSlot}
       </div>
     </div>
   );
@@ -367,6 +401,10 @@ function Header({
   cmd,
   renaming,
   pluginBehind,
+  compact,
+  active = true,
+  viewMenu,
+  onClosePane,
 }: {
   agent: Agent;
   now: number;
@@ -378,6 +416,10 @@ function Header({
   cmd: HeaderCommands;
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
   pluginBehind?: { reload: () => void };
+  compact?: boolean;
+  active?: boolean;
+  viewMenu?: React.ReactNode;
+  onClosePane?: () => void;
 }) {
   const s = agent.session;
   const ctx = s?.context;
@@ -403,28 +445,31 @@ function Header({
     },
   ].filter((x): x is ActionItem => !!x);
   return (
-    <header data-tauri-drag-region className="flex shrink-0 flex-col gap-2.5 px-5 pt-3.5 pb-3.5">
-      <div data-tauri-drag-region className="flex items-center gap-3">
-        <StatusIcon status={agent.status} size={18} />
+    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5")}>
+      <div data-tauri-drag-region className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+        <StatusIcon status={agent.status} size={compact ? 15 : 18} />
         {renaming ? (
           <NameEditor value={agent.name} onSave={(name) => renaming.save(agent, name)} onCancel={renaming.cancel} className="max-w-sm text-xl tracking-tight" />
         ) : (
-          <h1 className="truncate text-xl font-semibold tracking-tight text-ink">
+          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", active ? "text-ink" : "text-ink-2")}>
             {agent.name}
             {agent.twin && <span className="ml-2 font-mono text-sm font-normal text-ink-3">{agent.twin}</span>}
           </h1>
         )}
-        <span className="text-sm text-ink-3">{STATUS_LABEL[agent.status]}</span>
+        <span className={cn("shrink-0 text-ink-3", compact ? "text-xs" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>
         {closing && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             {request?.waiting ? `closing when done · waiting: ${request.waiting}` : "closing after this turn…"}
           </span>
         )}
-        {agent.status === "working" && s?.turn && (
+        {agent.status === "working" && s?.turn && !compact && (
           <span className="truncate text-sm text-ink-3">· {ago(s.turn.startedAt, now)} on “{s.turn.prompt.slice(0, 80)}”</span>
         )}
         <span className="flex-1" />
-        <UnderwayPill />
+        {/* In panes, the window-wide controls sit on the active one only. */}
+        {!compact && <UnderwayPill />}
+        {(!compact || active) && viewMenu}
+        {(!compact || active) && (
         <Tip side="bottom" content={<TipLabel label={inspector.hidden ? "Show the inspector" : "Hide the inspector"} kbd="⌘⌥0" />}>
           <button
             onClick={inspector.toggle}
@@ -438,6 +483,7 @@ function Header({
             {inspector.attention && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-brand-500 ring-2 ring-canvas" />}
           </button>
         </Tip>
+        )}
         <ActionMenu
           items={agentActionItems(agent, actions)}
           defaultOpen={openMenu}
@@ -456,8 +502,19 @@ function Header({
             </Tip>
           )}
         />
+        {onClosePane && (
+          <Tip side="bottom" content={<TipLabel label="Close this pane" />}>
+            <button
+              onClick={onClosePane}
+              aria-label="Close this pane"
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <CloseCircleLinearIcon size={17} />
+            </button>
+          </Tip>
+        )}
       </div>
-      <div data-tauri-drag-region className="flex flex-wrap items-center gap-1.5">
+      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", compact ? "flex-nowrap overflow-hidden whitespace-nowrap [mask-image:linear-gradient(to_right,black_85%,transparent)] [&>*]:shrink-0" : "flex-wrap")}>
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
             {agent.project}
@@ -501,7 +558,7 @@ function Header({
                 </span>
                 {ctx?.tokens !== undefined && (
                   <span className="text-xs text-ink-3 tabular">
-                    {compact(ctx.tokens)} / {compact(ctx.window)} tokens
+                    {shortNumber(ctx.tokens)} / {shortNumber(ctx.window)} tokens
                   </span>
                 )}
               </div>
@@ -517,7 +574,7 @@ function Header({
                         {used !== undefined
                           ? `${Math.round(used)}% of the usable context; Claude auto-compacts at 100%.`
                           : "Just compacted: the size shows again after the next reply."}
-                        {ctx?.tokens !== undefined && ` ${compact(ctx.tokens)} of ${compact(ctx.window)} tokens.`}
+                        {ctx?.tokens !== undefined && ` ${shortNumber(ctx.tokens)} of ${shortNumber(ctx.window)} tokens.`}
                       </span>
                     </span>
                   )

@@ -1,0 +1,241 @@
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { LAYOUTS, type SplitLayout } from "@/lib/split";
+import type { Agent } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { StatusIcon } from "./StatusIcon";
+import { Tip, TipLabel } from "./Tooltip";
+import { Kbd } from "./primitives";
+
+/**
+ * The panes of a split chat area. `render(i)` draws pane i; the dividers drag (double-click
+ * puts one back in the middle). Four panes share the vertical divider, so they stay a grid.
+ */
+export function SplitPanes({ layout, ratios = [0.5, 0.5], onRatios, render }: { layout: SplitLayout; ratios?: [number, number]; onRatios: (r: [number, number]) => void; render: (i: number) => ReactNode }) {
+  const [a, b] = ratios;
+  const setA = (x: number) => onRatios([x, b]);
+  const setB = (x: number) => onRatios([a, x]);
+  switch (layout) {
+    case "2v":
+      return <Two dir="row" ratio={a} onRatio={setA} first={render(0)} second={render(1)} />;
+    case "2h":
+      return <Two dir="col" ratio={a} onRatio={setA} first={render(0)} second={render(1)} />;
+    case "3l":
+      return <Two dir="row" ratio={a} onRatio={setA} first={render(0)} second={<Two dir="col" ratio={b} onRatio={setB} first={render(1)} second={render(2)} />} />;
+    case "3t":
+      return <Two dir="col" ratio={a} onRatio={setA} first={render(0)} second={<Two dir="row" ratio={b} onRatio={setB} first={render(1)} second={render(2)} />} />;
+    case "4":
+      return (
+        <Two
+          dir="col"
+          ratio={a}
+          onRatio={setA}
+          first={<Two dir="row" ratio={b} onRatio={setB} first={render(0)} second={render(1)} />}
+          second={<Two dir="row" ratio={b} onRatio={setB} first={render(2)} second={render(3)} />}
+        />
+      );
+    default:
+      return <>{render(0)}</>;
+  }
+}
+
+function Two({ dir, ratio, onRatio, first, second }: { dir: "row" | "col"; ratio: number; onRatio: (r: number) => void; first: ReactNode; second: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const row = dir === "row";
+  const move = (e: React.PointerEvent) => {
+    if (!dragging || !box.current) return;
+    const r = box.current.getBoundingClientRect();
+    const x = row ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height;
+    onRatio(Math.round(Math.min(0.8, Math.max(0.2, x)) * 1000) / 1000);
+  };
+  return (
+    <div ref={box} className={cn("flex h-full min-h-0 w-full min-w-0", row ? "flex-row" : "flex-col")}>
+      <div className="min-h-0 min-w-0" style={{ flex: `${ratio} 1 0` }}>
+        {first}
+      </div>
+      <div
+        role="separator"
+        aria-orientation={row ? "vertical" : "horizontal"}
+        title="Drag to resize; double-click to even out"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDragging(true);
+        }}
+        onPointerMove={move}
+        onPointerUp={() => setDragging(false)}
+        onPointerCancel={() => setDragging(false)}
+        onDoubleClick={() => onRatio(0.5)}
+        className={cn("group relative z-10 shrink-0", row ? "-mx-1 w-2 cursor-col-resize" : "-my-1 h-2 cursor-row-resize")}
+      >
+        <span
+          className={cn(
+            "absolute rounded-full bg-brand-500 opacity-0 transition-opacity duration-150 group-hover:opacity-60",
+            dragging && "opacity-90",
+            row ? "inset-y-6 left-1/2 w-[3px] -translate-x-1/2" : "inset-x-6 top-1/2 h-[3px] -translate-y-1/2",
+          )}
+        />
+      </div>
+      <div className="min-h-0 min-w-0" style={{ flex: `${1 - ratio} 1 0` }}>
+        {second}
+      </div>
+      {/* While dragging, terminals and frames would swallow the pointer. */}
+      {dragging && <div className={cn("fixed inset-0 z-50", row ? "cursor-col-resize" : "cursor-row-resize")} />}
+    </div>
+  );
+}
+
+/** A small drawing of a layout: its panes as rounded blocks. */
+export function LayoutGlyph({ layout, className }: { layout: SplitLayout; className?: string }) {
+  const cell = "rounded-[2px] bg-current";
+  const grid: Record<SplitLayout, ReactNode> = {
+    "1": <span className={cn(cell, "col-span-2 row-span-2")} />,
+    "2v": (
+      <>
+        <span className={cn(cell, "row-span-2")} />
+        <span className={cn(cell, "row-span-2")} />
+      </>
+    ),
+    "2h": (
+      <>
+        <span className={cn(cell, "col-span-2")} />
+        <span className={cn(cell, "col-span-2")} />
+      </>
+    ),
+    "3l": (
+      <>
+        <span className={cn(cell, "row-span-2")} />
+        <span className={cell} />
+        <span className={cell} />
+      </>
+    ),
+    "3t": (
+      <>
+        <span className={cn(cell, "col-span-2")} />
+        <span className={cell} />
+        <span className={cell} />
+      </>
+    ),
+    "4": (
+      <>
+        <span className={cell} />
+        <span className={cell} />
+        <span className={cell} />
+        <span className={cell} />
+      </>
+    ),
+  };
+  return <span className={cn("grid size-4 grid-cols-2 grid-rows-2 gap-[2px]", className)}>{grid[layout]}</span>;
+}
+
+/** The header's layout button: the six layouts and the text size. */
+export function ViewMenu({ layout, onLayout, scale, onScale }: { layout: SplitLayout; onLayout: (l: SplitLayout) => void; scale: number; onScale: (dir: 1 | -1 | 0) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <Tip side="bottom" content={open ? null : <TipLabel label="Layout and text size" kbd="⌘\" />}>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Layout and text size"
+          className={cn(
+            "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
+            open && "bg-line text-ink",
+          )}
+        >
+          <LayoutGlyph layout={layout} className="opacity-80" />
+        </button>
+      </Tip>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full right-0 z-40 mt-1.5 w-[248px] rounded-xl bg-canvas p-3 shadow-2xl ring-1 ring-line-strong dark:bg-[#1d2026]"
+          >
+            <div className="mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+              Layout
+              <span className="ml-auto flex items-center gap-1 font-normal normal-case tracking-normal">
+                <Kbd>⌘\</Kbd> split / one
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {LAYOUTS.map((l) => (
+                <button
+                  key={l.id}
+                  title={l.label}
+                  aria-label={l.label}
+                  aria-pressed={layout === l.id}
+                  onClick={() => onLayout(l.id)}
+                  className={cn(
+                    "flex h-12 items-center justify-center rounded-lg ring-1 transition-colors",
+                    layout === l.id ? "bg-brand-500/12 text-brand-600 ring-brand-500/50 dark:text-brand-400" : "text-ink-3 ring-line hover:bg-line hover:text-ink-2",
+                  )}
+                >
+                  <LayoutGlyph layout={l.id} className="size-6 gap-[3px]" />
+                </button>
+              ))}
+            </div>
+            <div className="mt-3.5 mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+              Text size
+              <span className="ml-auto flex items-center gap-1 font-normal normal-case tracking-normal">
+                <Kbd>⌘+</Kbd> <Kbd>⌘−</Kbd>
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => onScale(-1)} disabled={scale <= 0.8} aria-label="Smaller text" className="h-8 flex-1 rounded-lg text-xs font-semibold text-ink-2 ring-1 ring-line transition-colors hover:bg-line disabled:opacity-40">
+                A−
+              </button>
+              <button onClick={() => onScale(0)} title="Back to the default size" className="h-8 w-16 rounded-lg text-xs text-ink-2 tabular ring-1 ring-line transition-colors hover:bg-line">
+                {Math.round(scale * 100)}%
+              </button>
+              <button onClick={() => onScale(1)} disabled={scale >= 1.6} aria-label="Bigger text" className="h-8 flex-1 rounded-lg text-sm font-semibold text-ink-2 ring-1 ring-line transition-colors hover:bg-line disabled:opacity-40">
+                A+
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** An empty pane: the agents not on screen, to pick one (or pick in the sidebar). */
+export function PanePicker({ agents, active, onPick, onFocus }: { agents: Agent[]; active: boolean; onPick: (id: string) => void; onFocus: () => void }) {
+  return (
+    <div className="flex h-full p-1.5" onPointerDown={onFocus}>
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed p-4 transition-colors",
+          active ? "border-brand-500/60 bg-brand-500/[0.04]" : "border-line-strong",
+        )}
+      >
+        <p className="text-sm font-semibold text-ink">Pick an agent for this pane</p>
+        <p className="mt-0.5 mb-3 text-xs text-ink-3">{active ? "Or click one in the sidebar." : "Click here, then pick one in the sidebar."}</p>
+        <div className="flex max-h-[60%] w-full max-w-xs flex-col gap-0.5 overflow-y-auto">
+          {agents.map((a) => (
+            <button key={a.id} onClick={() => onPick(a.id)} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-line">
+              <StatusIcon status={a.status} tip={false} />
+              <span className="flex-1 truncate text-sm font-medium text-ink">{a.name}</span>
+              <span className="truncate text-[11px] text-ink-3">{a.project}</span>
+            </button>
+          ))}
+          {agents.length === 0 && <p className="text-center text-xs text-ink-3">Every agent is already on screen.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}

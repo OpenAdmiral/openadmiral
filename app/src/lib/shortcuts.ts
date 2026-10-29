@@ -24,6 +24,9 @@ export type ShortcutId =
   | "toggle-sidebar"
   | "toggle-inspector"
   | "focus-mode"
+  | "split-toggle"
+  | "text-bigger"
+  | "text-smaller"
   | "shortcuts"
   | "term-option"
   | "term-redraw";
@@ -73,6 +76,9 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { id: "toggle-sidebar", keys: [["⌘", "0"], ["⌘", "⌃", "S"]], description: "Show or hide the sidebar", match: (e) => e.metaKey && !e.altKey && ((e.code === "Digit0" && !e.shiftKey) || (e.code === "KeyS" && e.ctrlKey)) },
       { id: "toggle-inspector", keys: [["⌘", "⌥", "0"]], description: "Show or hide the inspector (right column)", match: (e) => e.metaKey && e.altKey && e.code === "Digit0" },
       { id: "focus-mode", keys: [["⌘", "⇧", "F"]], description: "Focus mode: hide both panels; again to bring them back", match: (e) => e.metaKey && e.shiftKey && !e.altKey && e.code === "KeyF" },
+      { id: "split-toggle", keys: [["⌘", "\\"]], description: "Split the chat into panes, or back to one agent (pick the layout in the header)", match: (e) => e.metaKey && !e.altKey && !e.ctrlKey && e.code === "Backslash" },
+      { id: "text-bigger", keys: [["⌘", "+"]], description: "Bigger text in the terminal, conversation and artifacts", match: (e) => e.metaKey && !e.altKey && !e.ctrlKey && (e.key === "+" || e.key === "=" || e.code === "Equal") },
+      { id: "text-smaller", keys: [["⌘", "−"]], description: "Smaller text", match: (e) => e.metaKey && !e.altKey && !e.ctrlKey && (e.key === "-" || e.code === "Minus") },
       { id: "shortcuts", keys: [["⌘", "/"]], description: "This list", match: (e) => e.metaKey && !e.altKey && (e.key === "/" || e.code === "Slash") },
     ],
   },
