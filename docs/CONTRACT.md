@@ -153,6 +153,16 @@ longer lists it (`handoff` only; `exit` just closes the session). A session that
 message yet has no transcript to resume (`--resume` fails with "source session … not
 found"): the app starts `claude --bg -n <name>` in its folder instead, and that new id replaces it.
 
+## How the app reads all this
+
+Session files are read once and kept, read again only when their modification time or
+size changes (`src-tauri/src/session_files.rs`); every reader (window, menu bar, Underway,
+discovery) shares that. A change under this folder sends the window only what changed
+(`openadmiral://delta`: the sessions that differ and the ids gone, and whole the other
+kinds touched); files the window does not show (attached.json, focus.json, fill/,
+settings.json) send nothing. `claude agents --json` readings under 1.5 s old are shared,
+and the agents poll runs every 2 s while the window shows (or a hand-off waits), else 10 s.
+
 ## settings.json (app → mod)
 
 `{ showProgressCalls?: boolean }`: what the person chose for every session, from the

@@ -5,7 +5,9 @@
 # every build, which makes macOS kill a copy running from there. You run the
 # installed copy instead; this script only replaces it while it is not running.
 #
-#   scripts/install.sh            build (debug bundle) and install
+#   scripts/install.sh            build (optimized, like a release) and install;
+#                                 OPENADMIRAL_DEBUG_BUILD=1 builds the faster debug
+#                                 bundle instead (several times the CPU when running)
 #   scripts/install.sh --no-build install the bundle already built
 #   add --when-quit               if OpenAdmiral is running, swap in the new build as
 #                                 soon as the user quits it (⌘Q) and reopen it (the app
@@ -31,7 +33,9 @@ done
 APP_DIR=${0:A:h:h}
 DEST="$HOME/Applications/OpenAdmiral.app"
 STAGE="$HOME/Applications/OpenAdmiral.app.new"
-BUNDLE="$APP_DIR/src-tauri/target/debug/bundle/macos/OpenAdmiral.app"
+PROFILE=release
+[[ -n "${OPENADMIRAL_DEBUG_BUILD:-}" ]] && PROFILE=debug
+BUNDLE="$APP_DIR/src-tauri/target/$PROFILE/bundle/macos/OpenAdmiral.app"
 
 IDENTITY=${OPENADMIRAL_SIGNING_IDENTITY:-}
 ID_FILE="$HOME/.config/openadmiral/signing-identity"
@@ -47,7 +51,11 @@ if (( BUILD )); then
     echo "Signing with $IDENTITY"
   fi
   # No update packages for a local install: they need the release signing key.
-  (cd "$APP_DIR" && pnpm tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}')
+  # Optimized by default: a debug build runs the app's file reading and parsing several
+  # times slower, which shows as constant CPU and battery use.
+  FLAGS=()
+  [[ $PROFILE == debug ]] && FLAGS=(--debug)
+  (cd "$APP_DIR" && pnpm tauri build "${FLAGS[@]}" --config '{"bundle":{"createUpdaterArtifacts":false}}')
 fi
 [[ -d "$BUNDLE" ]] || { echo "No bundle at $BUNDLE; build first." >&2; exit 1; }
 

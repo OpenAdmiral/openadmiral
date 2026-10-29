@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPhantom, mergeAgents, supersededMap } from "./admiral";
+import { applyDelta, isPhantom, mergeAgents, supersededMap, type Snapshot } from "./admiral";
 import type { AdmiralSession } from "./types";
 
 const now = 1_000_000_000;
@@ -58,5 +58,22 @@ describe("sessions found without the plugin", () => {
     expect(vs.session?.turn?.prompt).toBe("Fix the tests");
     expect(vs.attachable).toBe(false);
     expect(agents.find((a) => a.id === "known")!.unplugged).toBeUndefined();
+  });
+});
+
+describe("applyDelta", () => {
+  const s = (id: string, v: number) => ({ sessionId: id, v }) as unknown as AdmiralSession;
+  const base: Snapshot = { sessions: [s("a", 1), s("b", 1)], delegations: [], queues: { a: {} } };
+
+  it("replaces sessions by id, drops the removed and keeps the rest", () => {
+    const next = applyDelta(base, { sessions: { upsert: [s("a", 2), s("c", 1)], remove: ["b"] } });
+    expect(next.sessions).toEqual([s("a", 2), s("c", 1)]);
+    expect(next.queues).toBe(base.queues);
+  });
+
+  it("takes other kinds whole, only when sent", () => {
+    const next = applyDelta(base, { delegations: [{ id: "dlg_1" } as never] });
+    expect(next.delegations).toHaveLength(1);
+    expect(next.sessions).toBe(base.sessions);
   });
 });

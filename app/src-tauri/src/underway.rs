@@ -499,7 +499,7 @@ fn save(app: &AppHandle, s: &Settings) {
 /// Agents working now, and queued work coming up.
 fn work(now: i64) -> (usize, bool) {
     let dir = crate::admiral_dir();
-    let sessions = crate::read_dir_json(&dir.join("sessions"));
+    let sessions = crate::session_files::all();
     let mut live = std::collections::HashSet::new();
     let mut working = 0;
     for s in &sessions {
@@ -639,7 +639,7 @@ impl Underway {
         }
         self.apply(state.hold, settings.battery_floor, state.settings.enabled);
         if settings.auto_resume {
-            let sessions = crate::read_dir_json(&crate::admiral_dir().join("sessions"));
+            let sessions = crate::session_files::all();
             let resumed = self.inner.lock().unwrap().resumer.tick(&sessions, now, inputs.net.online_since);
             for (id, name) in resumed {
                 let _ = app.emit("openadmiral://resumed", json!({ "sessionId": id, "name": name }));

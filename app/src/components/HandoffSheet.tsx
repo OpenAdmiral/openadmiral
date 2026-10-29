@@ -28,7 +28,7 @@ export function HandoffSheet({ agent, handoff, waiting, startError, open, onClos
     setTrust(false);
     setRetryError(null);
     setRetried(false);
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => !document.hidden && setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [open]);
 

@@ -188,3 +188,10 @@ main[data-rail] > div > div > header:first-child { padding-left: 64px; }
   .hljs-title, .hljs-title.function_ { color: #ffa657; }
   .hljs-variable, .hljs-params { color: #e6edf3; }
 }
+
+/* The window is hidden (main.tsx): no animation drives frames nobody sees. */
+[data-hidden] *,
+[data-hidden] *::before,
+[data-hidden] *::after {
+  animation-play-state: paused !important;
+}

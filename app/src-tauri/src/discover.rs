@@ -272,7 +272,7 @@ fn discover() -> Discovery {
     let dirs = cwds(&sessions_procs.iter().map(|p| p.pid).collect::<Vec<_>>());
     // Known already: sessions whose plugin writes a fresh file. Those that are not
     // background jobs run as one of the processes found here, in their folder.
-    let fresh: Vec<(String, String)> = crate::read_dir_json(&crate::admiral_dir().join("sessions"))
+    let fresh: Vec<(String, String)> = crate::session_files::all()
         .iter()
         .filter(|s| s.get("updatedAt").and_then(Value::as_f64).is_some_and(|u| now - (u as i64) < 90_000))
         .filter_map(|s| Some((s.get("sessionId")?.as_str()?.to_string(), s.get("cwd")?.as_str()?.to_string())))

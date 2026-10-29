@@ -354,7 +354,7 @@ fn apply(app: &AppHandle, tray: &tauri::tray::TrayIcon, live: &mut Option<(Vec<L
 pub fn refresh(app: &AppHandle, agents: &Value) {
     let Some(tray) = app.tray_by_id(ID) else { return };
     let dir = crate::admiral_dir();
-    let sessions = crate::read_dir_json(&dir.join("sessions"));
+    let sessions = crate::session_files::all();
     let delegations = crate::read_dir_json(&dir.join("delegations"));
     let qdir = dir.join("queue");
     let queues: Vec<(String, Value, Vec<Value>)> = std::fs::read_dir(&qdir)

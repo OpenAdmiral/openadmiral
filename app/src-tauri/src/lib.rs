@@ -11,6 +11,7 @@ mod power;
 mod pty;
 mod resume;
 mod scheduler;
+mod session_files;
 mod shot;
 mod staged;
 mod telemetry;
@@ -292,15 +293,7 @@ fn load_snapshot() -> Snapshot {
     let dir = admiral_dir();
     Snapshot {
         // A session without a transcript never ran as a real session (see isPhantom in the UI).
-        sessions: read_dir_json(&dir.join("sessions"))
-            .into_iter()
-            .map(|mut s| {
-                let id = s.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string();
-                let cwd = s.get("cwd").and_then(Value::as_str).unwrap_or("").to_string();
-                s["hasTranscript"] = Value::from(transcript::locate(&id, &cwd).is_some());
-                s
-            })
-            .collect(),
+        sessions: session_files::all(),
         delegations: read_dir_json(&dir.join("delegations")),
         queues: read_queues(&dir.join("queue")),
         artifacts: artifacts::read_all(),
@@ -308,9 +301,24 @@ fn load_snapshot() -> Snapshot {
     }
 }
 
+/// The last `claude agents --json` reading and when it was taken.
+static AGENTS: std::sync::Mutex<Option<(std::time::Instant, Value)>> = std::sync::Mutex::new(None);
+/// Readings this recent are shared: each call starts Claude Code (about 0.2 s of CPU), and the
+/// poll, the hand-offs, the scheduler and discovery all ask.
+const AGENTS_FRESH: Duration = Duration::from_millis(1500);
+
 pub fn claude_agents() -> Option<Value> {
+    if let Some((at, v)) = AGENTS.lock().ok()?.as_ref() {
+        if at.elapsed() < AGENTS_FRESH {
+            return Some(v.clone());
+        }
+    }
     let out = claude_cmd().args(["agents", "--json"]).output().ok()?;
-    serde_json::from_slice(&out.stdout).ok()
+    let v: Value = serde_json::from_slice(&out.stdout).ok()?;
+    if let Ok(mut cache) = AGENTS.lock() {
+        *cache = Some((std::time::Instant::now(), v.clone()));
+    }
+    Some(v)
 }
 
 #[tauri::command]
@@ -996,10 +1004,44 @@ fn watch_admiral(app: AppHandle) {
         };
         let at_of = |v: &Value| v.get("at").and_then(Value::as_u64).unwrap_or(0);
         let mut last_focus = read_focus().map(|v| at_of(&v)).unwrap_or(0);
-        // Coalesce bursts (a mod rewrites its file several times per turn) into one snapshot.
-        while rx.recv().is_ok() {
-            while rx.recv_timeout(Duration::from_millis(120)).is_ok() {}
-            let _ = app.emit("openadmiral://snapshot", load_snapshot());
+        // Coalesce bursts (a mod rewrites its file several times per turn), then send the
+        // window only what changed: the sessions that differ (the folder holds hundreds) and,
+        // whole, the small kinds touched. Files the window does not show send nothing.
+        let mut shown: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+        session_files::delta(&mut shown);
+        let kind_of = |e: &notify::Event| -> Vec<String> {
+            e.paths.iter().filter_map(|p| p.strip_prefix(&dir).ok()?.components().next().map(|c| c.as_os_str().to_string_lossy().to_string())).collect()
+        };
+        while let Ok(first) = rx.recv() {
+            let mut kinds: std::collections::HashSet<String> = first.map(|e| kind_of(&e)).unwrap_or_default().into_iter().collect();
+            while let Ok(more) = rx.recv_timeout(Duration::from_millis(120)) {
+                kinds.extend(more.map(|e| kind_of(&e)).unwrap_or_default());
+            }
+            // An event for the folder itself (FSEvents dropped details): everything may have changed.
+            let all = kinds.is_empty();
+            let touched = |k: &str| all || kinds.contains(k);
+            let mut delta = serde_json::Map::new();
+            if touched("sessions") {
+                let (upsert, remove) = session_files::delta(&mut shown);
+                if !upsert.is_empty() || !remove.is_empty() {
+                    delta.insert("sessions".into(), serde_json::json!({ "upsert": upsert, "remove": remove }));
+                }
+            }
+            if touched("delegations") {
+                delta.insert("delegations".into(), Value::Array(read_dir_json(&dir.join("delegations"))));
+            }
+            if touched("queue") {
+                delta.insert("queues".into(), Value::Object(read_queues(&dir.join("queue"))));
+            }
+            if touched("artifacts") {
+                delta.insert("artifacts".into(), Value::Array(artifacts::read_all()));
+            }
+            if touched("requests") {
+                delta.insert("requests".into(), Value::Object(read_requests(&dir.join("requests"))));
+            }
+            if !delta.is_empty() {
+                let _ = app.emit("openadmiral://delta", Value::Object(delta));
+            }
             if let Some(focus) = read_focus() {
                 let at = at_of(&focus);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -1022,7 +1064,10 @@ fn poll_agents(app: AppHandle) {
             tray::refresh(&app, &agents);
             let _ = app.emit("openadmiral://agents", agents);
         }
-        std::thread::sleep(Duration::from_secs(2));
+        // Every 2 s while someone looks (or a hand-off waits on a session to exit); with the
+        // window hidden or minimized, the menu bar's counts can wait 10 s.
+        let shown = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false));
+        std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) { 2 } else { 10 }));
     });
 }
 

@@ -40,6 +40,11 @@ fn terminal() -> String {
 #[derive(Default)]
 pub struct Handoffs(Mutex<Vec<Handoff>>);
 
+/// Some hand-off is waiting on a session to exit (the agents poll stays quick for it).
+pub fn any_pending(app: &AppHandle) -> bool {
+    app.state::<Handoffs>().0.lock().map(|l| l.iter().any(|h| h.state == "requested" || h.state == "served")).unwrap_or(false)
+}
+
 /// A hand-off of this session is under way (the scheduler leaves it alone).
 pub fn is_busy(app: &AppHandle, session_id: &str) -> bool {
     app.state::<Handoffs>().0.lock().map(|l| l.iter().any(|h| h.session_id == session_id && h.state != "error" && h.state != "expired")).unwrap_or(false)

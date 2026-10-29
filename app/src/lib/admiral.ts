@@ -15,7 +15,26 @@ const DONE_NOTICE_MIN_MS = 2 * 60_000;
 /** A pending hand-off or exit request (docs/CONTRACT.md "requests/"); `waiting` is the mod's note while it cannot exit yet. */
 export type AdmiralRequest = { action: "handoff" | "exit"; at: number; servedAt?: number; waiting?: string };
 
-type Snapshot = { sessions: AdmiralSession[]; delegations: AdmiralDelegation[]; queues?: Record<string, QueueEntry>; artifacts?: Artifact[]; requests?: Record<string, AdmiralRequest> };
+/** What the backend sends when files change (lib.rs watch_admiral): a kind present changed. */
+export type SnapshotDelta = Partial<Omit<Snapshot, "sessions">> & { sessions?: { upsert: AdmiralSession[]; remove: string[] } };
+
+/** The snapshot with a delta applied: sessions replaced by id, other kinds whole. */
+export function applyDelta(prev: Snapshot, d: SnapshotDelta): Snapshot {
+  const next: Snapshot = { ...prev };
+  if (d.sessions) {
+    const byId = new Map(prev.sessions.map((s) => [s.sessionId, s]));
+    for (const id of d.sessions.remove) byId.delete(id);
+    for (const s of d.sessions.upsert) byId.set(s.sessionId, s);
+    next.sessions = [...byId.values()];
+  }
+  if (d.delegations) next.delegations = d.delegations;
+  if (d.queues) next.queues = d.queues;
+  if (d.artifacts) next.artifacts = d.artifacts;
+  if (d.requests) next.requests = d.requests;
+  return next;
+}
+
+export type Snapshot = { sessions: AdmiralSession[]; delegations: AdmiralDelegation[]; queues?: Record<string, QueueEntry>; artifacts?: Artifact[]; requests?: Record<string, AdmiralRequest> };
 
 /** A session file this old, whose session the CLI no longer lists, has ended. */
 const STALE_MS = 90_000;
@@ -165,7 +184,8 @@ export function useAdmiral() {
   // Sessions running without the plugin, and whether the plugin is installed (every 10 s).
   const [discovery, setDiscovery] = useState<{ pluginInstalled: boolean; sessions: DiscoveredSession[] }>({ pluginInstalled: true, sessions: [] });
   useEffect(() => {
-    const check = () => invoke<{ pluginInstalled: boolean; sessions: DiscoveredSession[] }>("discover_sessions").then(setDiscovery, () => {});
+    // Skipped while the window is hidden: it scans processes and transcripts for nobody.
+    const check = () => !document.hidden && invoke<{ pluginInstalled: boolean; sessions: DiscoveredSession[] }>("discover_sessions").then(setDiscovery, () => {});
     check();
     const t = setInterval(check, 10_000);
     return () => clearInterval(t);
@@ -186,13 +206,16 @@ export function useAdmiral() {
       .catch(() => {});
     const offs = [
       listen<Snapshot>("openadmiral://snapshot", (e) => setSnapshot(e.payload)),
+      // Only what changed: the sessions that differ, and whole the other kinds touched.
+      listen<SnapshotDelta>("openadmiral://delta", (e) => setSnapshot((prev) => applyDelta(prev, e.payload))),
       listen<CliAgent[]>("openadmiral://agents", (e) => {
         setCli(Array.isArray(e.payload) ? e.payload : []);
         setCliReady(true);
       }),
     ];
     // Ages and the stale rule move with the clock, not only with events.
-    const tick = setInterval(() => setNow(Date.now()), 5000);
+    // Not while the window is hidden: nothing on screen needs the time then.
+    const tick = setInterval(() => !document.hidden && setNow(Date.now()), 5000);
     return () => {
       offs.forEach((p) => p.then((off) => off()));
       clearInterval(tick);

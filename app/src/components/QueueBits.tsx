@@ -16,12 +16,18 @@ export function QueueText({ text, className, clamp = 3 }: { text: string; classN
   return <p className={cn("selectable text-xs leading-5 text-ink", clamp === 2 ? "line-clamp-2" : "line-clamp-3", className)}>{text}</p>;
 }
 
-/** Ticks so relative labels ("next in 3h") stay true. */
+/** Ticks so relative labels ("next in 3h") stay true; still while the window is hidden. */
 export function useNow(everyMs = 30_000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), everyMs);
-    return () => clearInterval(t);
+    const tick = () => !document.hidden && setNow(Date.now());
+    const t = setInterval(tick, everyMs);
+    // Back in view: catch up at once rather than at the next tick.
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [everyMs]);
   return now;
 }

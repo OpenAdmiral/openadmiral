@@ -12,6 +12,12 @@ window.addEventListener("unhandledrejection", (e) => {
   report("unhandledrejection", r instanceof Error ? `${r.message}\n${r.stack ?? ""}` : String(r));
 });
 
+// With the window hidden, endless animations (working spinners, breathing dots) stop: a
+// hidden page would still drive frames for them (index.css, [data-hidden]).
+const markHidden = () => document.documentElement.toggleAttribute("data-hidden", document.hidden);
+document.addEventListener("visibilitychange", markHidden);
+markHidden();
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />
