@@ -1,6 +1,8 @@
 import {
   closestCenter,
   DndContext,
+  pointerWithin,
+  useDroppable,
   DragOverlay,
   KeyboardCode,
   KeyboardSensor,
@@ -14,20 +16,21 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddLinearIcon, AltArrowDownLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddFolderLinearIcon, AddLinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
-import type { Group } from "@/lib/order";
+import { prefixName, SPACE_COLORS, spaceKey, type Group, type Node as TreeNode, type Space, type Spaces } from "@/lib/order";
+import { popupMenu, type MenuEntry } from "@/lib/menu";
 import { NameEditor } from "./NameEditor";
 import { listMenus, type AgentActions } from "@/lib/lifecycle";
 import { pending, type QueueEntry } from "@/lib/queue";
 import type { AdmiralRequest } from "@/lib/admiral";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
 import { activeOpenCount } from "@/lib/delegations";
-import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel, until } from "@/lib/utils";
+import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel, sharedPrefix, until } from "@/lib/utils";
 import { isReset, PlanMeters } from "./PlanMeters";
 import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
@@ -48,7 +51,10 @@ type Props = {
   onSelect: (v: View) => void;
   /** A new agent; with a folder, the sheet opens on it. */
   onNew: (cwd?: string) => void;
-  onMoveProject: (from: number, to: number) => void;
+  /** A folder on its own or a project (`space:<id>`), moved onto another's place at the top level. */
+  onMoveTop: (from: string, to: string) => void;
+  /** The projects the person made, holding folders. */
+  spaces: Spaces;
   onMoveAgent: (projectKey: string, from: number, to: number) => void;
   onResetOrder: () => void;
   actions: AgentActions;
@@ -73,26 +79,37 @@ type Props = {
   renaming?: { id: string; save: (a: Agent, name: string) => void; cancel: () => void };
 };
 
-// Sortable ids: projects and agents share one DndContext, told apart by prefix.
+// Sortable ids: folders, projects and agents share one DndContext, told apart by prefix.
+// `s:` is a project's card (sorted at the top level), `h:` its header (a folder dropped there moves in or out).
 const pid = (key: string) => `p:${key}`;
+const sid = (id: string) => `s:${id}`;
+const hid = (id: string) => `h:${id}`;
 const aid = (projectKey: string, agentId: string) => `a:${projectKey}\u0000${agentId}`;
 const parseAid = (id: string) => {
   const [projectKey, agentId] = id.slice(2).split("\u0000");
   return { projectKey, agentId };
 };
 
-/** A project only meets other projects; an agent only the agents of its own project. */
-const collision: CollisionDetection = (args) => {
-  const id = String(args.active.id);
-  const project = id.startsWith("a:") ? parseAid(id).projectKey : null;
-  const droppableContainers = args.droppableContainers.filter((c) => {
-    const cid = String(c.id);
-    return project === null ? cid.startsWith("p:") : cid.startsWith("a:") && parseAid(cid).projectKey === project;
-  });
-  return closestCenter({ ...args, droppableContainers });
-};
+/**
+ * An agent only meets the agents of its own folder; a project only the top level; a folder
+ * a project's header under the pointer (to move in or out), else the folders and projects.
+ */
+const collisionFor =
+  (loose: Set<string>): CollisionDetection =>
+  (args) => {
+    const id = String(args.active.id);
+    const only = (keep: (cid: string) => boolean) => args.droppableContainers.filter((c) => keep(String(c.id)));
+    if (id.startsWith("a:")) {
+      const folder = parseAid(id).projectKey;
+      return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("a:") && parseAid(c).projectKey === folder) });
+    }
+    if (id.startsWith("s:")) return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("s:") || (c.startsWith("p:") && loose.has(c.slice(2)))) });
+    const header = pointerWithin({ ...args, droppableContainers: only((c) => c.startsWith("h:")) });
+    if (header.length) return header;
+    return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("p:") || c.startsWith("s:")) });
+  };
 
-export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveProject, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
+export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
   pluginBehind,
   unplugged,
   sort }: Props) {
@@ -101,6 +118,17 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
   const [active, setActive] = useState<string | null>(null);
   const [folded, toggleFolded] = useFolded();
+  // The project whose name is being typed, and the one whose color picker is open.
+  const [editingSpace, setEditingSpace] = useState<string | null>(null);
+  const [coloring, setColoring] = useState<string | null>(null);
+  const tree = spaces.tree;
+  const home = new Map<string, Space>();
+  for (const n of tree) if (n.kind === "space") for (const g of n.groups) home.set(g.key, n.space);
+  const topKeys = tree.map((n) => (n.kind === "group" ? n.group.key : spaceKey(n.space.id)));
+  const topIds = tree.map((n) => (n.kind === "group" ? pid(n.group.key) : sid(n.space.id)));
+  const loose = new Set(tree.flatMap((n) => (n.kind === "group" ? [n.group.key] : [])));
+  const collision = collisionFor(loose);
+  const newSpace = () => setEditingSpace(spaces.create("New project"));
 
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so a click still selects.
@@ -118,12 +146,42 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
     const from = String(e.active.id);
     const to = e.over ? String(e.over.id) : null;
     if (!to || from === to) return;
+    // Dropped on an agent counts as dropped on its folder.
+    const over = to.startsWith("a:") ? pid(parseAid(to).projectKey) : to;
+    // A folder's place at the top level: its own, or its project's.
+    const topOf = (cid: string) => (cid.startsWith("s:") ? spaceKey(cid.slice(2)) : home.get(cid.slice(2)) ? spaceKey(home.get(cid.slice(2))!.id) : cid.slice(2));
+    if (from.startsWith("s:")) {
+      if (over.startsWith("s:") || over.startsWith("p:")) onMoveTop(spaceKey(from.slice(2)), topOf(over));
+      return;
+    }
     if (from.startsWith("p:")) {
-      // A project dropped on one of another project's agents counts as that project.
-      const target = to.startsWith("a:") ? pid(parseAid(to).projectKey) : to;
-      const ids = groups.map((g) => pid(g.key));
-      const a = ids.indexOf(from), b = ids.indexOf(target);
-      if (a !== -1 && b !== -1) onMoveProject(a, b);
+      const key = from.slice(2);
+      const mine = home.get(key)?.id ?? null;
+      if (over.startsWith("h:")) {
+        const target = over.slice(2);
+        // Onto its own project's header: out, just below the project.
+        if (target === mine) spaces.place(key, null, topKeys[topKeys.indexOf(spaceKey(mine)) + 1]);
+        else spaces.place(key, target);
+        return;
+      }
+      if (over.startsWith("s:")) {
+        const target = over.slice(2);
+        if (target === mine) return;
+        if (mine === null) onMoveTop(key, spaceKey(target));
+        else spaces.place(key, target);
+        return;
+      }
+      const onto = over.slice(2);
+      const theirs = home.get(onto)?.id ?? null;
+      if (mine === theirs) {
+        if (mine === null) return onMoveTop(key, onto);
+        // Within a project: like a list move, it lands where the other was.
+        const members = home.get(key)!.members;
+        const a = members.indexOf(key), b = members.indexOf(onto);
+        spaces.place(key, mine, a < b ? members[b + 1] : onto);
+        return;
+      }
+      spaces.place(key, theirs, theirs === null ? topOf(over) : onto);
       return;
     }
     // Agents stay inside their project.
@@ -136,13 +194,76 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
     if (a !== -1 && b !== -1) onMoveAgent(g.key, a, b);
   };
 
-  const menus = listMenus(actions, { onClearEnded, onResetOrder });
+  const menus = listMenus(actions, { onClearEnded, onResetOrder, onNewSpace: newSpace });
+  const folderMenu = (e: React.MouseEvent, g: Group) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const mine = home.get(g.key);
+    const others = tree.flatMap((n) => (n.kind === "space" && n.space.id !== mine?.id ? [n.space] : []));
+    const prefix = g.label.match(/^([a-z0-9]+)[-_]/i)?.[1];
+    const entries: MenuEntry[] = [
+      { id: `folder:new:${g.key}`, text: `New Agent in ${g.label}`, action: () => onNew(g.key) },
+      { separator: true },
+      ...others.map((s) => ({ id: `folder:to:${s.id}`, text: `Move to ${s.name}`, action: () => spaces.place(g.key, s.id) })),
+      {
+        id: "folder:to-new",
+        text: "Move to New Project…",
+        action: () => setEditingSpace(spaces.create(prefix ? prefixName(prefix) : g.label, [g.key], mine ? spaceKey(mine.id) : g.key)),
+      },
+      ...(mine ? [{ id: "folder:out", text: `Remove from ${mine.name}`, action: () => spaces.place(g.key, null, topKeys[topKeys.indexOf(spaceKey(mine.id)) + 1]) }] : []),
+    ];
+    void popupMenu(entries);
+  };
+  const spaceMenu = (e: React.MouseEvent, s: Space) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void popupMenu([
+      { id: "space:rename", text: "Rename…", action: () => setEditingSpace(s.id) },
+      { id: "space:color", text: "Change Color…", action: () => setColoring(s.id) },
+      { separator: true },
+      { id: "space:delete", text: `Delete “${s.name}”`, action: () => spaces.remove(s.id) },
+    ]);
+  };
+  const suggestion = spaces.suggestions[0];
+
+  const renderFolder = (g: Group, inside?: Space, prefix?: string) => (
+    <SortableGroup
+      key={g.key}
+      group={g}
+      label={prefix && g.label.startsWith(prefix) ? g.label.slice(prefix.length) : undefined}
+      nested={!!inside}
+      folded={folded.has(g.key)}
+      onFold={() => toggleFolded(g.key)}
+      onNew={() => onNew(g.key)}
+      onMenu={(e) => folderMenu(e, g)}
+    >
+      <SortableContext items={g.agents.map((a) => aid(g.key, a.id))} strategy={verticalListSortingStrategy}>
+        {g.agents.map((a) => (
+          <SortableAgent
+            key={a.id}
+            id={aid(g.key, a.id)}
+            agent={a}
+            n={numbers.get(a.id)!}
+            queued={pending(queues[a.id]).length}
+            request={a.cli ? requests[a.id] : undefined}
+            selected={view?.kind === "agent" && view.id === a.id}
+            onSelect={() => onSelect({ kind: "agent", id: a.id })}
+            onMenu={(e) => menus.agent(e, a)}
+            editor={renaming?.id === a.id ? <NameEditor value={a.name} onSave={(name) => renaming.save(a, name)} onCancel={renaming.cancel} className="text-sm" /> : undefined}
+          />
+        ))}
+      </SortableContext>
+    </SortableGroup>
+  );
 
   // ⌘1–9 count agents in the order drawn.
   const recent = sort?.mode === "recent";
   const numbers = new Map<string, number>();
   (recent ? sort!.recent : groups.flatMap((g) => g.agents)).forEach((a, i) => numbers.set(a.id, i + 1));
   const activeGroup = active?.startsWith("p:") ? groups.find((g) => pid(g.key) === active) : undefined;
+  const activeSpace = active?.startsWith("s:") ? tree.find((n): n is Extract<TreeNode, { kind: "space" }> => n.kind === "space" && sid(n.space.id) === active) : undefined;
+  // What dropping the dragged folder on a project's header would do.
+  const dragging = active?.startsWith("p:") ? { key: active.slice(2), home: home.get(active.slice(2))?.id ?? null } : null;
   const activeAgent = active?.startsWith("a:") ? groups.flatMap((g) => g.agents).find((a) => a.id === parseAid(active).agentId) : undefined;
 
   return (
@@ -199,6 +320,17 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
         {groups.length > 0 && sort && (
           <div className="mb-2 flex items-center justify-between px-1.5">
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Agents</span>
+            {!recent && (
+              <Tip side="bottom" content={<TipLabel label="New project" />}>
+                <button
+                  onClick={newSpace}
+                  aria-label="New project"
+                  className="mr-auto ml-1.5 inline-flex size-6 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-line-strong hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                >
+                  <AddFolderLinearIcon size={14} />
+                </button>
+              </Tip>
+            )}
             <div className="flex rounded-md bg-line p-0.5 text-[11px]" role="radiogroup" aria-label="Order the agents">
               {(["order", "recent"] as const).map((m) => (
                 <button
@@ -255,34 +387,50 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
           onDragCancel={() => setActive(null)}
           autoScroll={{ threshold: { x: 0, y: 0.15 }, acceleration: 8 }}
         >
-          <SortableContext items={groups.map((g) => pid(g.key))} strategy={verticalListSortingStrategy}>
-            {groups.map((g) => (
-              <SortableGroup key={g.key} group={g} folded={folded.has(g.key)} onFold={() => toggleFolded(g.key)} onNew={() => onNew(g.key)}>
-                <SortableContext items={g.agents.map((a) => aid(g.key, a.id))} strategy={verticalListSortingStrategy}>
-                  {g.agents.map((a) => (
-                    <SortableAgent
-                      key={a.id}
-                      id={aid(g.key, a.id)}
-                      agent={a}
-                      n={numbers.get(a.id)!}
-                      queued={pending(queues[a.id]).length}
-                      request={a.cli ? requests[a.id] : undefined}
-                      selected={view?.kind === "agent" && view.id === a.id}
-                      onSelect={() => onSelect({ kind: "agent", id: a.id })}
-                      onMenu={(e) => menus.agent(e, a)}
-                      editor={
-                        renaming?.id === a.id ? (
-                          <NameEditor value={a.name} onSave={(name) => renaming.save(a, name)} onCancel={renaming.cancel} className="text-sm" />
-                        ) : undefined
-                      }
-                    />
-                  ))}
-                </SortableContext>
-              </SortableGroup>
-            ))}
+          {suggestion && (
+            <SpaceSuggestion
+              name={suggestion.name}
+              labels={suggestion.labels}
+              onCreate={() => spaces.create(suggestion.name, suggestion.keys, suggestion.keys[0])}
+              onDismiss={() => spaces.dismiss(suggestion.name)}
+            />
+          )}
+          <SortableContext items={topIds} strategy={verticalListSortingStrategy}>
+            {tree.map((n) => {
+              if (n.kind === "group") return renderFolder(n.group);
+              const prefix = sharedPrefix(n.groups.map((g) => g.label));
+              const sp = n.space;
+              return (
+                <SortableSpace
+                  key={sp.id}
+                  node={n}
+                  folded={folded.has(spaceKey(sp.id))}
+                  onFold={() => toggleFolded(spaceKey(sp.id))}
+                  onMenu={(e) => spaceMenu(e, sp)}
+                  editing={editingSpace === sp.id}
+                  onRename={(name) => {
+                    setEditingSpace(null);
+                    if (name.trim()) spaces.update(sp.id, { name: name.trim() });
+                  }}
+                  onCancelRename={() => setEditingSpace(null)}
+                  coloring={coloring === sp.id}
+                  onColoring={(on) => setColoring(on ? sp.id : null)}
+                  onColor={(color) => spaces.update(sp.id, { color })}
+                  drop={dragging ? (dragging.home === sp.id ? "out" : "in") : undefined}
+                >
+                  <SortableContext items={n.groups.map((g) => pid(g.key))} strategy={verticalListSortingStrategy}>
+                    {n.groups.map((g) => renderFolder(g, sp, prefix))}
+                  </SortableContext>
+                </SortableSpace>
+              );
+            })}
           </SortableContext>
           <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
-            {activeGroup ? (
+            {activeSpace ? (
+              <div className="rounded-xl bg-canvas/95 p-1 shadow-xl ring-1 ring-line-strong backdrop-blur dark:bg-[#1d2026]/95">
+                <SpaceHeader node={activeSpace} lifted />
+              </div>
+            ) : activeGroup ? (
               <div className="rounded-xl bg-canvas/95 px-1 py-1 shadow-xl ring-1 ring-line-strong backdrop-blur dark:bg-[#1d2026]/95">
                 <GroupHeader group={activeGroup} lifted />
                 {activeGroup.agents.map((a) => (
@@ -491,18 +639,24 @@ function useFolded(): [Set<string>, (key: string) => void] {
   return [folded, toggle];
 }
 
-/** A project: its header, then its agents indented behind a rail in the project's color. */
-function SortableGroup({ group, folded, onFold, onNew, children }: { group: Group; folded: boolean; onFold: () => void; onNew: () => void; children: React.ReactNode }) {
+/** A folder: its header, then its agents indented behind a rail in the folder's color. */
+function SortableGroup({ group, label, nested, folded, onFold, onNew, onMenu, children }: { group: Group; label?: string; nested?: boolean; folded: boolean; onFold: () => void; onNew: () => void; onMenu: (e: React.MouseEvent) => void; children: React.ReactNode }) {
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: pid(group.key) });
   return (
     <section
       ref={setNodeRef}
+      onContextMenu={onMenu}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("mt-2 border-t border-line pt-2 first:mt-0 first:border-t-0 first:pt-0", isDragging && DROP_SLOT)}
+      className={cn(
+        nested
+          ? "mt-1 first:mt-0"
+          : "mt-2 border-t border-line pt-2 first:mt-0 first:border-t-0 first:pt-0 [[data-space]+&]:mt-3 [[data-space]+&]:border-t-0 [[data-space]+&]:pt-0",
+        isDragging && DROP_SLOT,
+      )}
     >
-      <GroupHeader group={group} folded={folded} onFold={onFold} onNew={onNew} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
+      <GroupHeader group={group} label={label} folded={folded} onFold={onFold} onNew={onNew} handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }} />
       {!folded && (
-        <div className="ml-[13px] border-l-2 pl-1.5" style={{ borderColor: `color-mix(in srgb, ${projectColor(group.label)} 45%, transparent)` }}>
+        <div className={cn("border-l-2", nested ? "ml-[9px] pl-0.5" : "ml-[13px] pl-1.5")} style={{ borderColor: `color-mix(in srgb, ${projectColor(group.label)} 45%, transparent)` }}>
           {children}
         </div>
       )}
@@ -510,7 +664,7 @@ function SortableGroup({ group, folded, onFold, onNew, children }: { group: Grou
   );
 }
 
-function GroupHeader({ group, folded, onFold, onNew, handle, lifted }: { group: Group; folded?: boolean; onFold?: () => void; onNew?: () => void; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
+function GroupHeader({ group, label: shown, folded, onFold, onNew, handle, lifted }: { group: Group; label?: string; folded?: boolean; onFold?: () => void; onNew?: () => void; handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void }; lifted?: boolean }) {
   const { ref, ...rest } = handle ?? {};
   // Folded away, an agent waiting on you still shows on its project.
   const waiting = folded && group.agents.some((a) => a.status === "waiting");
@@ -540,7 +694,9 @@ function GroupHeader({ group, folded, onFold, onNew, handle, lifted }: { group: 
         <span className="w-2.5" />
       )}
       <span className="size-2 shrink-0 rounded-full" style={{ background: projectColor(group.label) }} />
-      <h3 className="truncate text-[13px] font-semibold text-ink">{projectLabel(group.label)}</h3>
+      <h3 className="truncate text-[13px] font-semibold text-ink" title={group.label}>
+        {shown ?? projectLabel(group.label)}
+      </h3>
       {waiting && <span title="An agent here needs you" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}
       <span className="ml-auto" />
       {onNew && (
@@ -558,6 +714,261 @@ function GroupHeader({ group, folded, onFold, onNew, handle, lifted }: { group: 
       )}
       <span className="rounded-full bg-line px-1.5 text-[10px] leading-4 text-ink-3 tabular">{group.agents.length}</span>
     </div>
+  );
+}
+
+type SpaceNode = Extract<TreeNode, { kind: "space" }>;
+
+/** A tint of a project's color, for its card, rail and borders. */
+const tint = (color: string, pct: number) => `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+
+/**
+ * A project the person made: a card in its color holding its folders. Its header drags the
+ * whole card; a folder dropped on the header moves in (or, from inside, out).
+ */
+function SortableSpace({
+  node,
+  folded,
+  onFold,
+  onMenu,
+  editing,
+  onRename,
+  onCancelRename,
+  coloring,
+  onColoring,
+  onColor,
+  drop,
+  children,
+}: {
+  node: SpaceNode;
+  folded: boolean;
+  onFold: () => void;
+  onMenu: (e: React.MouseEvent) => void;
+  editing: boolean;
+  onRename: (name: string) => void;
+  onCancelRename: () => void;
+  coloring: boolean;
+  onColoring: (on: boolean) => void;
+  onColor: (color: string) => void;
+  drop?: "in" | "out";
+  children: React.ReactNode;
+}) {
+  const { space } = node;
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: sid(space.id) });
+  return (
+    <section
+      ref={setNodeRef}
+      onContextMenu={onMenu}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        transition,
+        background: `linear-gradient(180deg, ${tint(space.color, 9)}, ${tint(space.color, 3)})`,
+        boxShadow: `inset 0 0 0 1px ${tint(space.color, 22)}`,
+      }}
+      data-space=""
+      className={cn("mt-3 rounded-xl p-[3px] first:mt-0", isDragging && DROP_SLOT)}
+    >
+      <SpaceHeader
+        node={node}
+        folded={folded}
+        onFold={onFold}
+        editing={editing}
+        onRename={onRename}
+        onCancelRename={onCancelRename}
+        coloring={coloring}
+        onColoring={onColoring}
+        onColor={onColor}
+        drop={drop}
+        handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }}
+      />
+      <AnimatePresence initial={false}>
+        {!folded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="px-0.5 pt-0.5 pb-0.5">
+              {node.groups.length ? (
+                children
+              ) : (
+                <div className="mx-1 mb-1 rounded-lg border border-dashed px-3 py-2.5 text-center text-[11px] leading-relaxed text-ink-3" style={{ borderColor: tint(space.color, 35) }}>
+                  Drag a folder onto this header, or right-click one and choose <span className="font-semibold text-ink-2">Move to {space.name}</span>.
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
+  );
+}
+
+function SpaceHeader({
+  node,
+  folded,
+  onFold,
+  editing,
+  onRename,
+  onCancelRename,
+  coloring,
+  onColoring,
+  onColor,
+  drop,
+  handle,
+  lifted,
+}: {
+  node: SpaceNode;
+  folded?: boolean;
+  onFold?: () => void;
+  editing?: boolean;
+  onRename?: (name: string) => void;
+  onCancelRename?: () => void;
+  coloring?: boolean;
+  onColoring?: (on: boolean) => void;
+  onColor?: (color: string) => void;
+  drop?: "in" | "out";
+  handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void };
+  lifted?: boolean;
+}) {
+  const { space, groups } = node;
+  const { setNodeRef, isOver } = useDroppable({ id: hid(space.id), disabled: lifted });
+  const { ref, ...rest } = handle ?? {};
+  const agents = groups.flatMap((g) => g.agents);
+  const working = agents.filter((a) => a.status === "working").length;
+  const waiting = agents.filter((a) => a.status === "waiting").length;
+  const target = isOver && drop;
+  return (
+    <div
+      ref={(el) => {
+        setNodeRef(el);
+        ref?.(el);
+      }}
+      {...(editing ? {} : rest)}
+      aria-label={`${space.name} project. Press space to reorder.`}
+      className={cn(
+        "group/space relative flex items-center gap-2 rounded-lg px-1.5 py-1.5 outline-none transition-[background,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-brand-500",
+        handle && !editing && "cursor-grab active:cursor-grabbing",
+        lifted && "cursor-grabbing",
+      )}
+      style={target ? { background: tint(space.color, 16), boxShadow: `inset 0 0 0 1.5px ${tint(space.color, 70)}` } : undefined}
+    >
+      {onFold ? (
+        <button
+          type="button"
+          onClick={onFold}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label={folded ? `Show ${space.name}` : `Hide ${space.name}`}
+          aria-expanded={!folded}
+          className="-m-1 rounded p-1 text-ink-3 transition-colors hover:text-ink"
+        >
+          <AltArrowDownLinearIcon size={12} className={cn("transition-transform duration-150", folded && "-rotate-90")} />
+        </button>
+      ) : (
+        <span className="w-2.5" />
+      )}
+      <button
+        type="button"
+        onClick={() => onColoring?.(!coloring)}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label={`${space.name}'s color`}
+        title="Change the color"
+        className="grid size-[22px] shrink-0 place-items-center rounded-[7px] text-[11px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.2),inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-150 hover:scale-105"
+        style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${space.color} 80%, white), ${space.color} 55%, color-mix(in srgb, ${space.color} 75%, black))` }}
+      >
+        {(space.name.trim()[0] ?? "·").toUpperCase()}
+      </button>
+      {editing && onRename && onCancelRename ? (
+        <NameEditor value={space.name} onSave={onRename} onCancel={onCancelRename} className="text-[13px]" />
+      ) : (
+        <h3 className="min-w-0 truncate text-[13.5px] font-semibold tracking-[-0.01em] text-ink">{space.name}</h3>
+      )}
+      {!editing && (
+        <>
+          <span className="ml-auto" />
+          {target ? (
+            <span className="shrink-0 text-[10.5px] font-semibold" style={{ color: space.color }}>
+              {drop === "in" ? "Move here" : "Move out"}
+            </span>
+          ) : (
+            <>
+              {working > 0 && (
+                <span title={`${working} working`} className="flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-ink-3 tabular">
+                  <span className="relative flex size-1.5">
+                    <span className="absolute inset-0 animate-ping rounded-full bg-brand-500/60" />
+                    <span className="relative size-1.5 rounded-full bg-brand-500" />
+                  </span>
+                  {working}
+                </span>
+              )}
+              {waiting > 0 && (
+                <span title={`${waiting} need${waiting === 1 ? "s" : ""} you`} className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold leading-4 text-amber-700 tabular dark:text-amber-300">
+                  {waiting}
+                </span>
+              )}
+              <span className="rounded-full px-1.5 text-[10px] leading-4 text-ink-3 tabular" style={{ background: tint(space.color, 14) }}>
+                {agents.length}
+              </span>
+            </>
+          )}
+        </>
+      )}
+      <AnimatePresence>
+        {coloring && onColor && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full left-5 z-20 mt-1 flex gap-1.5 rounded-lg bg-canvas p-2 shadow-xl ring-1 ring-line-strong dark:bg-[#1d2026]"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseLeave={() => onColoring?.(false)}
+          >
+            {SPACE_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={`Color ${c}`}
+                onClick={() => {
+                  onColor(c);
+                  onColoring?.(false);
+                }}
+                className={cn("size-4 rounded-full transition-transform hover:scale-110", c === space.color && "ring-2 ring-ink/70 ring-offset-1 ring-offset-canvas")}
+                style={{ background: c }}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Folders that share a prefix, offered as one project: one tap groups them. */
+function SpaceSuggestion({ name, labels, onCreate, onDismiss }: { name: string; labels: string[]; onCreate: () => void; onDismiss: () => void }) {
+  const list = labels.length > 3 ? `${labels.slice(0, 2).join(", ")} and ${labels.length - 2} more` : labels.join(labels.length === 2 ? " and " : ", ");
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-3 rounded-xl bg-gradient-to-br from-brand-500/12 via-brand-500/5 to-transparent p-3 ring-1 ring-brand-500/20"
+    >
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+        <StarsMinimalisticLinearIcon size={14} className="text-brand-600 dark:text-brand-400" />
+        Group them as “{name}”?
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-3">{list} share a name. A project keeps them together.</p>
+      <div className="mt-2 flex items-center gap-3 text-xs">
+        <button onClick={onCreate} className="font-semibold text-brand-700 hover:underline dark:text-brand-300">
+          Create project
+        </button>
+        <button onClick={onDismiss} className="text-ink-3 hover:text-ink">
+          Not now
+        </button>
+      </div>
+    </motion.div>
   );
 }
 

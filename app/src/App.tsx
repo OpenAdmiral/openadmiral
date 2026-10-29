@@ -452,7 +452,8 @@ export default function App() {
         delegations={delegations}
         rateLimits={rateLimits}
         view={view}
-        onMoveProject={order.moveProject}
+        onMoveTop={order.moveTop}
+        spaces={order.spaces}
         onMoveAgent={order.moveAgent}
         onResetOrder={order.reset}
         actions={life.actions}

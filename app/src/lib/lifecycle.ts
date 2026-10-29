@@ -64,7 +64,7 @@ export function agentMenuEntries(a: Agent, actions: AgentActions, extra: { text:
 export const openAgentMenu = (a: Agent, actions: AgentActions, extra: { text: string; action: () => void }[] = []) => popupMenu(agentMenuEntries(a, actions, extra));
 
 /** Right-click in the agent list (full sidebar or rail): on an agent, its menu plus Reset Order; elsewhere, the list's own. */
-export const listMenus = (actions: AgentActions, list: { onClearEnded: () => void; onResetOrder: () => void }) => ({
+export const listMenus = (actions: AgentActions, list: { onClearEnded: () => void; onResetOrder: () => void; onNewSpace?: () => void }) => ({
   agent: (e: { preventDefault: () => void; stopPropagation: () => void }, a: Agent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -73,6 +73,7 @@ export const listMenus = (actions: AgentActions, list: { onClearEnded: () => voi
   empty: (e: { preventDefault: () => void }) => {
     e.preventDefault();
     popupMenu([
+      ...(list.onNewSpace ? [{ id: "sidebar:new-space", text: "New Project", action: list.onNewSpace }, { separator: true as const }] : []),
       { id: "sidebar:clear-ended", text: "Clear Ended Sessions…", action: list.onClearEnded },
       { id: "sidebar:reset-order", text: "Reset Order", action: list.onResetOrder },
     ]);

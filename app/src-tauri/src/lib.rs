@@ -785,6 +785,10 @@ fn order_path(app: &AppHandle) -> Option<PathBuf> {
 /// The sidebar order the person dragged into place: `{ projects, agents }`, or null.
 #[tauri::command]
 fn order_load(app: AppHandle) -> Value {
+    // Preview: an arrangement to start from (README shots with projects).
+    if let Some(p) = std::env::var_os("OPENADMIRAL_ORDER").filter(|_| preview()) {
+        return std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    }
     order_path(&app)
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
