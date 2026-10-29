@@ -6,15 +6,26 @@ import type { Agent } from "./types";
  * The sidebar order the person chose, saved in the app data dir.
  * Projects are keyed by repo root (else cwd), agents by session name (else id),
  * so an agent resumed under the same name comes back to its place.
- * `projects` is the top level: folder keys and `space:<id>` for the projects the person
- * made (`spaces`), which hold folders. `dismissed`: suggested projects turned down.
+ * `projects` is the top level: group keys (a folder's agents) and `space:<id>` for the
+ * projects the person made (`spaces`). A project holds whole groups (`members`, new agents
+ * of the folder join too) and single agents (`placed`: "<folder>\0<agent key>" → the
+ * project's id, or "" for the top level, overriding where its group is).
+ * `dismissed`: suggested projects turned down.
  */
-export type SidebarOrder = { projects: string[]; agents: Record<string, string[]>; spaces?: Space[]; dismissed?: string[] };
+export type SidebarOrder = { projects: string[]; agents: Record<string, string[]>; spaces?: Space[]; placed?: Record<string, string>; dismissed?: string[] };
 
-export type Group = { key: string; label: string; agents: Agent[] };
+/**
+ * A folder's agents as drawn in one place. `key` is the folder; `slot` tells apart the
+ * pieces of one folder when some of its agents sit in another project.
+ */
+export type Group = { key: string; label: string; agents: Agent[]; slot?: string; space?: string };
 
-/** A project the person made: a name, a color and the folders it holds, in order. */
+export const slotOf = (g: Group) => g.slot ?? g.key;
+
+/** A project the person made: a name, a color and the groups it holds, in order. */
 export type Space = { id: string; name: string; color: string; members: string[] };
+
+export const placedKey = (folder: string, agent: string) => `${folder}\u0000${agent}`;
 
 /** The sidebar as drawn: folders on their own, and projects with their folders. */
 export type Node = { kind: "group"; group: Group } | { kind: "space"; space: Space; groups: Group[] };
@@ -29,24 +40,45 @@ const rankIn = (list: string[] | undefined, k: string) => {
   return i === -1 ? Number.MAX_SAFE_INTEGER : i;
 };
 
-/** `groups` (sorted) placed into the person's projects; a project shows even with no folder running. */
+/** The project a whole group belongs to ("" for the top level). */
+export function groupHome(order: SidebarOrder | null, folder: string) {
+  return (order?.spaces ?? []).find((s) => s.members.includes(folder))?.id ?? "";
+}
+
+/** Where an agent is drawn: its own placement, else its group's. */
+export function agentHome(order: SidebarOrder | null, folder: string, agent: string) {
+  const p = order?.placed?.[placedKey(folder, agent)];
+  if (p !== undefined && (p === "" || order?.spaces?.some((s) => s.id === p))) return p;
+  return groupHome(order, folder);
+}
+
+/** `groups` (sorted, whole folders) placed into the person's projects; a project shows even when empty. */
 export function layout(groups: Group[], order: SidebarOrder | null): Node[] {
   const spaces = order?.spaces ?? [];
-  const home = new Map<string, Space>();
-  for (const s of spaces) for (const m of s.members) if (!home.has(m)) home.set(m, s);
-  const byKey = new Map(groups.map((g) => [g.key, g]));
+  // Each folder split by where its agents are drawn.
+  const pieces = new Map<string, Group[]>();
+  for (const g of groups) {
+    const by = new Map<string, Agent[]>();
+    for (const a of g.agents) {
+      const at = agentHome(order, g.key, agentKeyOf(a));
+      by.set(at, [...(by.get(at) ?? []), a]);
+    }
+    for (const [at, agents] of by) pieces.set(at, [...(pieces.get(at) ?? []), { ...g, agents, slot: at ? `${at}\u0001${g.key}` : g.key, space: at || undefined }]);
+  }
   const top: { key: string; node: Node }[] = [
-    ...groups.filter((g) => !home.has(g.key)).map((g) => ({ key: g.key, node: { kind: "group", group: g } as Node })),
-    ...spaces.map((s) => ({
-      key: spaceKey(s.id),
-      node: { kind: "space", space: s, groups: s.members.filter((m) => home.get(m) === s).flatMap((m) => byKey.get(m) ?? []) } as Node,
-    })),
+    ...(pieces.get("") ?? []).map((g) => ({ key: g.key, node: { kind: "group", group: g } as Node })),
+    ...spaces.map((s) => {
+      const inside = pieces.get(s.id) ?? [];
+      // Its whole groups in its order, then groups with only some agents here.
+      const ordered = [...inside].sort((a, b) => rankIn(s.members, a.key) - rankIn(s.members, b.key) || a.label.localeCompare(b.label));
+      return { key: spaceKey(s.id), node: { kind: "space", space: s, groups: ordered } as Node };
+    }),
   ];
   // Stable: folders not yet placed keep their sorted order, after the placed ones.
   return top.map((t, i) => ({ ...t, i })).sort((a, b) => rankIn(order?.projects, a.key) - rankIn(order?.projects, b.key) || a.i - b.i).map((t) => t.node);
 }
 
-/** Folders on screen, in the order drawn. */
+/** Groups on screen, in the order drawn. */
 export const flatten = (tree: Node[]) => tree.flatMap((n) => (n.kind === "group" ? [n.group] : n.groups));
 
 /** A name for folders that share a prefix: "applivery-" → "Applivery". */
@@ -71,6 +103,18 @@ export function suggestSpaces(tree: Node[], order: SidebarOrder | null): { name:
 
 // ---- changes to the order: pure, so they are tested on their own ----
 
+/** Moves single agents of a folder to a project, or "" for the top level. */
+export function placeAgents(o: SidebarOrder, folder: string, agents: string[], space: string): SidebarOrder {
+  const placed = { ...(o.placed ?? {}) };
+  const home = groupHome(o, folder);
+  for (const a of agents) {
+    // Where its group already is: no placement of its own needed.
+    if (space === home) delete placed[placedKey(folder, a)];
+    else placed[placedKey(folder, a)] = space;
+  }
+  return { ...o, placed };
+}
+
 const without = (o: SidebarOrder, keys: string[]) => (o.spaces ?? []).map((s) => ({ ...s, members: s.members.filter((m) => !keys.includes(m)) }));
 
 /** A new project holding `keys`, drawn where `at` is (a top-level key), else first. */
@@ -91,23 +135,29 @@ export function removeSpace(o: SidebarOrder, id: string): SidebarOrder {
   const s = (o.spaces ?? []).find((x) => x.id === id);
   if (!s) return o;
   const projects = o.projects.filter((k) => !s.members.includes(k)).flatMap((k) => (k === spaceKey(id) ? s.members : [k]));
-  return { ...o, projects, spaces: (o.spaces ?? []).filter((x) => x.id !== id) };
+  const placed = Object.fromEntries(Object.entries(o.placed ?? {}).filter(([, at]) => at !== id));
+  return { ...o, projects, placed, spaces: (o.spaces ?? []).filter((x) => x.id !== id) };
 }
 
 /**
  * Moves a folder into a project (before `before`, one of its folders, else last) or, with
  * `space` null, out to the top level (before `before`, a top-level key, else last).
  */
-export function placeFolder(o: SidebarOrder, key: string, space: string | null, before?: string): SidebarOrder {
+export function placeFolder(o: SidebarOrder, key: string, space: string | null, before?: string, agents: string[] = []): SidebarOrder {
   const spaces = without(o, [key]);
+  // The agents that came with it follow the group again; others placed where it now is too.
+  const placed = Object.fromEntries(
+    Object.entries(o.placed ?? {}).filter(([k, at]) => !(k.startsWith(`${key}\u0000`) && (agents.includes(k.slice(key.length + 1)) || at === (space ?? "")))),
+  );
   if (space === null) {
     const projects = o.projects.filter((k) => k !== key);
     const i = before ? projects.indexOf(before) : -1;
     projects.splice(i === -1 ? projects.length : i, 0, key);
-    return { ...o, projects, spaces };
+    return { ...o, projects, spaces, placed };
   }
   return {
     ...o,
+    placed,
     spaces: spaces.map((s) => {
       if (s.id !== space) return s;
       const members = [...s.members];
@@ -148,7 +198,7 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
 
   useEffect(() => {
     invoke<SidebarOrder | null>("order_load")
-      .then((o) => setOrder({ projects: o?.projects ?? [], agents: o?.agents ?? {}, spaces: o?.spaces ?? [], dismissed: o?.dismissed ?? [] }))
+      .then((o) => setOrder({ projects: o?.projects ?? [], agents: o?.agents ?? {}, spaces: o?.spaces ?? [], placed: o?.placed ?? {}, dismissed: o?.dismissed ?? [] }))
       .catch(() => setOrder({ projects: [], agents: {} }))
       .finally(() => (loaded.current = true));
   }, []);
@@ -221,30 +271,46 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
   );
 
   // The person's projects: make, rename, recolor, remove, and move folders in and out.
-  const change = useCallback((f: (o: SidebarOrder) => SidebarOrder) => order && save(f(order)), [order, save]);
+  // From the latest order, so several changes in a row (make a project, then move into it) compose.
+  const change = useCallback((f: (o: SidebarOrder) => SidebarOrder) => {
+    setOrder((prev) => {
+      if (!prev) return prev;
+      const next = f(prev);
+      invoke("order_save", { order: next }).catch(() => {});
+      return next;
+    });
+  }, []);
   const spaces = useMemo(
     () => ({
       tree,
       suggestions: suggestSpaces(tree, order),
       create: (name: string, keys: string[] = [], at?: string) => {
-        const used = new Set((order?.spaces ?? []).map((s) => s.color));
-        const color = SPACE_COLORS.find((c) => !used.has(c)) ?? SPACE_COLORS[(order?.spaces?.length ?? 0) % SPACE_COLORS.length];
         const id = Math.random().toString(36).slice(2, 10);
-        change((o) => addSpace(o, { id, name, color }, keys, at));
+        change((o) => {
+          const used = new Set((o.spaces ?? []).map((s) => s.color));
+          const color = SPACE_COLORS.find((c) => !used.has(c)) ?? SPACE_COLORS[(o.spaces?.length ?? 0) % SPACE_COLORS.length];
+          return addSpace(o, { id, name, color }, keys, at);
+        });
         return id;
       },
       update: (id: string, patch: Partial<Pick<Space, "name" | "color">>) => change((o) => updateSpace(o, id, patch)),
       remove: (id: string) => change((o) => removeSpace(o, id)),
-      place: (key: string, space: string | null, before?: string) => change((o) => placeFolder(o, key, space, before)),
+      /** A whole group: into a project, or out to the top level (null). */
+      place: (key: string, space: string | null, before?: string, agents?: string[]) => change((o) => placeFolder(o, key, space, before, agents)),
+      /** Single agents of a folder: into a project, or "" for the top level. */
+      placeAgents: (folder: string, agents: string[], space: string) => change((o) => placeAgents(o, folder, agents, space)),
+      /** Where a whole group belongs ("" for the top level). */
+      homeOf: (folder: string) => groupHome(order, folder),
       dismiss: (name: string) => change((o) => ({ ...o, dismissed: [...(o.dismissed ?? []), name.toLowerCase()] })),
     }),
     [tree, order, change],
   );
 
   const moveAgent = useCallback(
-    (projectKey: string, from: number, to: number) => {
-      const g = groups.find((x) => x.key === projectKey);
+    (slot: string, from: number, to: number) => {
+      const g = groups.find((x) => slotOf(x) === slot);
       if (!order || !g || from === to) return;
+      const projectKey = g.key;
       const visible = g.agents.map(agentKeyOf);
       const [moved] = visible.splice(from, 1);
       visible.splice(to, 0, moved);
@@ -258,13 +324,18 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
     (a: Agent, from: string, to: string) => {
       if (!order || from === to) return;
       const key = projectKeyOf(a);
-      save({ ...order, agents: { ...order.agents, [key]: renameEntry(order.agents[key] ?? [], from, to) } });
+      const placed = { ...(order.placed ?? {}) };
+      if (placedKey(key, from) in placed) {
+        placed[placedKey(key, to)] = placed[placedKey(key, from)];
+        delete placed[placedKey(key, from)];
+      }
+      save({ ...order, placed, agents: { ...order.agents, [key]: renameEntry(order.agents[key] ?? [], from, to) } });
     },
     [order, save],
   );
 
   // The person's projects stay; only the arrangement goes back to the default.
-  const reset = useCallback(() => order && save({ projects: (order.spaces ?? []).map((s) => spaceKey(s.id)), agents: {}, spaces: order.spaces, dismissed: order.dismissed }), [order, save]);
+  const reset = useCallback(() => order && save({ projects: (order.spaces ?? []).map((s) => spaceKey(s.id)), agents: {}, spaces: order.spaces, placed: order.placed, dismissed: order.dismissed }), [order, save]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.agents), [groups]);
   return { groups, flat, spaces, moveTop, moveAgent, renameKey, reset, ready: order !== null };

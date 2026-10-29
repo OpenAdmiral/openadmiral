@@ -1,7 +1,7 @@
 import { ChatLineLinearIcon, GitForkLinearIcon, HourglassLinearIcon, StructureLinearIcon } from "@solar-icons/react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { agentLinks, sharedCheckout, type AgentLink } from "@/lib/agentLinks";
-import type { Group } from "@/lib/order";
+import { slotOf, type Group } from "@/lib/order";
 import type { QueueEntry } from "@/lib/queue";
 import type { Agent, DelegationStatus, AdmiralDelegation } from "@/lib/types";
 import { ago, branchTone, cn, contextUsed, fillText, projectColor, usd } from "@/lib/utils";
@@ -188,7 +188,7 @@ export function AgentsMap({ groups, agents, delegations, queues, now, onJump, on
               />
               <div className="relative flex flex-wrap items-start gap-x-12 gap-y-6">
                 {clusters.map((g) => (
-                  <Cluster key={g.key} group={g}>
+                  <Cluster key={slotOf(g)} group={g}>
                     {g.agents.map((a) => (
                       <Node
                         key={a.id}

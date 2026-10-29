@@ -11,6 +11,7 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
@@ -22,10 +23,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
-import { prefixName, SPACE_COLORS, spaceKey, type Group, type Node as TreeNode, type Space, type Spaces } from "@/lib/order";
+import { agentKeyOf, prefixName, slotOf, SPACE_COLORS, spaceKey, type Group, type Node as TreeNode, type Space, type Spaces } from "@/lib/order";
 import { popupMenu, type MenuEntry } from "@/lib/menu";
 import { NameEditor } from "./NameEditor";
-import { listMenus, type AgentActions } from "@/lib/lifecycle";
+import { listMenus, openAgentMenu, type AgentActions } from "@/lib/lifecycle";
 import { pending, type QueueEntry } from "@/lib/queue";
 import type { AdmiralRequest } from "@/lib/admiral";
 import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
@@ -55,7 +56,7 @@ type Props = {
   onMoveTop: (from: string, to: string) => void;
   /** The projects the person made, holding folders. */
   spaces: Spaces;
-  onMoveAgent: (projectKey: string, from: number, to: number) => void;
+  onMoveAgent: (slot: string, from: number, to: number) => void;
   onResetOrder: () => void;
   actions: AgentActions;
   onClearEnded: () => void;
@@ -81,32 +82,32 @@ type Props = {
 
 // Sortable ids: folders, projects and agents share one DndContext, told apart by prefix.
 // `s:` is a project's card (sorted at the top level), `h:` its header (a folder dropped there moves in or out).
-const pid = (key: string) => `p:${key}`;
+const pid = (slot: string) => `p:${slot}`;
 const sid = (id: string) => `s:${id}`;
 const hid = (id: string) => `h:${id}`;
-const aid = (projectKey: string, agentId: string) => `a:${projectKey}\u0000${agentId}`;
+const aid = (slot: string, agentId: string) => `a:${slot}\u0000${agentId}`;
 const parseAid = (id: string) => {
-  const [projectKey, agentId] = id.slice(2).split("\u0000");
-  return { projectKey, agentId };
+  const [slot, agentId] = id.slice(2).split("\u0000");
+  return { slot, agentId };
 };
 
 /**
- * An agent only meets the agents of its own folder; a project only the top level; a folder
- * a project's header under the pointer (to move in or out), else the folders and projects.
+ * Agents and groups: a project's card or header under the pointer takes them in (their own
+ * project's header takes them out); else they meet their siblings (an agent the agents of
+ * its group, a group the groups beside it). A project meets the top level.
  */
 const collisionFor =
-  (loose: Set<string>): CollisionDetection =>
+  (containerOf: (slot: string) => string, top: Set<string>): CollisionDetection =>
   (args) => {
     const id = String(args.active.id);
     const only = (keep: (cid: string) => boolean) => args.droppableContainers.filter((c) => keep(String(c.id)));
-    if (id.startsWith("a:")) {
-      const folder = parseAid(id).projectKey;
-      return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("a:") && parseAid(c).projectKey === folder) });
-    }
-    if (id.startsWith("s:")) return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("s:") || (c.startsWith("p:") && loose.has(c.slice(2)))) });
-    const header = pointerWithin({ ...args, droppableContainers: only((c) => c.startsWith("h:")) });
-    if (header.length) return header;
-    return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("p:") || c.startsWith("s:")) });
+    if (id.startsWith("s:")) return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("s:") || (c.startsWith("p:") && top.has(c.slice(2)))) });
+    const slot = id.startsWith("a:") ? parseAid(id).slot : id.slice(2);
+    const mine = containerOf(slot);
+    const into = pointerWithin({ ...args, droppableContainers: only((c) => c.startsWith("h:") || (c.startsWith("s:") && c.slice(2) !== mine)) });
+    if (into.length) return [...into].sort((a, b) => Number(String(b.id).startsWith("h:")) - Number(String(a.id).startsWith("h:")));
+    if (id.startsWith("a:")) return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("a:") && parseAid(c).slot === slot) });
+    return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("p:") && containerOf(c.slice(2)) === mine) });
   };
 
 export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
@@ -117,18 +118,33 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
   const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
   const [active, setActive] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   const [folded, toggleFolded] = useFolded();
   // The project whose name is being typed, and the one whose color picker is open.
   const [editingSpace, setEditingSpace] = useState<string | null>(null);
   const [coloring, setColoring] = useState<string | null>(null);
   const tree = spaces.tree;
-  const home = new Map<string, Space>();
-  for (const n of tree) if (n.kind === "space") for (const g of n.groups) home.set(g.key, n.space);
+  const bySlot = new Map(groups.map((g) => [slotOf(g), g]));
+  const containerOf = (slot: string) => bySlot.get(slot)?.space ?? "";
+  const spaceList = tree.flatMap((n) => (n.kind === "space" ? [n.space] : []));
+  const nameOf = (id: string) => spaceList.find((s) => s.id === id)?.name ?? "";
   const topKeys = tree.map((n) => (n.kind === "group" ? n.group.key : spaceKey(n.space.id)));
-  const topIds = tree.map((n) => (n.kind === "group" ? pid(n.group.key) : sid(n.space.id)));
-  const loose = new Set(tree.flatMap((n) => (n.kind === "group" ? [n.group.key] : [])));
-  const collision = collisionFor(loose);
+  const topIds = tree.map((n) => (n.kind === "group" ? pid(slotOf(n.group)) : sid(n.space.id)));
+  const collision = collisionFor(containerOf, new Set(tree.flatMap((n) => (n.kind === "group" ? [slotOf(n.group)] : []))));
   const newSpace = () => setEditingSpace(spaces.create("New project"));
+  // Just below a project: where a group taken out of it lands.
+  const below = (space: string) => topKeys[topKeys.indexOf(spaceKey(space)) + 1];
+  // Over a project to drop into it, the lists hold still, so the card stays under the pointer.
+  const still = !!overId && (overId.startsWith("s:") || overId.startsWith("h:")) && !active?.startsWith("s:");
+
+  /** Moves a group: the whole folder when it is where the folder belongs, else just these agents. */
+  const moveGroup = (g: Group, target: string) => {
+    const here = g.space ?? "";
+    if (target === here) return;
+    const keys = g.agents.map(agentKeyOf);
+    if (here === spaces.homeOf(g.key)) spaces.place(g.key, target || null, target ? undefined : here ? below(here) : undefined, keys);
+    else spaces.placeAgents(g.key, keys, target);
+  };
 
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so a click still selects.
@@ -141,78 +157,78 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   );
 
   const onDragStart = (e: DragStartEvent) => setActive(String(e.active.id));
+  const onDragOver = (e: DragOverEvent) => setOverId(e.over ? String(e.over.id) : null);
   const onDragEnd = (e: DragEndEvent) => {
     setActive(null);
+    setOverId(null);
     const from = String(e.active.id);
     const to = e.over ? String(e.over.id) : null;
     if (!to || from === to) return;
-    // Dropped on an agent counts as dropped on its folder.
-    const over = to.startsWith("a:") ? pid(parseAid(to).projectKey) : to;
-    // A folder's place at the top level: its own, or its project's.
-    const topOf = (cid: string) => (cid.startsWith("s:") ? spaceKey(cid.slice(2)) : home.get(cid.slice(2)) ? spaceKey(home.get(cid.slice(2))!.id) : cid.slice(2));
+    // Where a drop on a project's card or header sends it: in, or out of its own.
+    const intoOf = (here: string) => (to.startsWith("h:") ? (to.slice(2) === here ? "" : to.slice(2)) : to.startsWith("s:") ? to.slice(2) : null);
     if (from.startsWith("s:")) {
+      const over = to.startsWith("a:") ? pid(parseAid(to).slot) : to;
+      const topOf = (cid: string) => (cid.startsWith("s:") ? spaceKey(cid.slice(2)) : containerOf(cid.slice(2)) ? spaceKey(containerOf(cid.slice(2))) : (bySlot.get(cid.slice(2))?.key ?? ""));
       if (over.startsWith("s:") || over.startsWith("p:")) onMoveTop(spaceKey(from.slice(2)), topOf(over));
       return;
     }
     if (from.startsWith("p:")) {
-      const key = from.slice(2);
-      const mine = home.get(key)?.id ?? null;
-      if (over.startsWith("h:")) {
-        const target = over.slice(2);
-        // Onto its own project's header: out, just below the project.
-        if (target === mine) spaces.place(key, null, topKeys[topKeys.indexOf(spaceKey(mine)) + 1]);
-        else spaces.place(key, target);
-        return;
-      }
-      if (over.startsWith("s:")) {
-        const target = over.slice(2);
-        if (target === mine) return;
-        if (mine === null) onMoveTop(key, spaceKey(target));
-        else spaces.place(key, target);
-        return;
-      }
-      const onto = over.slice(2);
-      const theirs = home.get(onto)?.id ?? null;
-      if (mine === theirs) {
-        if (mine === null) return onMoveTop(key, onto);
-        // Within a project: like a list move, it lands where the other was.
-        const members = home.get(key)!.members;
-        const a = members.indexOf(key), b = members.indexOf(onto);
-        spaces.place(key, mine, a < b ? members[b + 1] : onto);
-        return;
-      }
-      spaces.place(key, theirs, theirs === null ? topOf(over) : onto);
+      const g = bySlot.get(from.slice(2));
+      if (!g) return;
+      const here = g.space ?? "";
+      const into = intoOf(here);
+      if (into !== null) return moveGroup(g, into);
+      const other = to.startsWith("p:") ? bySlot.get(to.slice(2)) : undefined;
+      if (!other || (other.space ?? "") !== here) return;
+      if (!here) return onMoveTop(g.key, other.key);
+      // Within a project: like a list move, it lands where the other was.
+      const members = spaceList.find((s) => s.id === here)?.members ?? [];
+      const a = members.indexOf(g.key), b = members.indexOf(other.key);
+      if (a !== -1 && b !== -1) spaces.place(g.key, here, a < b ? members[b + 1] : other.key);
       return;
     }
-    // Agents stay inside their project.
+    const src = parseAid(from);
+    const g = bySlot.get(src.slot);
+    const agent = g?.agents.find((x) => x.id === src.agentId);
+    if (!g || !agent) return;
+    const into = intoOf(g.space ?? "");
+    if (into !== null) return spaces.placeAgents(g.key, [agentKeyOf(agent)], into);
     if (!to.startsWith("a:")) return;
-    const src = parseAid(from), dst = parseAid(to);
-    if (src.projectKey !== dst.projectKey) return;
-    const g = groups.find((x) => x.key === src.projectKey);
-    if (!g) return;
+    const dst = parseAid(to);
+    if (dst.slot !== src.slot) return;
     const a = g.agents.findIndex((x) => x.id === src.agentId), b = g.agents.findIndex((x) => x.id === dst.agentId);
-    if (a !== -1 && b !== -1) onMoveAgent(g.key, a, b);
+    if (a !== -1 && b !== -1) onMoveAgent(src.slot, a, b);
   };
 
   const menus = listMenus(actions, { onClearEnded, onResetOrder, onNewSpace: newSpace });
-  const folderMenu = (e: React.MouseEvent, g: Group) => {
+  /** Move to each other project, to a new one, or out of its own. */
+  const moveEntries = (here: string, move: (target: string) => void, newName: string) => [
+    ...spaceList.filter((s) => s.id !== here).map((s) => ({ text: `Move to ${s.name}`, action: () => move(s.id) })),
+    {
+      text: "Move to New Project…",
+      action: () => {
+        const id = spaces.create(newName, [], here ? spaceKey(here) : undefined);
+        move(id);
+        setEditingSpace(id);
+      },
+    },
+    ...(here ? [{ text: `Remove from ${nameOf(here)}`, action: () => move("") }] : []),
+  ];
+  const groupMenu = (e: React.MouseEvent, g: Group) => {
     e.preventDefault();
     e.stopPropagation();
-    const mine = home.get(g.key);
-    const others = tree.flatMap((n) => (n.kind === "space" && n.space.id !== mine?.id ? [n.space] : []));
     const prefix = g.label.match(/^([a-z0-9]+)[-_]/i)?.[1];
     const entries: MenuEntry[] = [
-      { id: `folder:new:${g.key}`, text: `New Agent in ${g.label}`, action: () => onNew(g.key) },
+      { id: `group:new:${g.key}`, text: `New Agent in ${g.label}`, action: () => onNew(g.key) },
       { separator: true },
-      ...others.map((s) => ({ id: `folder:to:${s.id}`, text: `Move to ${s.name}`, action: () => spaces.place(g.key, s.id) })),
-      {
-        id: "folder:to-new",
-        text: "Move to New Project…",
-        action: () => setEditingSpace(spaces.create(prefix ? prefixName(prefix) : g.label, [g.key], mine ? spaceKey(mine.id) : g.key)),
-      },
-      ...(mine ? [{ id: "folder:out", text: `Remove from ${mine.name}`, action: () => spaces.place(g.key, null, topKeys[topKeys.indexOf(spaceKey(mine.id)) + 1]) }] : []),
+      ...moveEntries(g.space ?? "", (t) => moveGroup(g, t), prefix ? prefixName(prefix) : g.label).map((x, i) => ({ id: `group:move:${i}`, ...x })),
     ];
     void popupMenu(entries);
+  };
+  const agentMenu = (e: React.MouseEvent, a: Agent, g: Group) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openAgentMenu(a, actions, [...moveEntries(g.space ?? "", (t) => spaces.placeAgents(g.key, [agentKeyOf(a)], t), "New project"), { text: "Reset Order", action: onResetOrder }]);
   };
   const spaceMenu = (e: React.MouseEvent, s: Space) => {
     e.preventDefault();
@@ -226,29 +242,31 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   };
   const suggestion = spaces.suggestions[0];
 
-  const renderFolder = (g: Group, inside?: Space, prefix?: string) => (
+  const renderGroup = (g: Group, inside?: Space, prefix?: string) => (
     <SortableGroup
-      key={g.key}
+      key={slotOf(g)}
       group={g}
       label={prefix && g.label.startsWith(prefix) ? g.label.slice(prefix.length) : undefined}
       nested={!!inside}
-      folded={folded.has(g.key)}
-      onFold={() => toggleFolded(g.key)}
+      still={still}
+      folded={folded.has(slotOf(g))}
+      onFold={() => toggleFolded(slotOf(g))}
       onNew={() => onNew(g.key)}
-      onMenu={(e) => folderMenu(e, g)}
+      onMenu={(e) => groupMenu(e, g)}
     >
-      <SortableContext items={g.agents.map((a) => aid(g.key, a.id))} strategy={verticalListSortingStrategy}>
+      <SortableContext items={g.agents.map((a) => aid(slotOf(g), a.id))} strategy={verticalListSortingStrategy}>
         {g.agents.map((a) => (
           <SortableAgent
             key={a.id}
-            id={aid(g.key, a.id)}
+            id={aid(slotOf(g), a.id)}
             agent={a}
             n={numbers.get(a.id)!}
             queued={pending(queues[a.id]).length}
             request={a.cli ? requests[a.id] : undefined}
             selected={view?.kind === "agent" && view.id === a.id}
+            still={still}
             onSelect={() => onSelect({ kind: "agent", id: a.id })}
-            onMenu={(e) => menus.agent(e, a)}
+            onMenu={(e) => agentMenu(e, a, g)}
             editor={renaming?.id === a.id ? <NameEditor value={a.name} onSave={(name) => renaming.save(a, name)} onCancel={renaming.cancel} className="text-sm" /> : undefined}
           />
         ))}
@@ -260,10 +278,10 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   const recent = sort?.mode === "recent";
   const numbers = new Map<string, number>();
   (recent ? sort!.recent : groups.flatMap((g) => g.agents)).forEach((a, i) => numbers.set(a.id, i + 1));
-  const activeGroup = active?.startsWith("p:") ? groups.find((g) => pid(g.key) === active) : undefined;
+  const activeGroup = active?.startsWith("p:") ? bySlot.get(active.slice(2)) : undefined;
   const activeSpace = active?.startsWith("s:") ? tree.find((n): n is Extract<TreeNode, { kind: "space" }> => n.kind === "space" && sid(n.space.id) === active) : undefined;
-  // What dropping the dragged folder on a project's header would do.
-  const dragging = active?.startsWith("p:") ? { key: active.slice(2), home: home.get(active.slice(2))?.id ?? null } : null;
+  // The project the dragged group or agent is in: its header takes it out, the others in.
+  const draggedFrom = active?.startsWith("p:") ? containerOf(active.slice(2)) : active?.startsWith("a:") ? containerOf(parseAid(active).slot) : null;
   const activeAgent = active?.startsWith("a:") ? groups.flatMap((g) => g.agents).find((a) => a.id === parseAid(active).agentId) : undefined;
 
   return (
@@ -383,8 +401,12 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
           collisionDetection={collision}
           modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
           onDragStart={onDragStart}
+          onDragOver={onDragOver}
           onDragEnd={onDragEnd}
-          onDragCancel={() => setActive(null)}
+          onDragCancel={() => {
+            setActive(null);
+            setOverId(null);
+          }}
           autoScroll={{ threshold: { x: 0, y: 0.15 }, acceleration: 8 }}
         >
           {suggestion && (
@@ -397,7 +419,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
           )}
           <SortableContext items={topIds} strategy={verticalListSortingStrategy}>
             {tree.map((n) => {
-              if (n.kind === "group") return renderFolder(n.group);
+              if (n.kind === "group") return renderGroup(n.group);
               const prefix = sharedPrefix(n.groups.map((g) => g.label));
               const sp = n.space;
               return (
@@ -416,10 +438,11 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
                   coloring={coloring === sp.id}
                   onColoring={(on) => setColoring(on ? sp.id : null)}
                   onColor={(color) => spaces.update(sp.id, { color })}
-                  drop={dragging ? (dragging.home === sp.id ? "out" : "in") : undefined}
+                  still={still}
+                  drop={draggedFrom === null ? undefined : draggedFrom === sp.id ? (overId === hid(sp.id) ? "out" : undefined) : overId === hid(sp.id) || overId === sid(sp.id) ? "in" : undefined}
                 >
-                  <SortableContext items={n.groups.map((g) => pid(g.key))} strategy={verticalListSortingStrategy}>
-                    {n.groups.map((g) => renderFolder(g, sp, prefix))}
+                  <SortableContext items={n.groups.map((g) => pid(slotOf(g)))} strategy={verticalListSortingStrategy}>
+                    {n.groups.map((g) => renderGroup(g, sp, prefix))}
                   </SortableContext>
                 </SortableSpace>
               );
@@ -640,13 +663,13 @@ function useFolded(): [Set<string>, (key: string) => void] {
 }
 
 /** A folder: its header, then its agents indented behind a rail in the folder's color. */
-function SortableGroup({ group, label, nested, folded, onFold, onNew, onMenu, children }: { group: Group; label?: string; nested?: boolean; folded: boolean; onFold: () => void; onNew: () => void; onMenu: (e: React.MouseEvent) => void; children: React.ReactNode }) {
-  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: pid(group.key) });
+function SortableGroup({ group, label, nested, still, folded, onFold, onNew, onMenu, children }: { group: Group; label?: string; nested?: boolean; still?: boolean; folded: boolean; onFold: () => void; onNew: () => void; onMenu: (e: React.MouseEvent) => void; children: React.ReactNode }) {
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: pid(slotOf(group)) });
   return (
     <section
       ref={setNodeRef}
       onContextMenu={onMenu}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
+      style={{ transform: still ? undefined : CSS.Translate.toString(transform), transition }}
       className={cn(
         nested
           ? "mt-1 first:mt-0"
@@ -738,6 +761,7 @@ function SortableSpace({
   onColoring,
   onColor,
   drop,
+  still,
   children,
 }: {
   node: SpaceNode;
@@ -751,6 +775,7 @@ function SortableSpace({
   onColoring: (on: boolean) => void;
   onColor: (color: string) => void;
   drop?: "in" | "out";
+  still?: boolean;
   children: React.ReactNode;
 }) {
   const { space } = node;
@@ -760,10 +785,10 @@ function SortableSpace({
       ref={setNodeRef}
       onContextMenu={onMenu}
       style={{
-        transform: CSS.Translate.toString(transform),
-        transition,
-        background: `linear-gradient(180deg, ${tint(space.color, 9)}, ${tint(space.color, 3)})`,
-        boxShadow: `inset 0 0 0 1px ${tint(space.color, 22)}`,
+        transform: still ? undefined : CSS.Translate.toString(transform),
+        transition: `${transition ?? "transform 200ms ease"}, box-shadow 150ms, background 150ms`,
+        background: `linear-gradient(180deg, ${tint(space.color, drop === "in" ? 18 : 9)}, ${tint(space.color, drop === "in" ? 8 : 3)})`,
+        boxShadow: drop === "in" ? `inset 0 0 0 2px ${tint(space.color, 75)}, 0 0 0 4px ${tint(space.color, 15)}` : `inset 0 0 0 1px ${tint(space.color, 22)}`,
       }}
       data-space=""
       className={cn("mt-3 rounded-xl p-[3px] first:mt-0", isDragging && DROP_SLOT)}
@@ -795,7 +820,7 @@ function SortableSpace({
                 children
               ) : (
                 <div className="mx-1 mb-1 rounded-lg border border-dashed px-3 py-2.5 text-center text-[11px] leading-relaxed text-ink-3" style={{ borderColor: tint(space.color, 35) }}>
-                  Drag a folder onto this header, or right-click one and choose <span className="font-semibold text-ink-2">Move to {space.name}</span>.
+                  Drag agents or groups here, or right-click one and choose <span className="font-semibold text-ink-2">Move to {space.name}</span>.
                 </div>
               )}
             </div>
@@ -834,12 +859,12 @@ function SpaceHeader({
   lifted?: boolean;
 }) {
   const { space, groups } = node;
-  const { setNodeRef, isOver } = useDroppable({ id: hid(space.id), disabled: lifted });
+  const { setNodeRef } = useDroppable({ id: hid(space.id), disabled: lifted });
   const { ref, ...rest } = handle ?? {};
   const agents = groups.flatMap((g) => g.agents);
   const working = agents.filter((a) => a.status === "working").length;
   const waiting = agents.filter((a) => a.status === "waiting").length;
-  const target = isOver && drop;
+  const target = drop;
   return (
     <div
       ref={(el) => {
@@ -853,7 +878,7 @@ function SpaceHeader({
         handle && !editing && "cursor-grab active:cursor-grabbing",
         lifted && "cursor-grabbing",
       )}
-      style={target ? { background: tint(space.color, 16), boxShadow: `inset 0 0 0 1.5px ${tint(space.color, 70)}` } : undefined}
+      style={target === "out" ? { background: tint(space.color, 16), boxShadow: `inset 0 0 0 1.5px ${tint(space.color, 70)}` } : undefined}
     >
       {onFold ? (
         <button
@@ -972,7 +997,7 @@ function SpaceSuggestion({ name, labels, onCreate, onDismiss }: { name: string; 
   );
 }
 
-function SortableAgent({ id, agent, n, queued, request, selected, onSelect, onMenu, editor }: { id: string; agent: Agent; n: number; queued: number; request?: AdmiralRequest; selected: boolean; onSelect: () => void; onMenu: (e: React.MouseEvent) => void; editor?: React.ReactNode }) {
+function SortableAgent({ id, agent, n, queued, request, selected, still, onSelect, onMenu, editor }: { id: string; agent: Agent; n: number; queued: number; request?: AdmiralRequest; selected: boolean; still?: boolean; onSelect: () => void; onMenu: (e: React.MouseEvent) => void; editor?: React.ReactNode }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id });
   // Selected from the keyboard (⌥↑/⌥↓, ⌘1–9): bring the row into view.
   const row = useRef<HTMLDivElement | null>(null);
@@ -985,7 +1010,7 @@ function SortableAgent({ id, agent, n, queued, request, selected, onSelect, onMe
         setNodeRef(el);
         row.current = el;
       }}
-      onContextMenu={onMenu} style={{ transform: CSS.Translate.toString(transform), transition }} className={cn("mb-0.5", isDragging && DROP_SLOT)}>
+      onContextMenu={onMenu} style={{ transform: still ? undefined : CSS.Translate.toString(transform), transition }} className={cn("mb-0.5", isDragging && DROP_SLOT)}>
       {editor ? (
         // Not the row's button: its drag handle and Enter/Space would take the keys.
         <div className="flex items-center gap-2.5 rounded-lg bg-canvas px-2.5 py-2 ring-1 ring-line-strong dark:bg-white/[0.07]">

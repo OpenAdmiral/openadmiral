@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { addSpace, flatten, layout, placeFolder, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
+import { addSpace, flatten, layout, placeAgents, placeFolder, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
 
-const g = (key: string): Group => ({ key, label: key, agents: [] });
+const agent = (name: string) => ({ id: name, name, project: "x", cwd: "/x", status: "idle", cli: { name } }) as never;
+// A folder's group as the sidebar has it: with an agent (a group never shows empty).
+const g = (key: string): Group => ({ key, label: key, agents: [agent(`${key}-1`)] });
 const base = (o: Partial<SidebarOrder> = {}): SidebarOrder => ({ projects: [], agents: {}, spaces: [], ...o });
 
 describe("projects in the sidebar", () => {
@@ -44,5 +46,20 @@ describe("projects in the sidebar", () => {
     const made = addSpace(base(), { id: "a", name: "Applivery", color: "#000" });
     expect(suggestSpaces(layout(groups, made), made)).toEqual([]);
     expect(prefixName("tmv")).toBe("Tmv");
+  });
+
+  it("moves single agents into a project, and back with their group", () => {
+    const blog: Group = { key: "blog", label: "blog", agents: [agent("a"), agent("b")] };
+    let o = addSpace(base({ projects: ["blog"] }), { id: "s", name: "S", color: "#000" });
+    o = placeAgents(o, "blog", ["b"], "s");
+    const tree = layout([blog], o);
+    expect(tree.map((n) => (n.kind === "group" ? n.group.agents.map((a) => a.id) : n.groups.map((g) => [g.slot, g.agents.map((a) => a.id)])))).toEqual([[["s\u0001blog", ["b"]]], ["a"]]);
+    // The whole group follows into the project; b needs no placement of its own any more.
+    o = placeFolder(o, "blog", "s", undefined, ["a"]);
+    expect(o.placed).toEqual({});
+    expect(layout([blog], o)).toMatchObject([{ kind: "space", groups: [{ slot: "s\u0001blog" }] }]);
+    // One agent out again: placed at the top level.
+    o = placeAgents(o, "blog", ["a"], "");
+    expect(flatten(layout([blog], o)).map((g) => g.agents.map((a) => a.id))).toEqual([["b"], ["a"]]);
   });
 });

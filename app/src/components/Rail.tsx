@@ -1,6 +1,6 @@
 import { DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { useEffect, useRef } from "react";
-import type { Group } from "@/lib/order";
+import { slotOf, type Group } from "@/lib/order";
 import { listMenus, type AgentActions } from "@/lib/lifecycle";
 import { cn } from "@/lib/utils";
 import { StatusIcon } from "./StatusIcon";
@@ -78,7 +78,7 @@ export function Rail({ groups, view, onSelect, onExpand, onShortcuts, openDelega
       <div className="mt-3 mb-1 h-px w-5 bg-line" />
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1" onContextMenu={menus.empty}>
         {groups.map((g) => (
-          <div key={g.key} className="flex flex-col items-center gap-0.5">
+          <div key={slotOf(g)} className="flex flex-col items-center gap-0.5">
             {g.agents.map((a) => {
               const selected = view?.kind === "agent" && view.id === a.id;
               n += 1;

@@ -121,7 +121,7 @@ export default function App() {
   // ⌘K's search: closed, or open on a query ("" from the keyboard).
   const [palette, setPalette] = useState<false | string>(false);
   const paletteHits = useMemo(
-    () => (palette !== false ? collect(agents, delegations, artifacts, queues, order.groups.map((g) => ({ key: g.key, label: g.label }))) : []),
+    () => (palette !== false ? collect(agents, delegations, artifacts, queues, [...new Map(order.groups.map((g) => [g.key, { key: g.key, label: g.label }])).values()]) : []),
     [palette, agents, delegations, artifacts, queues, order.groups],
   );
   const openTarget = (t: Target) => {
