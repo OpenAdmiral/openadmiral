@@ -23,7 +23,16 @@ export type Group = { key: string; label: string; agents: Agent[]; slot?: string
 export const slotOf = (g: Group) => g.slot ?? g.key;
 
 /** A project the person made: a name, a color and the groups it holds, in order. */
-export type Space = { id: string; name: string; color: string; members: string[]; /** A logo, as a data URL (a website's icon). */ icon?: string };
+export type Space = {
+  id: string;
+  name: string;
+  color: string;
+  members: string[];
+  /** A logo, as a data URL (a website's icon). */
+  icon?: string;
+  /** The order its groups are drawn in, as arranged by hand (whole groups and ones with only some agents here). */
+  order?: string[];
+};
 
 export const placedKey = (folder: string, agent: string) => `${folder}\u0000${agent}`;
 
@@ -73,7 +82,9 @@ export function layout(groups: Group[], order: SidebarOrder | null): Node[] {
     ...spaces.map((s) => {
       const inside = pieces.get(s.id) ?? [];
       // Its whole groups in its order, then groups with only some agents here.
-      const ordered = [...inside].sort((a, b) => rankIn(s.members, a.key) - rankIn(s.members, b.key) || a.label.localeCompare(b.label));
+      const ordered = [...inside].sort(
+        (a, b) => rankIn(s.order, a.key) - rankIn(s.order, b.key) || rankIn(s.members, a.key) - rankIn(s.members, b.key) || a.label.localeCompare(b.label),
+      );
       return { key: spaceKey(s.id), node: { kind: "space", space: s, groups: ordered } as Node };
     }),
   ];
@@ -138,6 +149,12 @@ export const updateSpace = (o: SidebarOrder, id: string, patch: { name?: string;
     else if (icon !== undefined) next.icon = icon;
     return next;
   }),
+});
+
+/** The groups of a project in a new order (`visible`: the ones on screen, in their new order). */
+export const arrangeSpace = (o: SidebarOrder, id: string, visible: string[]): SidebarOrder => ({
+  ...o,
+  spaces: (o.spaces ?? []).map((s) => (s.id === id ? { ...s, order: reorderVisible(s.order ?? [], visible) } : s)),
 });
 
 /** Removes a project; its folders come back to the top level where it was. */
@@ -309,6 +326,8 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
       place: (key: string, space: string | null, before?: string, agents?: string[]) => change((o) => placeFolder(o, key, space, before, agents)),
       /** Single agents of a folder: into a project, or "" for the top level. */
       placeAgents: (folder: string, agents: string[], space: string) => change((o) => placeAgents(o, folder, agents, space)),
+      /** The groups of a project, reordered by hand. */
+      arrange: (id: string, visible: string[]) => change((o) => arrangeSpace(o, id, visible)),
       /** Where a whole group belongs ("" for the top level). */
       homeOf: (folder: string) => groupHome(order, folder),
       dismiss: (name: string) => change((o) => ({ ...o, dismissed: [...(o.dismissed ?? []), name.toLowerCase()] })),

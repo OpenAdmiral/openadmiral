@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSpace, flatten, layout, placeAgents, placeFolder, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
+import { addSpace, arrangeSpace, flatten, layout, placeAgents, placeFolder, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
 
 const agent = (name: string) => ({ id: name, name, project: "x", cwd: "/x", status: "idle", cli: { name } }) as never;
 // A folder's group as the sidebar has it: with an agent (a group never shows empty).
@@ -61,5 +61,15 @@ describe("projects in the sidebar", () => {
     // One agent out again: placed at the top level.
     o = placeAgents(o, "blog", ["a"], "");
     expect(flatten(layout([blog], o)).map((g) => g.agents.map((a) => a.id))).toEqual([["b"], ["a"]]);
+  });
+
+  it("keeps a project's groups in the order arranged by hand", () => {
+    let o = addSpace(base(), { id: "s", name: "S", color: "#000" }, ["blog", "docs"]);
+    o = placeAgents(o, "applivery-api", ["applivery-api-1"], "s");
+    const space = () => layout(groups, o).find((n) => n.kind === "space");
+    // Whole groups first, then the one with only an agent here.
+    expect(space()).toMatchObject({ groups: [{ key: "blog" }, { key: "docs" }, { key: "applivery-api" }] });
+    o = arrangeSpace(o, "s", ["applivery-api", "blog", "docs"]);
+    expect(space()).toMatchObject({ groups: [{ key: "applivery-api" }, { key: "blog" }, { key: "docs" }] });
   });
 });

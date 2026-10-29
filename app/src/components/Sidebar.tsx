@@ -190,9 +190,13 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       if (!other || (other.space ?? "") !== here) return;
       if (!here) return onMoveTop(g.key, other.key);
       // Within a project: like a list move, it lands where the other was.
-      const members = spaceList.find((s) => s.id === here)?.members ?? [];
-      const a = members.indexOf(g.key), b = members.indexOf(other.key);
-      if (a !== -1 && b !== -1) spaces.place(g.key, here, a < b ? members[b + 1] : other.key);
+      const node = tree.find((n) => n.kind === "space" && n.space.id === here);
+      const visible = node?.kind === "space" ? node.groups.map((x) => x.key) : [];
+      const a = visible.indexOf(g.key), b = visible.indexOf(other.key);
+      if (a === -1 || b === -1) return;
+      visible.splice(a, 1);
+      visible.splice(b, 0, g.key);
+      spaces.arrange(here, visible);
       return;
     }
     const src = parseAid(from);
