@@ -132,6 +132,14 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
   const topIds = tree.map((n) => (n.kind === "group" ? pid(slotOf(n.group)) : sid(n.space.id)));
   const collision = collisionFor(containerOf, new Set(tree.flatMap((n) => (n.kind === "group" ? [slotOf(n.group)] : []))));
   const newSpace = () => setEditingSpace(spaces.create("New project"));
+  // Preview screenshots open the first project's color and logo with OPENADMIRAL_TIP=appearance.
+  const firstSpace = tree.find((n) => n.kind === "space");
+  const firstSpaceId = firstSpace?.kind === "space" ? firstSpace.space.id : undefined;
+  useEffect(() => {
+    const onTip = (e: Event) => (e as CustomEvent).detail === "appearance" && firstSpaceId && setColoring(firstSpaceId);
+    window.addEventListener("openadmiral:tip", onTip);
+    return () => window.removeEventListener("openadmiral:tip", onTip);
+  }, [firstSpaceId]);
   // Just below a project: where a group taken out of it lands.
   const below = (space: string) => topKeys[topKeys.indexOf(spaceKey(space)) + 1];
   // Over a project to drop into it, the lists hold still, so the card stays under the pointer.
@@ -235,7 +243,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
     e.stopPropagation();
     void popupMenu([
       { id: "space:rename", text: "Rename…", action: () => setEditingSpace(s.id) },
-      { id: "space:color", text: "Change Color…", action: () => setColoring(s.id) },
+      { id: "space:color", text: "Color and Logo…", action: () => setColoring(s.id) },
       { separator: true },
       { id: "space:delete", text: `Delete “${s.name}”`, action: () => spaces.remove(s.id) },
     ]);
@@ -437,7 +445,7 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
                   onCancelRename={() => setEditingSpace(null)}
                   coloring={coloring === sp.id}
                   onColoring={(on) => setColoring(on ? sp.id : null)}
-                  onColor={(color) => spaces.update(sp.id, { color })}
+                  onStyle={(patch) => spaces.update(sp.id, patch)}
                   still={still}
                   drop={draggedFrom === null ? undefined : draggedFrom === sp.id ? (overId === hid(sp.id) ? "out" : undefined) : overId === hid(sp.id) || overId === sid(sp.id) ? "in" : undefined}
                 >
@@ -759,7 +767,7 @@ function SortableSpace({
   onCancelRename,
   coloring,
   onColoring,
-  onColor,
+  onStyle,
   drop,
   still,
   children,
@@ -773,7 +781,7 @@ function SortableSpace({
   onCancelRename: () => void;
   coloring: boolean;
   onColoring: (on: boolean) => void;
-  onColor: (color: string) => void;
+  onStyle: (patch: { color?: string; icon?: string | null }) => void;
   drop?: "in" | "out";
   still?: boolean;
   children: React.ReactNode;
@@ -802,7 +810,7 @@ function SortableSpace({
         onCancelRename={onCancelRename}
         coloring={coloring}
         onColoring={onColoring}
-        onColor={onColor}
+        onStyle={onStyle}
         drop={drop}
         handle={{ ref: setActivatorNodeRef, ...attributes, ...listeners }}
       />
@@ -840,7 +848,7 @@ function SpaceHeader({
   onCancelRename,
   coloring,
   onColoring,
-  onColor,
+  onStyle,
   drop,
   handle,
   lifted,
@@ -853,7 +861,7 @@ function SpaceHeader({
   onCancelRename?: () => void;
   coloring?: boolean;
   onColoring?: (on: boolean) => void;
-  onColor?: (color: string) => void;
+  onStyle?: (patch: { color?: string; icon?: string | null }) => void;
   drop?: "in" | "out";
   handle?: HTMLAttributes<HTMLDivElement> & { ref?: (el: HTMLElement | null) => void };
   lifted?: boolean;
@@ -898,12 +906,12 @@ function SpaceHeader({
         type="button"
         onClick={() => onColoring?.(!coloring)}
         onPointerDown={(e) => e.stopPropagation()}
-        aria-label={`${space.name}'s color`}
-        title="Change the color"
-        className="grid size-[22px] shrink-0 place-items-center rounded-[7px] text-[11px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.2),inset_0_1px_0_rgb(255_255_255/0.25)] transition-transform duration-150 hover:scale-105"
-        style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${space.color} 80%, white), ${space.color} 55%, color-mix(in srgb, ${space.color} 75%, black))` }}
+        data-appearance-toggle=""
+        aria-label={`${space.name}'s color and logo`}
+        title="Color and logo"
+        className="shrink-0 rounded-[7px] transition-transform duration-150 hover:scale-105"
       >
-        {(space.name.trim()[0] ?? "·").toUpperCase()}
+        <SpaceTile space={space} />
       </button>
       {editing && onRename && onCancelRename ? (
         <NameEditor value={space.name} onSave={onRename} onCancel={onCancelRename} className="text-[13px]" />
@@ -940,34 +948,133 @@ function SpaceHeader({
           )}
         </>
       )}
-      <AnimatePresence>
-        {coloring && onColor && (
-          <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.97 }}
-            transition={{ duration: 0.12 }}
-            className="absolute top-full left-5 z-20 mt-1 flex gap-1.5 rounded-lg bg-canvas p-2 shadow-xl ring-1 ring-line-strong dark:bg-[#1d2026]"
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseLeave={() => onColoring?.(false)}
-          >
-            {SPACE_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={`Color ${c}`}
-                onClick={() => {
-                  onColor(c);
-                  onColoring?.(false);
-                }}
-                className={cn("size-4 rounded-full transition-transform hover:scale-110", c === space.color && "ring-2 ring-ink/70 ring-offset-1 ring-offset-canvas")}
-                style={{ background: c }}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AnimatePresence>{coloring && onStyle && <SpaceAppearance space={space} onStyle={onStyle} onClose={() => onColoring?.(false)} />}</AnimatePresence>
     </div>
+  );
+}
+
+/** A project's mark: its logo on white, else its initial on its color. */
+function SpaceTile({ space }: { space: Space }) {
+  if (space.icon)
+    return (
+      <span className="grid size-[22px] place-items-center overflow-hidden rounded-[7px] bg-white p-[3px] shadow-[0_1px_2px_rgb(0_0_0/0.2)]" style={{ boxShadow: `0 0 0 1px ${tint(space.color, 45)}, 0 1px 2px rgb(0 0 0 / 0.2)` }}>
+        <img src={space.icon} alt="" draggable={false} className="size-full object-contain" />
+      </span>
+    );
+  return (
+    <span
+      className="grid size-[22px] place-items-center rounded-[7px] text-[11px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.2),inset_0_1px_0_rgb(255_255_255/0.25)]"
+      style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${space.color} 80%, white), ${space.color} 55%, color-mix(in srgb, ${space.color} 75%, black))` }}
+    >
+      {(space.name.trim()[0] ?? "·").toUpperCase()}
+    </span>
+  );
+}
+
+/** Color and logo: a palette, any color, and a logo taken from a website's icon. Closes on a click outside or Esc. */
+function SpaceAppearance({ space, onStyle, onClose }: { space: Space; onStyle: (patch: { color?: string; icon?: string | null }) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    // Its own tile toggles it with its click.
+    const down = (e: PointerEvent) => {
+      const t = e.target as HTMLElement;
+      if (!ref.current?.contains(t) && !t.closest?.("[data-appearance-toggle]")) close.current();
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    // After the click that opened it.
+    const t = setTimeout(() => {
+      window.addEventListener("pointerdown", down, true);
+      window.addEventListener("keydown", key);
+    });
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, []);
+  const fetchIcon = async () => {
+    if (!url.trim() || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      onStyle({ icon: await invoke<string>("fetch_favicon", { url }) });
+      setUrl("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -4, scale: 0.97 }}
+      transition={{ duration: 0.12 }}
+      className="absolute top-full left-1 z-30 mt-1.5 w-[236px] cursor-default rounded-xl bg-canvas p-3 shadow-2xl ring-1 ring-line-strong dark:bg-[#1d2026]"
+      onPointerDown={(e) => e.stopPropagation()}
+      // Keys stay here: not the drag handle (Space), not the app's shortcuts.
+      onKeyDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">Color</div>
+      <div className="grid grid-cols-9 gap-1.5">
+        {SPACE_COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={`Color ${c}`}
+            onClick={() => onStyle({ color: c })}
+            className={cn("size-[18px] rounded-full transition-transform hover:scale-115", c === space.color && "ring-2 ring-ink/70 ring-offset-2 ring-offset-canvas dark:ring-offset-[#1d2026]")}
+            style={{ background: c }}
+          />
+        ))}
+        <label
+          title="Any color"
+          className={cn(
+            "relative size-[18px] cursor-pointer overflow-hidden rounded-full transition-transform hover:scale-115",
+            !SPACE_COLORS.includes(space.color) && "ring-2 ring-ink/70 ring-offset-2 ring-offset-canvas dark:ring-offset-[#1d2026]",
+          )}
+          style={{ background: "conic-gradient(#f43f5e, #f59e0b, #84cc16, #14b8a6, #3b82f6, #a855f7, #f43f5e)" }}
+        >
+          <input type="color" value={space.color} onChange={(e) => onStyle({ color: e.target.value })} className="absolute inset-0 cursor-pointer opacity-0" />
+        </label>
+      </div>
+      <div className="mt-3.5 mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+        Logo
+        {space.icon && (
+          <button type="button" onClick={() => onStyle({ icon: null })} className="ml-auto text-[10.5px] font-medium normal-case tracking-normal text-ink-3 hover:text-ink">
+            Remove
+          </button>
+        )}
+      </div>
+      <form
+        className="flex gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void fetchIcon();
+        }}
+      >
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="applivery.com"
+          spellCheck={false}
+          autoCapitalize="off"
+          className="min-w-0 flex-1 rounded-md border border-line-strong bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-3 focus:border-brand-500 focus:outline-none"
+        />
+        <button type="submit" disabled={!url.trim() || busy} className="rounded-md bg-brand-600 px-2.5 text-xs font-semibold text-white transition-opacity disabled:opacity-40">
+          {busy ? "…" : "Use"}
+        </button>
+      </form>
+      <p className={cn("mt-1.5 text-[10.5px] leading-snug", error ? "text-red-600 dark:text-red-400" : "text-ink-3")}>{error ?? "Its website's icon becomes the project's logo."}</p>
+    </motion.div>
   );
 }
 

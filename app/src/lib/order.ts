@@ -23,7 +23,7 @@ export type Group = { key: string; label: string; agents: Agent[]; slot?: string
 export const slotOf = (g: Group) => g.slot ?? g.key;
 
 /** A project the person made: a name, a color and the groups it holds, in order. */
-export type Space = { id: string; name: string; color: string; members: string[] };
+export type Space = { id: string; name: string; color: string; members: string[]; /** A logo, as a data URL (a website's icon). */ icon?: string };
 
 export const placedKey = (folder: string, agent: string) => `${folder}\u0000${agent}`;
 
@@ -33,7 +33,10 @@ export type Node = { kind: "group"; group: Group } | { kind: "space"; space: Spa
 export const spaceKey = (id: string) => `space:${id}`;
 
 /** Project colors, in the order new projects take them. */
-export const SPACE_COLORS = ["#6366f1", "#0ea5e9", "#14b8a6", "#f59e0b", "#f43f5e", "#a855f7", "#22c55e", "#f97316"];
+export const SPACE_COLORS = [
+  "#6366f1", "#0ea5e9", "#14b8a6", "#f59e0b", "#f43f5e", "#a855f7", "#22c55e", "#f97316", "#3b82f6",
+  "#06b6d4", "#10b981", "#84cc16", "#eab308", "#ef4444", "#ec4899", "#8b5cf6", "#64748b",
+];
 
 const rankIn = (list: string[] | undefined, k: string) => {
   const i = list?.indexOf(k) ?? -1;
@@ -125,9 +128,16 @@ export function addSpace(o: SidebarOrder, space: Omit<Space, "members">, keys: s
   return { ...o, projects, spaces: [...without(o, keys), { ...space, members: keys }] };
 }
 
-export const updateSpace = (o: SidebarOrder, id: string, patch: Partial<Pick<Space, "name" | "color">>): SidebarOrder => ({
+export const updateSpace = (o: SidebarOrder, id: string, patch: { name?: string; color?: string; icon?: string | null }): SidebarOrder => ({
   ...o,
-  spaces: (o.spaces ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)),
+  spaces: (o.spaces ?? []).map((s) => {
+    if (s.id !== id) return s;
+    const { icon, ...rest } = patch;
+    const next = { ...s, ...rest };
+    if (icon === null) delete next.icon;
+    else if (icon !== undefined) next.icon = icon;
+    return next;
+  }),
 });
 
 /** Removes a project; its folders come back to the top level where it was. */
@@ -293,7 +303,7 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
         });
         return id;
       },
-      update: (id: string, patch: Partial<Pick<Space, "name" | "color">>) => change((o) => updateSpace(o, id, patch)),
+      update: (id: string, patch: { name?: string; color?: string; icon?: string | null }) => change((o) => updateSpace(o, id, patch)),
       remove: (id: string) => change((o) => removeSpace(o, id)),
       /** A whole group: into a project, or out to the top level (null). */
       place: (key: string, space: string | null, before?: string, agents?: string[]) => change((o) => placeFolder(o, key, space, before, agents)),

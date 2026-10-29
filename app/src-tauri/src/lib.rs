@@ -1,5 +1,6 @@
 mod artifacts;
 mod discover;
+mod favicon;
 mod handoff;
 mod jobs;
 mod lifecycle;
@@ -1266,6 +1267,7 @@ pub fn run() {
             debug_menu_event,
             order_load,
             order_save,
+            favicon::fetch_favicon,
             ui_state_load,
             ui_state_save,
             clipboard_read,
