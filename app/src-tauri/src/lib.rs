@@ -1066,7 +1066,8 @@ fn poll_agents(app: AppHandle) {
         }
         // Every 2 s while someone looks (or a hand-off waits on a session to exit); with the
         // window hidden or minimized, the menu bar's counts can wait 10 s.
-        let shown = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false));
+        // (A flag the window events keep: asking the window itself goes through the main thread.)
+        let shown = WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed);
         std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) { 2 } else { 10 }));
     });
 }
@@ -1208,7 +1209,11 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&openadmiral, &edit, &window, &help])
 }
 
+/// Whether the main window is showing: closing it hides it (the app stays in the menu bar).
+static WINDOW_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 pub(crate) fn show_main(app: &AppHandle) {
+    WINDOW_SHOWN.store(true, std::sync::atomic::Ordering::Relaxed);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -1376,11 +1381,19 @@ pub fn run() {
                 }
                 api.prevent_close();
                 let _ = window.hide();
+                WINDOW_SHOWN.store(false, std::sync::atomic::Ordering::Relaxed);
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building OpenAdmiral")
         .run(|app, event| {
+            // The Dock icon, Spotlight or Finder opening it again: bring the closed window back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    show_main(app);
+                }
+            }
             // A clean quit tells the statusline nothing is attached any more, and
             // gives sleep back to macOS at once (the helper would after its lease).
             if let tauri::RunEvent::Exit = event {
