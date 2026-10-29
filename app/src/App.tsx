@@ -268,8 +268,12 @@ export default function App() {
       if (d.view === "about") setAbout(true);
       // OPENADMIRAL_VIEW=search:<query> (preview): ⌘K open on that query, for a screenshot.
       if (d.view?.startsWith("search")) setTimeout(() => setPalette(d.view!.slice(7)), 1500);
-      // OPENADMIRAL_VIEW=split:<layout> (preview): the chat split, for a screenshot.
-      if (d.view?.startsWith("split:")) setDemoLayout(d.view.slice(6) as SplitLayout);
+      // OPENADMIRAL_VIEW=split:<layout>[:dense] (preview): the chat split, for a screenshot.
+      if (d.view?.startsWith("split:")) {
+        const [, layout, dense] = d.view.split(":");
+        setDemoLayout(layout as SplitLayout);
+        if (dense) ui.toggleDensePanes();
+      }
       if (d.sort === "recent" || d.sort === "order") setSortMode(d.sort);
       if (d.rail) ui.toggleLeft();
       if (d.inspectorHidden) ui.toggleRight();
@@ -443,9 +447,9 @@ export default function App() {
   }, [shown, view, agents, life.actions, ui, seen.unseen, delegations, split]);
 
   const selected = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
-  const viewMenu = <ViewMenu layout={split.layout} onLayout={setLayout} scale={textScale} onScale={ui.stepText} />;
+  const viewMenu = <ViewMenu layout={split.layout} onLayout={setLayout} scale={textScale} onScale={ui.stepText} dense={!!ui.densePanes} onDense={ui.toggleDensePanes} />;
   /** An agent's view: on its own, as one pane of the split, or just its inspector beside them. */
-  const detail = (a: Agent, extra: { key?: string; part?: "all" | "main" | "inspector"; pane?: { active: boolean; onClose?: () => void } }) => (
+  const detail = (a: Agent, extra: { key?: string; part?: "all" | "main" | "inspector"; pane?: { active: boolean; onClose?: () => void }; dense?: boolean }) => (
     <AgentDetail
                 agent={a}
                 delegations={delegations}
@@ -611,6 +615,7 @@ export default function App() {
                           {detail(a, {
                             key: a.id,
                             part: "main",
+                            dense: !!ui.densePanes,
                             pane: { active: isActive, onClose: () => ui.setSplit((s) => ({ ...(s ?? SINGLE), panes: (s ?? SINGLE).panes.map((p, j) => (j === i ? null : p)) })) },
                           })}
                         </div>

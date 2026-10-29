@@ -129,7 +129,7 @@ export function LayoutGlyph({ layout, className }: { layout: SplitLayout; classN
 }
 
 /** The header's layout button: the six layouts and the text size. */
-export function ViewMenu({ layout, onLayout, scale, onScale }: { layout: SplitLayout; onLayout: (l: SplitLayout) => void; scale: number; onScale: (dir: 1 | -1 | 0) => void }) {
+export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: { layout: SplitLayout; onLayout: (l: SplitLayout) => void; scale: number; onScale: (dir: 1 | -1 | 0) => void; dense: boolean; onDense: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -189,6 +189,21 @@ export function ViewMenu({ layout, onLayout, scale, onScale }: { layout: SplitLa
                 </button>
               ))}
             </div>
+            <button
+              role="switch"
+              aria-checked={dense}
+              onClick={onDense}
+              disabled={layout === "1"}
+              className="mt-2.5 flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left text-xs text-ink-2 transition-colors hover:text-ink disabled:opacity-40"
+            >
+              <span className="flex-1">
+                <span className="block font-medium text-ink">Compact panes</span>
+                <span className="block text-[10.5px] text-ink-3">One line per pane, tabs as icons</span>
+              </span>
+              <span className={cn("relative h-[18px] w-8 shrink-0 rounded-full transition-colors", dense ? "bg-brand-600" : "bg-line-strong")}>
+                <span className={cn("absolute top-[2px] size-[14px] rounded-full bg-white shadow transition-[left] duration-150", dense ? "left-[16px]" : "left-[2px]")} />
+              </span>
+            </button>
             <div className="mt-3.5 mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
               Text size
               <span className="ml-auto flex items-center gap-1 font-normal normal-case tracking-normal">

@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   BranchingPathsUpLinearIcon,
+  ChatLineLinearIcon,
   CheckCircleLinearIcon,
   CloseCircleLinearIcon,
   CpuLinearIcon,
   DollarLinearIcon,
   FolderLinearIcon,
+  GalleryLinearIcon,
   ListArrowDownLinearIcon,
   MenuDotsLinearIcon,
   SidebarMinimalisticLinearIcon,
@@ -96,12 +98,14 @@ type Props = {
   viewMenu?: React.ReactNode;
   /** Text size of the conversation and artifacts (the terminal's is set on the terminals). */
   textScale?: number;
+  /** A pane in compact mode: one header line, the tabs as icons, no chips. */
+  dense?: boolean;
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1 }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption }: Props) {
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -275,6 +279,31 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
   );
   if (part === "inspector") return <div className="flex h-full pt-3 pr-3 pb-3">{inspectorSlot}</div>;
   const compact = !!pane;
+  const dense = compact && !!denseOption;
+  const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts" } as const;
+  const tabIcons = (
+    <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-line/70 p-0.5">
+      {(["main", "conversation", "artifacts"] as const).map((t, i) => {
+        const Icon = t === "main" ? MonitorLinearIcon : t === "conversation" ? ChatLineLinearIcon : GalleryLinearIcon;
+        return (
+          <Tip key={t} side="bottom" content={<TipLabel label={`${TAB_LABEL[t]}${t === "artifacts" && artifacts.length ? ` (${artifacts.length})` : ""}`} kbd={`⌃${i + 1}`} />}>
+            <button
+              onClick={() => setTab(t)}
+              aria-label={TAB_LABEL[t]}
+              aria-pressed={tab === t}
+              className={cn(
+                "relative inline-flex size-6 items-center justify-center rounded-md transition-colors",
+                tab === t ? "bg-canvas text-ink shadow-sm dark:bg-white/10" : "text-ink-3 hover:text-ink",
+              )}
+            >
+              <Icon size={14} />
+              {t === "artifacts" && unseenHere > 0 && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-brand-500" />}
+            </button>
+          </Tip>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -290,6 +319,8 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
         renaming={renaming}
         pluginBehind={pluginBehind}
         compact={compact}
+        dense={dense}
+        tabs={dense ? tabIcons : undefined}
         active={active}
         viewMenu={viewMenu}
         onClosePane={pane?.onClose}
@@ -311,7 +342,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
             compact && active ? "border-brand-500/70 ring-[3px] ring-brand-500/15" : "border-line",
           )}
         >
-          <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5">
+          <div className={cn("flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
             {(["main", "conversation", "artifacts"] as const).map((t, i) => (
               <button
                 key={t}
@@ -402,6 +433,8 @@ function Header({
   renaming,
   pluginBehind,
   compact,
+  dense,
+  tabs,
   active = true,
   viewMenu,
   onClosePane,
@@ -417,6 +450,8 @@ function Header({
   renaming?: { save: (a: Agent, name: string) => void; cancel: () => void };
   pluginBehind?: { reload: () => void };
   compact?: boolean;
+  dense?: boolean;
+  tabs?: React.ReactNode;
   active?: boolean;
   viewMenu?: React.ReactNode;
   onClosePane?: () => void;
@@ -445,18 +480,18 @@ function Header({
     },
   ].filter((x): x is ActionItem => !!x);
   return (
-    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5")}>
+    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", dense ? "@container min-w-0 overflow-hidden px-2.5 py-1.5 [&_.size-8]:size-7" : compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5")}>
       <div data-tauri-drag-region className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
         <StatusIcon status={agent.status} size={compact ? 15 : 18} />
         {renaming ? (
           <NameEditor value={agent.name} onSave={(name) => renaming.save(agent, name)} onCancel={renaming.cancel} className="max-w-sm text-xl tracking-tight" />
         ) : (
-          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", active ? "text-ink" : "text-ink-2")}>
+          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", dense && "min-w-[4.5rem] flex-1", active ? "text-ink" : "text-ink-2")}>
             {agent.name}
             {agent.twin && <span className="ml-2 font-mono text-sm font-normal text-ink-3">{agent.twin}</span>}
           </h1>
         )}
-        <span className={cn("shrink-0 text-ink-3", compact ? "text-xs" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>
+        {!dense && <span className={cn("shrink-0 text-ink-3", compact ? "text-xs" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
         {closing && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             {request?.waiting ? `closing when done · waiting: ${request.waiting}` : "closing after this turn…"}
@@ -465,7 +500,16 @@ function Header({
         {agent.status === "working" && s?.turn && !compact && (
           <span className="truncate text-sm text-ink-3">· {ago(s.turn.startedAt, now)} on “{s.turn.prompt.slice(0, 80)}”</span>
         )}
-        <span className="flex-1" />
+        {!dense && <span className="flex-1" />}
+        {dense && used !== undefined && (
+          <Tip side="bottom" content={<TipLabel label={`Context: ${Math.round(used)}% used`} />}>
+            <span className="flex shrink-0 items-center gap-1.5 @max-[400px]:hidden">
+              <Meter value={used} className="w-6 @max-[440px]:hidden" />
+              <span className={cn("text-[10.5px] tabular", fillText(used))}>{Math.round(used)}%</span>
+            </span>
+          </Tip>
+        )}
+        {tabs}
         {/* In panes, the window-wide controls sit on the active one only. */}
         {!compact && <UnderwayPill />}
         {(!compact || active) && viewMenu}
@@ -475,6 +519,7 @@ function Header({
             onClick={inspector.toggle}
             aria-label={inspector.hidden ? "Show the inspector" : "Hide the inspector"}
             className={cn(
+              dense && "@max-[400px]:hidden",
               "relative inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
               !inspector.hidden && "text-ink",
             )}
@@ -514,7 +559,7 @@ function Header({
           </Tip>
         )}
       </div>
-      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", compact ? "flex-nowrap overflow-hidden whitespace-nowrap [mask-image:linear-gradient(to_right,black_85%,transparent)] [&>*]:shrink-0" : "flex-wrap")}>
+      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", dense && "hidden", compact ? "flex-nowrap overflow-hidden whitespace-nowrap [mask-image:linear-gradient(to_right,black_85%,transparent)] [&>*]:shrink-0" : "flex-wrap")}>
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
             {agent.project}
