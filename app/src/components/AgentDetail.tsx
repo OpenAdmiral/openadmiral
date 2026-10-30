@@ -109,6 +109,9 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
+  // Whether it was already closed when opened here (the view mounts anew per agent): only then
+  // does it resume by itself. Closed while on screen (Close, Close and Remove, /exit) it stays closed.
+  const openedClosed = useRef(!agent.cli);
   const tasks = pickTasks(s, transcript);
   const [tab, setTab] = useState<Tab>("main");
   // Index → Conversation: the turn to bring to the top, and the one being read.
@@ -378,7 +381,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
             agent.unplugged ? (
               <Unplugged agent={agent} installed={pluginInstalled} />
             ) : (
-              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} />
+              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} autoResume={openedClosed.current} />
             )
           )}
         </div>
@@ -842,7 +845,7 @@ const autoResumed = new Set<string>();
 /** Opened, not passed over: ⌥↓ through the list moves on before this. */
 const AUTO_RESUME_MS = 1000;
 
-function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now: number; handoff?: Handoff; request?: AdmiralRequest }) {
+function ReadOnly({ agent, now, handoff: pending, request, autoResume }: { agent: Agent; now: number; handoff?: Handoff; request?: AdmiralRequest; autoResume: boolean }) {
   const s = agent.session;
   const [handoff, setHandoff] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -854,7 +857,7 @@ function ReadOnly({ agent, now, handoff: pending, request }: { agent: Agent; now
   // Not one with no conversation to continue: resuming that would start a new session.
   const stopped = !inTerminal && !panel && !agent.cli && !agent.unplugged && !pending && agent.session?.hasTranscript !== false;
   useEffect(() => {
-    if (!stopped || autoResumed.has(agent.id)) return;
+    if (!autoResume || !stopped || autoResumed.has(agent.id)) return;
     const t = setTimeout(() => {
       autoResumed.add(agent.id);
       startHandoff(agent.id, agent.cli?.name ?? agent.session?.name ?? agent.name, agent.cwd).catch((e) => setStartError(String(e)));
