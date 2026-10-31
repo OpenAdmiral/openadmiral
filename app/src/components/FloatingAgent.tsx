@@ -90,6 +90,7 @@ export function FloatingAgent({ id }: { id: string }) {
             dense={!!ui.densePanes}
             textScale={textScale}
             inset
+            restarting={life.restarting.includes(agent.id)}
             floatAction={{ kind: "dock", run: () => void invoke("float_dock") }}
           />
         ) : (

@@ -11,6 +11,7 @@ mod netwatch;
 mod plugin_files;
 mod power;
 mod pty;
+mod restart;
 mod resume;
 mod scheduler;
 mod session_files;
@@ -316,11 +317,24 @@ pub fn claude_agents() -> Option<Value> {
         }
     }
     let out = claude_cmd().args(["agents", "--json"]).output().ok()?;
-    let v: Value = serde_json::from_slice(&out.stdout).ok()?;
+    let mut v: Value = serde_json::from_slice(&out.stdout).ok()?;
+    with_versions(&mut v);
     if let Ok(mut cache) = AGENTS.lock() {
         *cache = Some((std::time::Instant::now(), v.clone()));
     }
     Some(v)
+}
+
+/// Adds to each row the Claude Code its process runs: `~/.claude/sessions/<pid>.json` has it.
+fn with_versions(agents: &mut Value) {
+    let dir = claude_home().join("sessions");
+    for row in agents.as_array_mut().into_iter().flatten() {
+        let Some(pid) = row.get("pid").and_then(Value::as_u64) else { continue };
+        let file = scheduler::read_json(&dir.join(format!("{pid}.json")));
+        if let Some(version) = file.as_ref().and_then(|f| f.get("version")).and_then(Value::as_str) {
+            row["version"] = Value::from(version);
+        }
+    }
 }
 
 #[tauri::command]
@@ -1064,6 +1078,7 @@ fn watch_admiral(app: AppHandle) {
 fn poll_agents(app: AppHandle) {
     std::thread::spawn(move || loop {
         if let Some(agents) = claude_agents() {
+            restart::tick(&app, &agents);
             if !preview() {
                 handoff::tick(&app, &agents);
             }
@@ -1074,7 +1089,7 @@ fn poll_agents(app: AppHandle) {
         // window hidden or minimized, the menu bar's counts can wait 10 s.
         // (A flag the window events keep: asking the window itself goes through the main thread.)
         let shown = WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed) || float::any();
-        std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) { 2 } else { 10 }));
+        std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) || restart::any() { 2 } else { 10 }));
     });
 }
 
@@ -1280,6 +1295,11 @@ pub fn run() {
             float::float_dock,
             float::float_close,
             float::float_recall,
+            float::float_jump,
+            restart::agent_restart,
+            restart::agent_restart_cancel,
+            restart::agent_restarts,
+            restart::claude_installed_version,
             ui_state_load,
             ui_state_save,
             clipboard_read,

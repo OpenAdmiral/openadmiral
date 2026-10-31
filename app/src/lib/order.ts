@@ -219,7 +219,8 @@ export function renameEntry(list: string[], from: string, to: string) {
 
 const appendMissing = (list: string[], keys: string[]) => [...list, ...keys.filter((k) => !list.includes(k))];
 
-export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
+/** `readOnly`: a floating window draws the arrangement; only the main window saves it. */
+export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly = false } = {}) {
   const [order, setOrder] = useState<SidebarOrder | null>(null);
   const loaded = useRef(false);
 
@@ -232,8 +233,8 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
 
   const save = useCallback((next: SidebarOrder) => {
     setOrder(next);
-    invoke("order_save", { order: next }).catch(() => {});
-  }, []);
+    if (!readOnly) invoke("order_save", { order: next }).catch(() => {});
+  }, [readOnly]);
 
   // Grouped by project, unknown keys placed by name until they are appended below.
   const sorted = useMemo<Group[]>(() => {
@@ -303,10 +304,10 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean) {
     setOrder((prev) => {
       if (!prev) return prev;
       const next = f(prev);
-      invoke("order_save", { order: next }).catch(() => {});
+      if (!readOnly) invoke("order_save", { order: next }).catch(() => {});
       return next;
     });
-  }, []);
+  }, [readOnly]);
   const spaces = useMemo(
     () => ({
       tree,

@@ -1,6 +1,8 @@
 import { DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { useEffect, useRef } from "react";
 import { slotOf, spaceKey, type Group, type Node as TreeNode } from "@/lib/order";
+import { popupMenu } from "@/lib/menu";
+import type { FloatableView } from "./FloatingView";
 import { SpaceTile, useFolded } from "./Sidebar";
 import { listMenus, type AgentActions } from "@/lib/lifecycle";
 import { cn } from "@/lib/utils";
@@ -12,6 +14,7 @@ type Props = {
   groups: Group[];
   /** The agents by project, as the sidebar has them (none in Recent: a flat list). */
   tree?: TreeNode[];
+  onFloatView: (view: FloatableView) => void;
   view: View | null;
   onSelect: (v: View) => void;
   onExpand: () => void;
@@ -28,7 +31,7 @@ type Props = {
  * grouped by project, three nav icons, the expand button at the bottom.
  * Everything else is in the tooltips, which appear at once.
  */
-export function Rail({ groups, tree, view, onSelect, onExpand, onShortcuts, openDelegations, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
+export function Rail({ groups, tree, onFloatView, view, onSelect, onExpand, onShortcuts, openDelegations, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
   // The same right-click menus as the full sidebar.
   const menus = listMenus(actions, { onClearEnded, onResetOrder });
   const nav: { kind: "agents" | "delegations" | "queue" | "costs" | "artifacts"; icon: typeof RoutingLinearIcon; label: string; kbd: string; badge: boolean }[] = [
@@ -69,6 +72,11 @@ export function Rail({ groups, tree, view, onSelect, onExpand, onShortcuts, open
             <button
               aria-label={label}
               onClick={() => onSelect({ kind })}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void popupMenu([{ id: `rail:float:${kind}`, text: `Open ${label} in Its Own Window`, action: () => onFloatView(kind) }]);
+              }}
               className={cn(
                 "relative flex size-8 items-center justify-center rounded-lg text-ink-3 transition-colors hover:bg-line hover:text-ink",
                 view?.kind === kind && "bg-line-strong text-ink",

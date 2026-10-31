@@ -17,7 +17,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddFolderLinearIcon, AddLinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddFolderLinearIcon, AddLinearIcon, MaximizeSquare3LinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
@@ -25,6 +25,7 @@ import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { money } from "@/lib/costs";
 import { agentKeyOf, prefixName, slotOf, SPACE_COLORS, spaceKey, type Group, type Node as TreeNode, type Space, type Spaces } from "@/lib/order";
 import { popupMenu, type MenuEntry } from "@/lib/menu";
+import type { FloatableView } from "./FloatingView";
 import { NameEditor } from "./NameEditor";
 import { listMenus, openAgentMenu, type AgentActions } from "@/lib/lifecycle";
 import { pending, type QueueEntry } from "@/lib/queue";
@@ -54,6 +55,8 @@ type Props = {
   onNew: (cwd?: string) => void;
   /** A folder on its own or a project (`space:<id>`), moved onto another's place at the top level. */
   onMoveTop: (from: string, to: string) => void;
+  /** Opens a view (Delegations, Costs…) in a floating window. */
+  onFloatView: (view: FloatableView) => void;
   /** The projects the person made, holding folders. */
   spaces: Spaces;
   onMoveAgent: (slot: string, from: number, to: number) => void;
@@ -110,7 +113,7 @@ const collisionFor =
     return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("p:") && containerOf(c.slice(2)) === mine) });
   };
 
-export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
+export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onFloatView, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
   pluginBehind,
   unplugged,
   sort }: Props) {
@@ -321,21 +324,21 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
       </div>
 
       <nav className="px-3">
-        <NavItem active={view?.kind === "agents"} onClick={() => onSelect({ kind: "agents" })} icon={StructureLinearIcon} label="Agents" kbd="⌘E" />
-        <NavItem active={view?.kind === "delegations"} onClick={() => onSelect({ kind: "delegations" })} icon={RoutingLinearIcon} label="Delegations" kbd="⌘D">
+        <NavItem active={view?.kind === "agents"} onClick={() => onSelect({ kind: "agents" })} onFloat={() => onFloatView("agents")} icon={StructureLinearIcon} label="Agents" kbd="⌘E" />
+        <NavItem active={view?.kind === "delegations"} onClick={() => onSelect({ kind: "delegations" })} onFloat={() => onFloatView("delegations")} icon={RoutingLinearIcon} label="Delegations" kbd="⌘D">
           {openDelegations > 0 && (
             <span className="rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold leading-4 text-white tabular">{openDelegations}</span>
           )}
         </NavItem>
-        <NavItem active={view?.kind === "queue"} onClick={() => onSelect({ kind: "queue" })} icon={PlaylistMinimalisticLinearIcon} label="Up next" kbd="⌘J">
+        <NavItem active={view?.kind === "queue"} onClick={() => onSelect({ kind: "queue" })} onFloat={() => onFloatView("queue")} icon={PlaylistMinimalisticLinearIcon} label="Up next" kbd="⌘J">
           {scheduledCount > 0 && (
             <span title={`${scheduledCount} scheduled`} className="rounded-full bg-brand-500/15 px-1.5 text-[10px] font-semibold leading-4 text-brand-700 tabular dark:text-brand-300">
               {scheduledCount}
             </span>
           )}
         </NavItem>
-        <NavItem active={view?.kind === "costs"} onClick={() => onSelect({ kind: "costs" })} icon={DollarLinearIcon} label="Costs" kbd="⌘U" />
-        <NavItem active={view?.kind === "artifacts"} onClick={() => onSelect({ kind: "artifacts" })} icon={GalleryLinearIcon} label="Artifacts" kbd="⌘G">
+        <NavItem active={view?.kind === "costs"} onClick={() => onSelect({ kind: "costs" })} onFloat={() => onFloatView("costs")} icon={DollarLinearIcon} label="Costs" kbd="⌘U" />
+        <NavItem active={view?.kind === "artifacts"} onClick={() => onSelect({ kind: "artifacts" })} onFloat={() => onFloatView("artifacts")} icon={GalleryLinearIcon} label="Artifacts" kbd="⌘G">
           {newArtifacts > 0 ? (
             <span title={`${newArtifacts} new artifact${newArtifacts > 1 ? "s" : ""}`} className="rounded-full bg-brand-500/15 px-1.5 text-[10px] font-semibold leading-4 whitespace-nowrap text-brand-700 tabular dark:text-brand-300">
               {newArtifacts} new
@@ -633,17 +636,31 @@ function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCos
   );
 }
 
-function NavItem({ active, onClick, icon: Icon, label, kbd, children }: { active: boolean; onClick: () => void; icon: typeof RoutingLinearIcon; label: string; kbd: string; children?: React.ReactNode }) {
+function NavItem({ active, onClick, onFloat, icon: Icon, label, kbd, children }: { active: boolean; onClick: () => void; onFloat: () => void; icon: typeof RoutingLinearIcon; label: string; kbd: string; children?: React.ReactNode }) {
   return (
-    <button
-      onClick={onClick}
-      className={cn("group flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm text-ink-2 transition-all duration-200 hover:bg-line", active && "bg-line-strong text-ink")}
-    >
-      <Icon size={16} className={cn(active ? "text-brand-600 dark:text-brand-400" : "text-ink-3")} />
-      <span className="flex-1 text-left">{label}</span>
-      {children}
-      <Kbd>{kbd}</Kbd>
-    </button>
+    <div className="group relative">
+      <button
+        onClick={onClick}
+        className={cn("flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm text-ink-2 transition-all duration-200 hover:bg-line", active && "bg-line-strong text-ink")}
+      >
+        <Icon size={16} className={cn(active ? "text-brand-600 dark:text-brand-400" : "text-ink-3")} />
+        <span className="flex-1 text-left">{label}</span>
+        {children}
+        <span className="transition-opacity group-focus-within:opacity-0 group-hover:opacity-0">
+          <Kbd>{kbd}</Kbd>
+        </span>
+      </button>
+      {/* Takes the shortcut's place on hover: a view in a window of its own. */}
+      <Tip side="right" content={<TipLabel label={`Open ${label} in its own window`} />}>
+        <button
+          onClick={onFloat}
+          aria-label={`Open ${label} in its own window`}
+          className="absolute top-1 right-1.5 inline-flex size-6 items-center justify-center rounded-md text-ink-3 opacity-0 transition-opacity hover:bg-line-strong hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 group-hover:opacity-100"
+        >
+          <MaximizeSquare3LinearIcon size={14} />
+        </button>
+      </Tip>
+    </div>
   );
 }
 

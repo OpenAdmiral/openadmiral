@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { debugTrace, popupMenu, setMenuErrorHandler, trace, type MenuEntry } from "./menu";
-import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { startHandoff } from "./handoffs";
 import { canRename, renameNeedsReload, requestRename } from "./rename";
 import type { Agent } from "./types";
@@ -12,6 +13,7 @@ export type AgentActions = {
   closeAndRemove: (a: Agent) => void;
   resume: (a: Agent) => void;
   rename: (a: Agent) => void;
+  restart: (a: Agent) => void; // asks first
 };
 
 const running = (a: Agent) => !!a.cli;
@@ -24,12 +26,14 @@ export const ACTION_HELP = {
   rename: "Gives the session a new name (runs /rename in it).",
   remove: "Hides it from OpenAdmiral. The conversation stays available with claude --resume.",
   closeRemove: "Closes the session after the current turn, then hides it from OpenAdmiral.",
+  restart: "Restarts it on the installed Claude Code after the current turn. Same conversation; background shells keep running.",
 } as const;
 
 /** The header's popover: every action explains itself, a disabled one says why. */
 export function agentActionItems(a: Agent, actions: AgentActions) {
   const on = running(a);
   return [
+    ...(a.update ? [{ id: "restart", label: `Restart to Update (${a.update.to})`, description: ACTION_HELP.restart, run: () => actions.restart(a) }] : []),
     { id: "close", label: "Close", shortcut: "⌘W", description: ACTION_HELP.close, disabledReason: on ? undefined : "Not running.", run: () => actions.close(a) },
     { id: "force", label: "Force Quit…", danger: true, description: ACTION_HELP.force, disabledReason: on ? undefined : "Not running.", run: () => actions.forceQuit(a) },
     ...(canRename(a) || renameNeedsReload(a)
@@ -45,6 +49,7 @@ export function agentActionItems(a: Agent, actions: AgentActions) {
 /** The agent's menu entries; ids carry the session, so a late click still acts on the right agent. */
 export function agentMenuEntries(a: Agent, actions: AgentActions, extra: { text: string; action: () => void }[] = []): MenuEntry[] {
   const entries: MenuEntry[] = [
+    ...(a.update ? [{ id: `agent:restart:${a.id}`, text: `Restart to Update (${a.update.to})…`, action: () => actions.restart(a) }, { separator: true as const }] : []),
     { id: `agent:close:${a.id}`, text: "Close", accelerator: "CmdOrCtrl+W", enabled: running(a), action: () => actions.close(a) },
     { id: `agent:force:${a.id}`, text: "Force Quit…", enabled: running(a), action: () => actions.forceQuit(a) },
     { separator: true },
@@ -135,7 +140,35 @@ export function useLifecycle(agents: Agent[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents, removeAfterClose]);
 
+  // Sessions waiting for their turn to end, to restart (src-tauri/src/restart.rs).
+  const [restarting, setRestarting] = useState<string[]>([]);
+  const agentsNow = useRef(agents);
+  agentsNow.current = agents;
+  useEffect(() => {
+    invoke<string[]>("agent_restarts").then(setRestarting, () => {});
+    const offs = [
+      listen<string[]>("openadmiral://restarts", (e) => setRestarting(e.payload)),
+      listen<{ sessionId: string; error?: string | null }>("openadmiral://restart-done", (e) => {
+        const name = agentsNow.current.find((a) => a.id === e.payload.sessionId)?.name ?? "The session";
+        if (e.payload.error) notify(`${name} did not restart: ${e.payload.error}`, "error");
+        else notify(`${name} restarted on the installed Claude Code.`);
+      }),
+    ];
+    return () => offs.forEach((p) => void p.then((off) => off()));
+  }, [notify]);
+
   const actions: AgentActions = {
+    restart: (a) => {
+      const shells = (a.session?.jobs ?? []).filter((j) => j.status === "running").map((j) => j.label || "a background command");
+      setConfirm({
+        title: `Restart ${a.name} to update?`,
+        body: `It moves to Claude Code ${a.update?.to ?? "as installed"} when its current turn ends. The conversation and its context stay.${shells.length ? ` Still running, and they keep running: ${shells.join(", ")}.` : ""}`,
+        action: "Restart",
+        run: async () => {
+          await invoke("agent_restart", { sessionId: a.id }).catch((e) => notify(String(e), "error"));
+        },
+      });
+    },
     rename: requestRename,
     close: async (a) => {
       try {
@@ -194,5 +227,5 @@ export function useLifecycle(agents: Agent[]) {
     });
   };
 
-  return { actions, closing, confirm, setConfirm, notices, clearEnded, notify };
+  return { actions, closing, restarting, confirm, setConfirm, notices, clearEnded, notify };
 }

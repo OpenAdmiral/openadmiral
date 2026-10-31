@@ -108,12 +108,14 @@ type Props = {
   floating?: { show: () => void; bringBack: () => void };
   /** In a floating window: room for the traffic lights. */
   inset?: boolean;
+  /** Waiting for its turn to end, to restart on the installed Claude Code. */
+  restarting?: boolean;
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset, restarting }: Props) {
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -334,6 +336,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
         tabs={dense ? tabIcons : undefined}
         floatAction={floatAction}
         inset={inset}
+        restarting={restarting}
         active={active}
         viewMenu={viewMenu}
         onClosePane={pane?.onClose}
@@ -463,6 +466,7 @@ function Header({
   tabs,
   floatAction,
   inset,
+  restarting,
   active = true,
   viewMenu,
   onClosePane,
@@ -482,6 +486,7 @@ function Header({
   tabs?: React.ReactNode;
   floatAction?: { kind: "float" | "dock"; run: () => void };
   inset?: boolean;
+  restarting?: boolean;
   active?: boolean;
   viewMenu?: React.ReactNode;
   onClosePane?: () => void;
@@ -523,6 +528,15 @@ function Header({
           </h1>
         )}
         {!dense && <span data-tauri-drag-region className={cn("shrink-0 text-ink-3", compact ? "text-xs @max-[420px]:hidden" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
+        {restarting && (
+          <button
+            onClick={() => void invoke("agent_restart_cancel", { sessionId: agent.id })}
+            title="Cancel the restart"
+            className="shrink-0 rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-brand-700 hover:bg-brand-500/25 dark:text-brand-300"
+          >
+            restarts after this turn · cancel
+          </button>
+        )}
         {closing && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             {request?.waiting ? `closing when done · waiting: ${request.waiting}` : "closing after this turn…"}
@@ -569,11 +583,12 @@ function Header({
                 onClick={toggle}
                 aria-label="Session actions"
                 className={cn(
-                  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
+                  "relative inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
                   isOpen && "bg-line text-ink",
                 )}
               >
                 <MenuDotsLinearIcon size={18} />
+                {agent.update && <span title={`Claude Code ${agent.update.to} is installed: Restart to Update`} className="absolute top-1 right-1 size-1.5 rounded-full bg-brand-500" />}
               </button>
             </Tip>
           )}

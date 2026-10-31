@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyDelta, isPhantom, mergeAgents, supersededMap, type Snapshot } from "./admiral";
+import { applyDelta, isPhantom, mergeAgents, olderVersion, supersededMap, withUpdates, type Snapshot } from "./admiral";
+import type { Agent } from "./types";
 import type { AdmiralSession } from "./types";
 
 const now = 1_000_000_000;
@@ -83,4 +84,20 @@ describe("what the CLI says about a session", () => {
   const status = (over: object) => mergeAgents([session()], [cli(over)], now, new Map(), new Map(), [])[0].status;
   it("a turn in progress is working", () => expect(status({ status: "busy", state: "working" })).toBe("working"));
   it("a finished turn with a shell left running is not", () => expect(status({ status: "busy", state: "done" })).toBe("idle"));
+});
+
+describe("an older Claude Code", () => {
+  it("compares versions by number", () => {
+    expect(olderVersion("2.1.312", "2.1.316")).toBe(true);
+    expect(olderVersion("2.1.99", "2.1.100")).toBe(true);
+    expect(olderVersion("2.1.316", "2.1.316")).toBe(false);
+    expect(olderVersion("2.2.0", "2.1.316")).toBe(false);
+  });
+  it("offers an update only to background sessions behind the installed one", () => {
+    const agent = (kind: string, version: string) => ({ cli: { kind, version } }) as Agent;
+    const [a, b, c] = withUpdates([agent("background", "2.1.312"), agent("interactive", "2.1.312"), agent("background", "2.1.316")], "2.1.316");
+    expect(a.update).toEqual({ from: "2.1.312", to: "2.1.316" });
+    expect(b.update).toBeUndefined();
+    expect(c.update).toBeUndefined();
+  });
 });

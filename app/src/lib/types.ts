@@ -77,6 +77,8 @@ export type CliAgent = {
   status?: string; // "idle" | "busy" | …
   /** The turn's own state: "done" stays "busy" while a background shell runs. */
   state?: string;
+  /** The Claude Code its process runs. */
+  version?: string;
 };
 
 export type AgentStatus = "working" | "waiting" | "idle" | "starting" | "ended";
@@ -96,6 +98,8 @@ export type Agent = {
   cli?: CliAgent;
   /** Found running without the OpenAdmiral plugin (src-tauri/src/discover.rs): read-only, from its transcript. */
   unplugged?: { via: string };
+  /** It runs an older Claude Code than the one installed; restarting moves it over. */
+  update?: { from: string; to: string };
 };
 
 /** A Claude Code session running without the plugin, as discover_sessions finds it. */

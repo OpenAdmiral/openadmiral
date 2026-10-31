@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clampScale, type SplitState } from "./split";
 
@@ -33,11 +34,21 @@ export function useUiState({ readOnly = false } = {}) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!readOnly) return;
+    const off = listen<Pick<UiState, "densePanes" | "textScale">>("openadmiral://view-choices", (e) => setState((s) => ({ ...s, ...e.payload })));
+    return () => void off.then((f) => f());
+  }, [readOnly]);
+
   const update = useCallback((patch: (s: UiState) => Partial<UiState>) => {
     touched.current = true;
     setState((s) => {
       const next = { ...s, ...patch(s) };
-      if (!readOnly) invoke("ui_state_save", { state: next }).catch(() => {});
+      if (!readOnly) {
+        invoke("ui_state_save", { state: next }).catch(() => {});
+        // Floating windows follow the view choices made here.
+        emit("openadmiral://view-choices", { densePanes: next.densePanes, textScale: next.textScale }).catch(() => {});
+      }
       return next;
     });
   }, [readOnly]);

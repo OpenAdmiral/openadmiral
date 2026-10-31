@@ -176,6 +176,22 @@ async function notify(title: string, body: string) {
   }
 }
 
+/** Whether version `a` is older than `b` ("2.1.312" < "2.1.316"). */
+export function olderVersion(a: string, b: string) {
+  const [x, y] = [a, b].map((v) => v.split(".").map(Number));
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d) return d < 0;
+  }
+  return false;
+}
+
+/** Background sessions on an older Claude Code than the installed one. Others restart by hand. */
+export function withUpdates(agents: Agent[], installed: string | null) {
+  if (!installed) return agents;
+  return agents.map((a) => (a.cli?.version && a.cli.kind !== "interactive" && olderVersion(a.cli.version, installed) ? { ...a, update: { from: a.cli.version, to: installed } } : a));
+}
+
 /** `quiet`: a floating window reads the same data; only the main window notifies and sets the badge. */
 export function useAdmiral({ quiet = false } = {}) {
   const [snapshot, setSnapshot] = useState<Snapshot>({ sessions: [], delegations: [] });
@@ -236,9 +252,17 @@ export function useAdmiral({ quiet = false } = {}) {
     misses.current = next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cli]);
+  // The Claude Code a restart would move a session to (the backend keeps it for minutes).
+  const [installed, setInstalled] = useState<string | null>(null);
+  useEffect(() => {
+    const read = () => !document.hidden && invoke<string | null>("claude_installed_version").then(setInstalled, () => {});
+    read();
+    const t = setInterval(read, 60_000);
+    return () => clearInterval(t);
+  }, []);
   const agents = useMemo(
-    () => mergeAgents(snapshot.sessions, cli, now, names.current, cliReady ? misses.current : new Map(), discovery.sessions),
-    [snapshot.sessions, cli, now, cliReady, discovery.sessions],
+    () => withUpdates(mergeAgents(snapshot.sessions, cli, now, names.current, cliReady ? misses.current : new Map(), discovery.sessions), installed),
+    [snapshot.sessions, cli, now, cliReady, discovery.sessions, installed],
   );
   const superseded = useMemo(() => supersededMap(snapshot.sessions, cli), [snapshot.sessions, cli]);
   const delegations = useMemo(

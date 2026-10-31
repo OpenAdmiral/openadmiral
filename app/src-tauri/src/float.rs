@@ -99,6 +99,13 @@ pub fn float_close(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+/// From a floating view: the main window comes forward showing this agent.
+#[tauri::command]
+pub fn float_jump(app: AppHandle, session_id: String) {
+    crate::show_main(&app);
+    let _ = app.emit_to("main", "openadmiral://float-docked", session_id);
+}
+
 /// From the main window: closes the agent's floating window.
 #[tauri::command]
 pub fn float_recall(app: AppHandle, session_id: String) -> Result<(), String> {

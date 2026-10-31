@@ -42,6 +42,7 @@ import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
+import { VIEW_TITLE, viewFloatId, type FloatableView } from "@/components/FloatingView";
 import { PanePicker, SplitPanes, ViewMenu } from "@/components/Split";
 import { setTerminalAway, setTerminalScale } from "@/components/Terminal";
 import { prune, relayout, show, SINGLE, type SplitLayout } from "@/lib/split";
@@ -271,6 +272,8 @@ export default function App() {
       // OPENADMIRAL_VIEW=split:<layout>[:dense] (preview): the chat split, for a screenshot.
       // OPENADMIRAL_VIEW=floatwin:<id> (preview): opens that agent's real floating window.
       if (d.view?.startsWith("floatwin:")) void invoke("float_open", { sessionId: d.view.slice(9), title: "Preview" }).catch((e) => invoke("frontend_log", { level: "float", message: String(e) }));
+      // OPENADMIRAL_VIEW=restart:<id> (preview): restarts that session for real; a throwaway's only.
+      if (d.view?.startsWith("restart:")) void invoke("agent_restart", { sessionId: d.view.slice(8) });
       if (d.view?.startsWith("split:")) {
         const [, layout, dense] = d.view.split(":");
         setDemoLayout(layout as SplitLayout);
@@ -410,6 +413,7 @@ export default function App() {
   // Back from its window: it takes an empty pane if there is one, else the active one.
   const dockRef = useRef<(id: string) => void>(() => {});
   dockRef.current = (id) => {
+    if (id.startsWith("view-")) return setView({ kind: id.slice(5) as FloatableView });
     const empty = split.panes.indexOf(null);
     if (empty !== -1 && !split.panes.includes(id)) ui.setSplit((s) => ({ ...(s ?? SINGLE), active: empty }));
     setView({ kind: "agent", id });
@@ -418,6 +422,7 @@ export default function App() {
     const off = listen<string>("openadmiral://float-docked", (e) => dockRef.current(e.payload));
     return () => void off.then((f) => f());
   }, []);
+  const floatView = (kind: FloatableView) => invoke("float_open", { sessionId: viewFloatId(kind), title: VIEW_TITLE[kind] }).catch((e) => life.notify(String(e), "error"));
   const toggleSplit = () => setLayout(split.layout === "1" ? (split.last ?? "2v") : "1");
 
   useEffect(() => {
@@ -516,6 +521,7 @@ export default function App() {
                 pluginInstalled={pluginInstalled}
                     viewMenu={viewMenu}
       textScale={textScale}
+      restarting={life.restarting.includes(a.id)}
       floatAction={floats.includes(a.id) ? undefined : { kind: "float", run: () => floatAgent(a) }}
       floating={
         floats.includes(a.id)
@@ -547,6 +553,7 @@ export default function App() {
             onShortcuts={() => setShortcuts(true)}
             groups={sortMode === "recent" ? [{ key: "recent", label: "Recent", agents: shown }] : order.groups}
             tree={sortMode === "recent" ? undefined : order.spaces.tree}
+            onFloatView={floatView}
             view={view}
             onSelect={setView}
             onExpand={ui.toggleLeft}
@@ -576,6 +583,7 @@ export default function App() {
         delegations={delegations}
         rateLimits={rateLimits}
         view={view}
+        onFloatView={floatView}
         onMoveTop={order.moveTop}
         spaces={order.spaces}
         onMoveAgent={order.moveAgent}
