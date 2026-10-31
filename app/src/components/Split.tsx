@@ -11,8 +11,10 @@ import { Kbd } from "./primitives";
  * The panes of a split chat area. `render(i)` draws pane i; the dividers drag (double-click
  * puts one back in the middle). Four panes share the vertical divider, so they stay a grid.
  */
-export function SplitPanes({ layout, ratios = [0.5, 0.5], onRatios, render }: { layout: SplitLayout; ratios?: [number, number]; onRatios: (r: [number, number]) => void; render: (i: number) => ReactNode }) {
-  const [a, b] = ratios;
+export function SplitPanes({ layout, ratios, onRatios, render }: { layout: SplitLayout; ratios?: [number, number]; onRatios: (r: [number, number]) => void; render: (i: number) => ReactNode }) {
+  // Three in a line: the first divider sits at a third, the second halves the rest.
+  const even = layout === "3v" || layout === "3h" ? 1 / 3 : 0.5;
+  const [a, b] = ratios ?? [even, 0.5];
   const setA = (x: number) => onRatios([x, b]);
   const setB = (x: number) => onRatios([a, x]);
   switch (layout) {
@@ -20,6 +22,10 @@ export function SplitPanes({ layout, ratios = [0.5, 0.5], onRatios, render }: { 
       return <Two dir="row" ratio={a} onRatio={setA} first={render(0)} second={render(1)} />;
     case "2h":
       return <Two dir="col" ratio={a} onRatio={setA} first={render(0)} second={render(1)} />;
+    case "3v":
+      return <Two dir="row" ratio={a} even={even} onRatio={setA} first={render(0)} second={<Two dir="row" ratio={b} onRatio={setB} first={render(1)} second={render(2)} />} />;
+    case "3h":
+      return <Two dir="col" ratio={a} even={even} onRatio={setA} first={render(0)} second={<Two dir="col" ratio={b} onRatio={setB} first={render(1)} second={render(2)} />} />;
     case "3l":
       return <Two dir="row" ratio={a} onRatio={setA} first={render(0)} second={<Two dir="col" ratio={b} onRatio={setB} first={render(1)} second={render(2)} />} />;
     case "3t":
@@ -39,7 +45,7 @@ export function SplitPanes({ layout, ratios = [0.5, 0.5], onRatios, render }: { 
   }
 }
 
-function Two({ dir, ratio, onRatio, first, second }: { dir: "row" | "col"; ratio: number; onRatio: (r: number) => void; first: ReactNode; second: ReactNode }) {
+function Two({ dir, ratio, even = 0.5, onRatio, first, second }: { dir: "row" | "col"; ratio: number; even?: number; onRatio: (r: number) => void; first: ReactNode; second: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const row = dir === "row";
@@ -47,7 +53,7 @@ function Two({ dir, ratio, onRatio, first, second }: { dir: "row" | "col"; ratio
     if (!dragging || !box.current) return;
     const r = box.current.getBoundingClientRect();
     const x = row ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height;
-    onRatio(Math.round(Math.min(0.8, Math.max(0.2, x)) * 1000) / 1000);
+    onRatio(Math.round(Math.min(0.8, Math.max(0.15, x)) * 1000) / 1000);
   };
   return (
     <div ref={box} className={cn("flex h-full min-h-0 w-full min-w-0", row ? "flex-row" : "flex-col")}>
@@ -65,7 +71,7 @@ function Two({ dir, ratio, onRatio, first, second }: { dir: "row" | "col"; ratio
         onPointerMove={move}
         onPointerUp={() => setDragging(false)}
         onPointerCancel={() => setDragging(false)}
-        onDoubleClick={() => onRatio(0.5)}
+        onDoubleClick={() => onRatio(even)}
         className={cn("group relative z-10 shrink-0", row ? "-mx-1 w-2 cursor-col-resize" : "-my-1 h-2 cursor-row-resize")}
       >
         <span
@@ -88,7 +94,7 @@ function Two({ dir, ratio, onRatio, first, second }: { dir: "row" | "col"; ratio
 /** A small drawing of a layout: its panes as rounded blocks. */
 export function LayoutGlyph({ layout, className }: { layout: SplitLayout; className?: string }) {
   const cell = "rounded-[2px] bg-current";
-  const grid: Record<SplitLayout, ReactNode> = {
+  const grid: Record<Exclude<SplitLayout, "3v" | "3h">, ReactNode> = {
     "1": <span className={cn(cell, "col-span-2 row-span-2")} />,
     "2v": (
       <>
@@ -125,7 +131,15 @@ export function LayoutGlyph({ layout, className }: { layout: SplitLayout; classN
       </>
     ),
   };
-  return <span className={cn("grid size-4 grid-cols-2 grid-rows-2 gap-[2px]", className)}>{grid[layout]}</span>;
+  if (layout === "3v" || layout === "3h")
+    return (
+      <span className={cn("grid size-4 gap-[2px]", layout === "3v" ? "grid-cols-3" : "grid-rows-3", className)}>
+        <span className={cell} />
+        <span className={cell} />
+        <span className={cell} />
+      </span>
+    );
+  return <span className={cn("grid size-4 grid-cols-2 grid-rows-2 gap-[2px]", className)}>{grid[layout as Exclude<SplitLayout, "3v" | "3h">]}</span>;
 }
 
 /** The header's layout button: the six layouts and the text size. */
@@ -172,7 +186,7 @@ export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: {
                 <Kbd>⌘\</Kbd> split / one
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5">
               {LAYOUTS.map((l) => (
                 <button
                   key={l.id}
