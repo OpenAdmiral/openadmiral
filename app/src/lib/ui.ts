@@ -21,7 +21,8 @@ export type UiState = {
 
 const DEFAULTS: UiState = { leftCollapsed: false, rightCollapsed: false };
 
-export function useUiState() {
+/** `readOnly`: a floating window reads the saved choices; only the main window writes them. */
+export function useUiState({ readOnly = false } = {}) {
   const [state, setState] = useState<UiState>(DEFAULTS);
   // A change made before the saved state arrives wins over it.
   const touched = useRef(false);
@@ -36,10 +37,10 @@ export function useUiState() {
     touched.current = true;
     setState((s) => {
       const next = { ...s, ...patch(s) };
-      invoke("ui_state_save", { state: next }).catch(() => {});
+      if (!readOnly) invoke("ui_state_save", { state: next }).catch(() => {});
       return next;
     });
-  }, []);
+  }, [readOnly]);
 
   return {
     ...state,

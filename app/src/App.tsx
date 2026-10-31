@@ -43,7 +43,7 @@ import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
 import { PanePicker, SplitPanes, ViewMenu } from "@/components/Split";
-import { setTerminalScale } from "@/components/Terminal";
+import { setTerminalAway, setTerminalScale } from "@/components/Terminal";
 import { prune, relayout, show, SINGLE, type SplitLayout } from "@/lib/split";
 
 export default function App() {
@@ -269,6 +269,8 @@ export default function App() {
       // OPENADMIRAL_VIEW=search:<query> (preview): ⌘K open on that query, for a screenshot.
       if (d.view?.startsWith("search")) setTimeout(() => setPalette(d.view!.slice(7)), 1500);
       // OPENADMIRAL_VIEW=split:<layout>[:dense] (preview): the chat split, for a screenshot.
+      // OPENADMIRAL_VIEW=floatwin:<id> (preview): opens that agent's real floating window.
+      if (d.view?.startsWith("floatwin:")) void invoke("float_open", { sessionId: d.view.slice(9), title: "Preview" }).catch((e) => invoke("frontend_log", { level: "float", message: String(e) }));
       if (d.view?.startsWith("split:")) {
         const [, layout, dense] = d.view.split(":");
         setDemoLayout(layout as SplitLayout);
@@ -382,6 +384,40 @@ export default function App() {
     setLayout(demoLayout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoLayout, viewAgent, shown.length]);
+  // Agents in floating windows: the main window's terminal steps aside for each.
+  const [floats, setFloats] = useState<string[]>([]);
+  const floatsBefore = useRef<string[]>([]);
+  useEffect(() => {
+    invoke<string[]>("floats").then(setFloats, () => {});
+    const off = listen<string[]>("openadmiral://floats", (e) => setFloats(e.payload));
+    return () => void off.then((f) => f());
+  }, []);
+  useEffect(() => {
+    for (const id of floats) setTerminalAway(id, true);
+    for (const id of floatsBefore.current) if (!floats.includes(id)) setTerminalAway(id, false);
+    floatsBefore.current = floats;
+  }, [floats]);
+  /** Into its own window: a split's pane frees up, and the next agent on screen is the active one. */
+  const floatAgent = (a: Agent) => {
+    setTerminalAway(a.id, true);
+    invoke("float_open", { sessionId: a.id, title: a.name }).catch((e) => life.notify(String(e), "error"));
+    if (split.layout === "1") return;
+    const panes = split.panes.map((p) => (p === a.id ? null : p));
+    ui.setSplit((s) => ({ ...(s ?? SINGLE), panes }));
+    const next = panes.find(Boolean);
+    if (next) setView({ kind: "agent", id: next });
+  };
+  // Back from its window: it takes an empty pane if there is one, else the active one.
+  const dockRef = useRef<(id: string) => void>(() => {});
+  dockRef.current = (id) => {
+    const empty = split.panes.indexOf(null);
+    if (empty !== -1 && !split.panes.includes(id)) ui.setSplit((s) => ({ ...(s ?? SINGLE), active: empty }));
+    setView({ kind: "agent", id });
+  };
+  useEffect(() => {
+    const off = listen<string>("openadmiral://float-docked", (e) => dockRef.current(e.payload));
+    return () => void off.then((f) => f());
+  }, []);
   const toggleSplit = () => setLayout(split.layout === "1" ? (split.last ?? "2v") : "1");
 
   useEffect(() => {
@@ -480,6 +516,15 @@ export default function App() {
                 pluginInstalled={pluginInstalled}
                     viewMenu={viewMenu}
       textScale={textScale}
+      floatAction={floats.includes(a.id) ? undefined : { kind: "float", run: () => floatAgent(a) }}
+      floating={
+        floats.includes(a.id)
+          ? {
+              show: () => void invoke("float_open", { sessionId: a.id, title: a.name }),
+              bringBack: () => void invoke("float_recall", { sessionId: a.id }),
+            }
+          : undefined
+      }
       {...extra}
     />
   );
@@ -501,6 +546,7 @@ export default function App() {
           <Rail
             onShortcuts={() => setShortcuts(true)}
             groups={sortMode === "recent" ? [{ key: "recent", label: "Recent", agents: shown }] : order.groups}
+            tree={sortMode === "recent" ? undefined : order.spaces.tree}
             view={view}
             onSelect={setView}
             onExpand={ui.toggleLeft}

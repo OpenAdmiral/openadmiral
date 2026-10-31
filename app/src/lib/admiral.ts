@@ -43,7 +43,8 @@ function statusOf(session: AdmiralSession | undefined, cli: CliAgent | undefined
   const fresh = session && now - session.updatedAt < STALE_MS;
   if (!cli && !fresh) return "ended";
   if (session?.status === "waiting") return "waiting";
-  if (session?.status === "working" || cli?.status === "busy") return "working";
+  // A finished turn that left a background shell stays "busy": the agent is not working.
+  if (session?.status === "working" || (cli?.status === "busy" && cli.state !== "done")) return "working";
   if (session?.status === "ended" && !cli) return "ended";
   if (session?.status === "starting") return "starting";
   return "idle";
@@ -175,7 +176,8 @@ async function notify(title: string, body: string) {
   }
 }
 
-export function useAdmiral() {
+/** `quiet`: a floating window reads the same data; only the main window notifies and sets the badge. */
+export function useAdmiral({ quiet = false } = {}) {
   const [snapshot, setSnapshot] = useState<Snapshot>({ sessions: [], delegations: [] });
   const [cli, setCli] = useState<CliAgent[]>([]);
   const [cliReady, setCliReady] = useState(false);
@@ -259,12 +261,13 @@ export function useAdmiral() {
 
   const attention = agents.filter((a) => a.status === "waiting").length;
   useEffect(() => {
-    invoke("set_attention", { count: attention }).catch(() => {});
-  }, [attention]);
+    if (!quiet) invoke("set_attention", { count: attention }).catch(() => {});
+  }, [attention, quiet]);
 
   // Notify on transitions only: the first snapshot is the baseline.
   const prev = useRef<{ agents: Map<string, AgentStatus>; dlg: Map<string, string>; ended: Map<string, number> } | null>(null);
   useEffect(() => {
+    if (quiet) return;
     const agentMap = new Map(agents.map((a) => [a.id, a.status]));
     const dlgMap = new Map(delegations.map((d) => [d.id, d.status]));
     const ended = new Map(agents.flatMap((a) => (a.session?.lastTurn ? [[a.id, a.session.lastTurn.endedAt] as const] : [])));
@@ -294,7 +297,7 @@ export function useAdmiral() {
       }
     }
     if (agents.length || delegations.length) prev.current = { agents: agentMap, dlg: dlgMap, ended };
-  }, [agents, delegations]);
+  }, [agents, delegations, quiet]);
 
   return { agents, delegations, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, pluginInstalled: discovery.pluginInstalled, hasData: snapshot.sessions.length > 0 || cli.length > 0 };
 }

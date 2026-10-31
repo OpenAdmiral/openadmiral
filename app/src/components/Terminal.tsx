@@ -43,6 +43,8 @@ type Live = {
   instance?: string | number;
   onExit?: () => void;
   onLeft?: () => void;
+  /** Its agent is in a floating window: that window's terminal answers the pty, this one must not. */
+  away?: boolean;
 };
 const live = new Map<string, Live>();
 
@@ -53,7 +55,7 @@ function wire() {
   wired = true;
   listen<{ key: string; data: string }>("pty://data", (e) => {
     const t = live.get(e.payload.key);
-    if (!t) return;
+    if (!t || t.away) return;
     // /exit in an attached session leaves the session running and puts the client in
     // Claude's agent view, a new unregistered process: end that client, not the session.
     if (!t.left && !e.payload.key.startsWith("trust:") && t.detect(e.payload.data)) {
@@ -215,6 +217,14 @@ export function typeIntoTerminal(key: string, text: string) {
 export function focusTerminal(key: string) {
   // Two frames: the tab's panel becomes visible on the first, xterm can take focus on the second.
   requestAnimationFrame(() => requestAnimationFrame(() => live.get(key)?.term.focus()));
+}
+
+/** This window's terminal for an agent steps aside while a floating window has the agent, and comes back in full. */
+export function setTerminalAway(key: string, away: boolean) {
+  const t = live.get(key);
+  if (!t || !!t.away === away) return;
+  t.away = away;
+  if (!away) repaintTerminal(key);
 }
 
 /** Ends a terminal for good: its process and its xterm. */

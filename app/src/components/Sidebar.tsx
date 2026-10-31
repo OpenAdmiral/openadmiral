@@ -652,7 +652,7 @@ const DROP_SLOT = "rounded-lg outline-2 outline-dashed -outline-offset-2 outline
 
 /** Folded projects, remembered across launches (this webview's storage). */
 const FOLDED = "openadmiral.sidebar.folded";
-function useFolded(): [Set<string>, (key: string) => void] {
+export function useFolded(): [Set<string>, (key: string) => void] {
   const [folded, setFolded] = useState<Set<string>>(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem(FOLDED) ?? "[]") as string[]);
@@ -958,7 +958,7 @@ function SpaceHeader({
 }
 
 /** A project's mark: its logo on white, else its initial on its color. */
-function SpaceTile({ space }: { space: Space }) {
+export function SpaceTile({ space }: { space: Space }) {
   if (space.icon)
     return (
       <span className="grid size-[22px] place-items-center overflow-hidden rounded-[7px] bg-white p-[3px] shadow-[0_1px_2px_rgb(0_0_0/0.2)]" style={{ boxShadow: `0 0 0 1px ${tint(space.color, 45)}, 0 1px 2px rgb(0 0 0 / 0.2)` }}>

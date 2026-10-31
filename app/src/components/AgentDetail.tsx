@@ -9,7 +9,9 @@ import {
   FolderLinearIcon,
   GalleryLinearIcon,
   ListArrowDownLinearIcon,
+  MaximizeSquare3LinearIcon,
   MenuDotsLinearIcon,
+  MinimizeSquare3LinearIcon,
   SidebarMinimalisticLinearIcon,
   MonitorLinearIcon,
   RecordCircleLinearIcon,
@@ -100,12 +102,18 @@ type Props = {
   textScale?: number;
   /** A pane in compact mode: one header line, the tabs as icons, no chips. */
   dense?: boolean;
+  /** The header's button: into a floating window, or from one back to the main window. */
+  floatAction?: { kind: "float" | "dock"; run: () => void };
+  /** The agent is in a floating window: its terminal is there. */
+  floating?: { show: () => void; bringBack: () => void };
+  /** In a floating window: room for the traffic lights. */
+  inset?: boolean;
 };
 
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption }: Props) {
+export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset }: Props) {
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -121,7 +129,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
     setTab("conversation");
     setJump({ index, at: Date.now() });
   };
-  const attached = (!preview || !!previewAttach) && agent.attachable && agent.live;
+  const attached = (!preview || !!previewAttach) && agent.attachable && agent.live && !floating;
   // Preview check (OPENADMIRAL_TERM_PROBE): read the screen, hide it behind another tab and the
   // inspector toggle, then read it again; both readings go to stderr.
   useEffect(() => {
@@ -324,6 +332,8 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
         compact={compact}
         dense={dense}
         tabs={dense ? tabIcons : undefined}
+        floatAction={floatAction}
+        inset={inset}
         active={active}
         viewMenu={viewMenu}
         onClosePane={pane?.onClose}
@@ -365,7 +375,20 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
           </div>
           {/* The terminal stays mounted behind the Artifacts tab, so switching keeps its session. */}
           <div className={cn("relative min-h-0 flex-1", tab !== "main" && "hidden", agent.attachable && agent.live && "bg-term")}>
-          {preview && !previewAttach && agent.attachable ? (
+          {floating ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <MaximizeSquare3LinearIcon size={26} className="text-ink-3" />
+              <p className="text-sm font-semibold text-ink">{agent.name} is in its own window</p>
+              <div className="flex items-center gap-2">
+                <button onClick={floating.show} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700">
+                  Show the window
+                </button>
+                <button onClick={floating.bringBack} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-2 ring-1 ring-line-strong transition-colors hover:bg-line">
+                  Bring it back
+                </button>
+              </div>
+            </div>
+          ) : preview && !previewAttach && agent.attachable ? (
             <div className="flex h-full items-center justify-center text-xs text-ink-3">Terminal not attached in preview mode.</div>
           ) : agent.attachable && agent.live ? (
             <AgentTerminal
@@ -438,6 +461,8 @@ function Header({
   compact,
   dense,
   tabs,
+  floatAction,
+  inset,
   active = true,
   viewMenu,
   onClosePane,
@@ -455,6 +480,8 @@ function Header({
   compact?: boolean;
   dense?: boolean;
   tabs?: React.ReactNode;
+  floatAction?: { kind: "float" | "dock"; run: () => void };
+  inset?: boolean;
   active?: boolean;
   viewMenu?: React.ReactNode;
   onClosePane?: () => void;
@@ -483,7 +510,7 @@ function Header({
     },
   ].filter((x): x is ActionItem => !!x);
   return (
-    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", compact && "group/pane @container min-w-0 @max-[300px]:[&_.size-8]:size-6", dense ? "px-2.5 py-1.5 [&_.size-8]:size-7" : compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5", compact && (active ? "relative z-30" : "relative z-20"))}>
+    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", compact && "group/pane @container min-w-0 @max-[300px]:[&_.size-8]:size-6", dense ? "px-2.5 py-1.5 [&_.size-8]:size-7" : compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5", compact && (active ? "relative z-30" : "relative z-20"), inset && "pl-[76px]")}>
       <div data-tauri-drag-region className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
         <StatusIcon status={agent.status} size={compact ? 15 : 18} />
         {renaming ? (
@@ -550,6 +577,20 @@ function Header({
             </Tip>
           )}
         />
+        {floatAction && (
+          <Tip side="bottom" content={<TipLabel label={floatAction.kind === "float" ? "Move to its own window" : "Back to the main window"} />}>
+            <button
+              onClick={floatAction.run}
+              aria-label={floatAction.kind === "float" ? "Move to its own window" : "Back to the main window"}
+              className={cn(
+                "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
+                compact && "@max-[300px]:hidden @max-[300px]:group-hover/pane:inline-flex",
+              )}
+            >
+              {floatAction.kind === "float" ? <MaximizeSquare3LinearIcon size={17} /> : <MinimizeSquare3LinearIcon size={17} />}
+            </button>
+          </Tip>
+        )}
         {onClosePane && (
           <Tip side="bottom" content={<TipLabel label="Close this pane" />}>
             <button

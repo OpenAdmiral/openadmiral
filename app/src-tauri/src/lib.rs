@@ -1,6 +1,7 @@
 mod artifacts;
 mod discover;
 mod favicon;
+mod float;
 mod handoff;
 mod jobs;
 mod lifecycle;
@@ -1072,7 +1073,7 @@ fn poll_agents(app: AppHandle) {
         // Every 2 s while someone looks (or a hand-off waits on a session to exit); with the
         // window hidden or minimized, the menu bar's counts can wait 10 s.
         // (A flag the window events keep: asking the window itself goes through the main thread.)
-        let shown = WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed);
+        let shown = WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed) || float::any();
         std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) { 2 } else { 10 }));
     });
 }
@@ -1091,6 +1092,7 @@ struct MenuSpec {
 /// depend on JS-side menu resources staying alive.
 #[tauri::command]
 fn popup_menu(window: tauri::Window, items: Vec<MenuSpec>) -> Result<(), String> {
+    *MENU_OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(window.label().to_string());
     let app = window.app_handle();
     let menu = Menu::new(app).map_err(|e| e.to_string())?;
     for it in items {
@@ -1106,10 +1108,14 @@ fn popup_menu(window: tauri::Window, items: Vec<MenuSpec>) -> Result<(), String>
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
+/// The window whose context menu is open: its click goes only to it, each window has its own actions.
+static MENU_OWNER: Mutex<Option<String>> = Mutex::new(None);
+
 /// Every menu click lands here; the UI's own items carry the `ui:` prefix.
 fn handle_menu(app: &AppHandle, id: &str) {
     if let Some(rest) = id.strip_prefix("ui:") {
-        let _ = app.emit("openadmiral://menu", rest.to_string());
+        let owner = MENU_OWNER.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| "main".into());
+        let _ = app.emit_to(owner.as_str(), "openadmiral://menu", rest.to_string());
     } else if id == "app:about" {
         show_main(app);
         let _ = app.emit("openadmiral://about", ());
@@ -1268,6 +1274,12 @@ pub fn run() {
             order_load,
             order_save,
             favicon::fetch_favicon,
+            float::floats,
+            float::float_open,
+            float::float_track,
+            float::float_dock,
+            float::float_close,
+            float::float_recall,
             ui_state_load,
             ui_state_save,
             clipboard_read,
@@ -1380,6 +1392,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                float::closed(window.app_handle(), window.label());
+            }
             // Closing the window keeps OpenAdmiral in the menu bar, as a native utility does.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() != "main" {
@@ -1396,7 +1411,8 @@ pub fn run() {
             // The Dock icon, Spotlight or Finder opening it again: bring the closed window back.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
-                if !has_visible_windows {
+                // A floating window may be the visible one: the main window still comes back.
+                if !has_visible_windows || !WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
                     show_main(app);
                 }
             }
