@@ -29,3 +29,6 @@ export function delegationCard(tool: 'delegate' | 'delegation_update', input: un
   }
   return { head: `${args.id ?? 'Delegation'} → ${args.status ?? 'updated'}`, detail: first(args.result) ?? first(args.note), warn }
 }
+
+/** Whether a session whose root is `cwd` is inside the repo at `root`. */
+export const repoHolds = (root: string, cwd: string) => cwd === root || cwd.startsWith(`${root.replace(/\/$/, '')}/`)

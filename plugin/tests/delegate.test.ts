@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { delegationCard } from '../hooks/card'
+import { delegationCard, repoHolds } from '../hooks/card'
 
 // Stands in for the machine: an in-memory ~/.claude/openadmiral and a recorded peer inbox.
 function engine(
@@ -611,4 +611,12 @@ test('delegation tool calls draw as one line and a detail', () => {
     detail: 'Fix deployed to sandbox.',
     warn: 'OpenAdmiral could not deliver it to applivery-intelligence: Claude sends it with SendMessage',
   })
+})
+
+test('a repo only counts when it holds the session folder', () => {
+  expect(repoHolds('/code/app', '/code/app')).toBe(true)
+  expect(repoHolds('/code/app', '/code/app/packages/web')).toBe(true)
+  // A shell `cd` into a repo below the session folder, or a sibling with the same prefix.
+  expect(repoHolds('/code/app/backend', '/code/app')).toBe(false)
+  expect(repoHolds('/code/app', '/code/app-old')).toBe(false)
 })

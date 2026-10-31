@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { delegationCard, ICON, parseAnswer, slugOf } from './card'
+import { delegationCard, ICON, parseAnswer, repoHolds, slugOf } from './card'
 import { classifyQueueText, isDone, isDueByTime, isTimed, nextDue, queueCommandsFrom, runNowPending, type QueueCommand, type QueueCondition, type QueueItemCore, type SentEntry } from './queue'
 import { hostOf, type Host } from './host'
 import { backgroundStart, taskNotification, upsertJob, type Job } from './jobs'
@@ -201,8 +201,10 @@ async function refreshGit($: EngineInterface, force = false) {
   // shell `cd` does not move (cwd() would, and a subfolder is not where the session is).
   const cwd = await $.session.root().catch(() => undefined)
   if (cwd && cwd !== me.cwd) touch($, { cwd, project: basename(cwd) })
-  const repo = await $.session.repo().catch(() => null)
-  if (!repo) return touch($, { repo: undefined, branch: undefined, dirty: undefined, worktree: undefined })
+  const found = await $.session.repo().catch(() => null)
+  // session.repo() follows a shell `cd`: a repo in a subfolder is not where the session is.
+  const repo = found && repoHolds(found.root, me.cwd) ? found : null
+  if (!repo) return touch($, { repo: undefined, project: basename(me.cwd), branch: undefined, dirty: undefined, worktree: undefined })
   const [branch, gitDir, commonDir, porcelain] = await Promise.all([
     git($, ['rev-parse', '--abbrev-ref', 'HEAD']),
     git($, ['rev-parse', '--path-format=absolute', '--git-dir']),
