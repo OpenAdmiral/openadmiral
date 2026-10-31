@@ -16,4 +16,10 @@ describe("split panes", () => {
     expect(two).toMatchObject({ panes: ["b", "a"], active: 1, last: "2h" });
     expect(relayout(two, "1", []).last).toBe("2h");
   });
+
+  it("never shows an agent twice, up to six panes", () => {
+    const six = relayout({ ...SINGLE, panes: ["a"] }, "c222", ["b", "c", "b", "a", "c"]);
+    expect(six.panes).toEqual(["a", "b", "c", null, null, null]);
+    expect(relayout(six, "c122", []).panes).toHaveLength(5);
+  });
 });

@@ -287,8 +287,8 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, 
       const el = host.current;
       if (!el || el.offsetParent === null) return false;
       const r = el.getBoundingClientRect();
-      const x = p.x / window.devicePixelRatio, y = p.y / window.devicePixelRatio;
-      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      // On macOS wry reports the view's points, already CSS pixels, though typed as physical.
+      return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
     };
     const off = getCurrentWebview().onDragDropEvent((e) => {
       const p = e.payload;

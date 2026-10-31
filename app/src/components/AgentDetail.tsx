@@ -295,7 +295,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
               aria-label={TAB_LABEL[t]}
               aria-pressed={tab === t}
               className={cn(
-                "relative inline-flex size-6 items-center justify-center rounded-md transition-colors",
+                "relative inline-flex size-6 items-center justify-center rounded-md transition-colors @max-[300px]:size-5",
                 tab === t ? "bg-canvas text-ink shadow-sm dark:bg-white/10" : "text-ink-3 hover:text-ink",
               )}
             >
@@ -329,13 +329,13 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
         onClosePane={pane?.onClose}
       />
       {agent.status === "waiting" && s?.waiting && (
-        <div className={cn("mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm", compact ? "mx-3 py-2 text-xs" : "mx-5")}>
+        <div className={cn("mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm", compact ? "mx-3 gap-2 px-3 py-2 text-xs" : "mx-5")}>
           <StatusIcon status="waiting" size={16} tip={false} />
-          <span className="shrink-0 font-semibold whitespace-nowrap text-amber-800 dark:text-amber-200">
+          <span className={cn("font-semibold whitespace-nowrap text-amber-800 dark:text-amber-200", compact ? "min-w-0 truncate" : "shrink-0")}>
             {s.waiting.reason === "permission" ? "Waiting for a permission" : "Waiting for your answer"}
           </span>
-          {s.waiting.detail && <span className="truncate text-amber-800/80 dark:text-amber-200/80">{s.waiting.detail}</span>}
-          <span className="ml-auto text-xs text-amber-800/70 tabular dark:text-amber-200/70">{ago(s.waiting.since, now)}</span>
+          {s.waiting.detail && <span className={cn("truncate text-amber-800/80 dark:text-amber-200/80", compact && "min-w-0 flex-1")}>{s.waiting.detail}</span>}
+          <span className="ml-auto shrink-0 text-xs text-amber-800/70 tabular dark:text-amber-200/70">{ago(s.waiting.since, now)}</span>
         </div>
       )}
       <div className={cn("flex min-h-0 flex-1", compact ? "px-1.5 pb-1.5" : "px-3 pb-3")}>
@@ -345,18 +345,18 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
             compact && active ? "border-brand-500/70 ring-[3px] ring-brand-500/15" : "border-line",
           )}
         >
-          <div className={cn("flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
+          <div className={cn("@container flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
             {(["main", "conversation", "artifacts"] as const).map((t, i) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
                 className={cn(
-                  "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 pt-1 pb-2 text-xs transition-colors",
+                  "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 pt-1 pb-2 text-xs transition-colors @max-[340px]:px-1.5",
                   tab === t ? "border-brand-500 font-semibold text-ink" : "border-transparent text-ink-3 hover:text-ink",
                 )}
               >
                 {t === "main" ? (agent.attachable && agent.live ? "Terminal" : "Session") : t === "conversation" ? "Conversation" : "Artifacts"}
-                <span className="text-[10px] font-normal text-ink-3">⌃{i + 1}</span>
+                <span className="text-[10px] font-normal text-ink-3 @max-[340px]:hidden">⌃{i + 1}</span>
                 {t === "artifacts" && artifacts.length > 0 && (
                   <span className={cn("rounded-full px-1.5 text-[10px] leading-4 tabular", unseenHere ? "bg-brand-600 font-semibold text-white" : "bg-line text-ink-3")}>{artifacts.length}</span>
                 )}
@@ -483,18 +483,18 @@ function Header({
     },
   ].filter((x): x is ActionItem => !!x);
   return (
-    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", dense ? "@container min-w-0 overflow-hidden px-2.5 py-1.5 [&_.size-8]:size-7" : compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5")}>
+    <header data-tauri-drag-region className={cn("flex shrink-0 flex-col", compact && "group/pane @container min-w-0 @max-[300px]:[&_.size-8]:size-6", dense ? "px-2.5 py-1.5 [&_.size-8]:size-7" : compact ? "gap-1.5 px-3 pt-2.5 pb-2" : "gap-2.5 px-5 pt-3.5 pb-3.5", compact && (active ? "relative z-30" : "relative z-20"))}>
       <div data-tauri-drag-region className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
         <StatusIcon status={agent.status} size={compact ? 15 : 18} />
         {renaming ? (
           <NameEditor value={agent.name} onSave={(name) => renaming.save(agent, name)} onCancel={renaming.cancel} className="max-w-sm text-xl tracking-tight" />
         ) : (
-          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", dense && "min-w-[4.5rem] flex-1", active ? "text-ink" : "text-ink-2")}>
+          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", compact && "min-w-0 flex-1", active ? "text-ink" : "text-ink-2")}>
             {agent.name}
             {agent.twin && <span className="ml-2 font-mono text-sm font-normal text-ink-3">{agent.twin}</span>}
           </h1>
         )}
-        {!dense && <span className={cn("shrink-0 text-ink-3", compact ? "text-xs" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
+        {!dense && <span className={cn("shrink-0 text-ink-3", compact ? "text-xs @max-[420px]:hidden" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
         {closing && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             {request?.waiting ? `closing when done · waiting: ${request.waiting}` : "closing after this turn…"}
@@ -503,7 +503,7 @@ function Header({
         {agent.status === "working" && s?.turn && !compact && (
           <span className="truncate text-sm text-ink-3">· {ago(s.turn.startedAt, now)} on “{s.turn.prompt.slice(0, 80)}”</span>
         )}
-        {!dense && <span className="flex-1" />}
+        {!compact && <span className="flex-1" />}
         {dense && used !== undefined && (
           <Tip side="bottom" content={<TipLabel label={`Context: ${Math.round(used)}% used`} />}>
             <span className="flex shrink-0 items-center gap-1.5 @max-[400px]:hidden">
@@ -522,7 +522,7 @@ function Header({
             onClick={inspector.toggle}
             aria-label={inspector.hidden ? "Show the inspector" : "Hide the inspector"}
             className={cn(
-              dense && "@max-[400px]:hidden",
+              compact && "@max-[400px]:hidden",
               "relative inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
               !inspector.hidden && "text-ink",
             )}
@@ -555,14 +555,14 @@ function Header({
             <button
               onClick={onClosePane}
               aria-label="Close this pane"
-              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-3 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500 @max-[300px]:hidden @max-[300px]:group-hover/pane:inline-flex"
             >
               <CloseCircleLinearIcon size={17} />
             </button>
           </Tip>
         )}
       </div>
-      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", dense && "hidden", compact ? "flex-nowrap overflow-hidden whitespace-nowrap [mask-image:linear-gradient(to_right,black_85%,transparent)] [&>*]:shrink-0" : "flex-wrap")}>
+      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", dense && "hidden", compact ? "flex-nowrap overflow-x-clip whitespace-nowrap [&>*]:shrink-0" : "flex-wrap")}>
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
             {agent.project}

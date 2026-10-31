@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LAYOUTS, type SplitLayout } from "@/lib/split";
+import { COLUMNS, LAYOUTS, type SplitLayout } from "@/lib/split";
 import type { Agent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { StatusIcon } from "./StatusIcon";
@@ -11,12 +11,25 @@ import { Kbd } from "./primitives";
  * The panes of a split chat area. `render(i)` draws pane i; the dividers drag (double-click
  * puts one back in the middle). Four panes share the vertical divider, so they stay a grid.
  */
-export function SplitPanes({ layout, ratios, onRatios, render }: { layout: SplitLayout; ratios?: [number, number]; onRatios: (r: [number, number]) => void; render: (i: number) => ReactNode }) {
+export function SplitPanes({ layout, ratios, onRatios, render }: { layout: SplitLayout; ratios?: number[]; onRatios: (r: number[]) => void; render: (i: number) => ReactNode }) {
   // Three in a line: the first divider sits at a third, the second halves the rest.
-  const even = layout === "3v" || layout === "3h" ? 1 / 3 : 0.5;
-  const [a, b] = ratios ?? [even, 0.5];
-  const setA = (x: number) => onRatios([x, b]);
-  const setB = (x: number) => onRatios([a, x]);
+  const columns = COLUMNS[layout];
+  const even = layout === "3v" || layout === "3h" || columns ? 1 / 3 : 0.5;
+  const all = [ratios?.[0] ?? even, ratios?.[1] ?? 0.5, ratios?.[2] ?? 0.5, ratios?.[3] ?? 0.5, ratios?.[4] ?? 0.5];
+  const [a, b] = all;
+  const set = (i: number, x: number) => onRatios(all.map((r, j) => (j === i ? x : r)));
+  const setA = (x: number) => set(0, x);
+  const setB = (x: number) => set(1, x);
+  if (columns) {
+    let next = 0;
+    // Each column's panes, in order; a split one has its own divider.
+    const [c0, c1, c2] = columns.map((count, c) => {
+      const first = next;
+      next += count;
+      return count === 1 ? render(first) : <Two dir="col" ratio={all[2 + c]} onRatio={(x) => set(2 + c, x)} first={render(first)} second={render(first + 1)} />;
+    });
+    return <Two dir="row" ratio={a} even={even} onRatio={setA} first={c0} second={<Two dir="row" ratio={b} onRatio={setB} first={c1} second={c2} />} />;
+  }
   switch (layout) {
     case "2v":
       return <Two dir="row" ratio={a} onRatio={setA} first={render(0)} second={render(1)} />;
@@ -91,10 +104,12 @@ function Two({ dir, ratio, even = 0.5, onRatio, first, second }: { dir: "row" | 
   );
 }
 
+type GridLayout = Exclude<SplitLayout, "3v" | "3h" | "c112" | "c122" | "c222">;
+
 /** A small drawing of a layout: its panes as rounded blocks. */
 export function LayoutGlyph({ layout, className }: { layout: SplitLayout; className?: string }) {
   const cell = "rounded-[2px] bg-current";
-  const grid: Record<Exclude<SplitLayout, "3v" | "3h">, ReactNode> = {
+  const grid: Record<GridLayout, ReactNode> = {
     "1": <span className={cn(cell, "col-span-2 row-span-2")} />,
     "2v": (
       <>
@@ -131,6 +146,19 @@ export function LayoutGlyph({ layout, className }: { layout: SplitLayout; classN
       </>
     ),
   };
+  const columns = COLUMNS[layout];
+  if (columns)
+    return (
+      <span className={cn("flex size-4 gap-[2px]", className)}>
+        {columns.map((count, c) => (
+          <span key={c} className="flex flex-1 flex-col gap-[inherit]">
+            {Array.from({ length: count }, (_, i) => (
+              <span key={i} className={cn(cell, "flex-1")} />
+            ))}
+          </span>
+        ))}
+      </span>
+    );
   if (layout === "3v" || layout === "3h")
     return (
       <span className={cn("grid size-4 gap-[2px]", layout === "3v" ? "grid-cols-3" : "grid-rows-3", className)}>
@@ -139,13 +167,19 @@ export function LayoutGlyph({ layout, className }: { layout: SplitLayout; classN
         <span className={cell} />
       </span>
     );
-  return <span className={cn("grid size-4 grid-cols-2 grid-rows-2 gap-[2px]", className)}>{grid[layout as Exclude<SplitLayout, "3v" | "3h">]}</span>;
+  return <span className={cn("grid size-4 grid-cols-2 grid-rows-2 gap-[2px]", className)}>{grid[layout as GridLayout]}</span>;
 }
 
 /** The header's layout button: the six layouts and the text size. */
 export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: { layout: SplitLayout; onLayout: (l: SplitLayout) => void; scale: number; onScale: (dir: 1 | -1 | 0) => void; dense: boolean; onDense: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Preview screenshots open it with OPENADMIRAL_TIP=view-menu.
+  useEffect(() => {
+    const onTip = (e: Event) => (e as CustomEvent).detail === "view-menu" && setOpen(true);
+    window.addEventListener("openadmiral:tip", onTip);
+    return () => window.removeEventListener("openadmiral:tip", onTip);
+  }, []);
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);

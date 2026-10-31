@@ -1,21 +1,24 @@
-// The chat area split into panes (up to four), each showing one agent. The sidebar and the
+// The chat area split into panes (up to six), each showing one agent. The sidebar and the
 // inspector follow the active pane: picking an agent shows it there, or, when another pane
 // already shows it, makes that pane the active one.
 
-export type SplitLayout = "1" | "2v" | "2h" | "3v" | "3h" | "3l" | "3t" | "4";
+export type SplitLayout = "1" | "2v" | "2h" | "3v" | "3h" | "3l" | "3t" | "4" | "c112" | "c122" | "c222";
+
+/** Three columns, each one pane or two stacked. */
+export const COLUMNS: Partial<Record<SplitLayout, [number, number, number]>> = { c112: [1, 1, 2], c122: [1, 2, 2], c222: [2, 2, 2] };
 
 export type SplitState = {
   layout: SplitLayout;
   /** Agent ids by pane, null for an empty one; as many as the layout has panes. */
   panes: (string | null)[];
   active: number;
-  /** Where the dividers sit: the first split, then the second (0.5 is the middle). */
-  ratios?: [number, number];
+  /** Where the dividers sit: the first split, the second, then each column's own (three-column layouts). */
+  ratios?: number[];
   /** The multi-pane layout ⌘\ comes back to. */
   last?: SplitLayout;
 };
 
-export const PANES: Record<SplitLayout, number> = { "1": 1, "2v": 2, "2h": 2, "3v": 3, "3h": 3, "3l": 3, "3t": 3, "4": 4 };
+export const PANES: Record<SplitLayout, number> = { "1": 1, "2v": 2, "2h": 2, "3v": 3, "3h": 3, "3l": 3, "3t": 3, "4": 4, c112: 4, c122: 5, c222: 6 };
 
 export const LAYOUTS: { id: SplitLayout; label: string }[] = [
   { id: "1", label: "One agent" },
@@ -26,6 +29,9 @@ export const LAYOUTS: { id: SplitLayout; label: string }[] = [
   { id: "3l", label: "Three: one tall, two stacked" },
   { id: "3t", label: "Three: one wide, two side by side" },
   { id: "4", label: "Four in a grid" },
+  { id: "c112", label: "Three columns, the last one split" },
+  { id: "c122", label: "Three columns, the last two split" },
+  { id: "c222", label: "Three columns, all split" },
 ];
 
 export const SINGLE: SplitState = { layout: "1", panes: [null], active: 0 };
@@ -48,7 +54,7 @@ export function show(s: SplitState, id: string): SplitState {
 export function relayout(s: SplitState, layout: SplitLayout, candidates: string[]): SplitState {
   const n = PANES[layout];
   const kept = s.panes.slice(0, n);
-  const spare = candidates.filter((c) => !kept.includes(c));
+  const spare = [...new Set(candidates)].filter((c) => !kept.includes(c));
   while (kept.length < n) kept.push(spare.shift() ?? null);
   // Each layout starts evenly divided.
   return { ...s, layout, panes: kept, active: Math.min(s.active, n - 1), ratios: layout === s.layout ? s.ratios : undefined, last: layout === "1" ? s.last : layout };
