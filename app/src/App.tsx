@@ -470,7 +470,7 @@ export default function App() {
                 onError={(m) => life.notify(m, "error")}
                 onNotice={(m) => life.notify(m)}
                 onConfirm={life.setConfirm}
-                artifacts={artifacts.filter((a) => a.sessionId === a.id)}
+                artifacts={artifacts.filter((x) => x.sessionId === a.id)}
                 artifactFocus={artifactFocus?.sessionId === a.id ? artifactFocus : undefined}
                 turnFocus={turnFocus?.sessionId === a.id ? turnFocus : undefined}
                 seen={seen}
