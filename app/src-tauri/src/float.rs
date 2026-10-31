@@ -61,7 +61,9 @@ pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(
         .initialization_script(format!("window.__OPENADMIRAL_FLOAT__ = '{session_id}';"))
         .title(title)
         .inner_size(900.0, 680.0)
-        .min_inner_size(420.0, 320.0);
+        .min_inner_size(420.0, 320.0)
+        // On another desktop it is rarely the active window: the first click must already drag it.
+        .accept_first_mouse(true);
     #[cfg(target_os = "macos")]
     {
         builder = builder.title_bar_style(TitleBarStyle::Overlay).hidden_title(true).traffic_light_position(tauri::LogicalPosition::new(14.0, 19.0));

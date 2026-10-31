@@ -355,7 +355,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
             compact && active ? "border-brand-500/70 ring-[3px] ring-brand-500/15" : "border-line",
           )}
         >
-          <div className={cn("@container flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
+          <div data-tauri-drag-region className={cn("@container flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
             {(["main", "conversation", "artifacts"] as const).map((t, i) => (
               <button
                 key={t}
@@ -516,12 +516,13 @@ function Header({
         {renaming ? (
           <NameEditor value={agent.name} onSave={(name) => renaming.save(agent, name)} onCancel={renaming.cancel} className="max-w-sm text-xl tracking-tight" />
         ) : (
-          <h1 className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", compact && "min-w-0 flex-1", active ? "text-ink" : "text-ink-2")}>
+          // The name fills a pane's header: it has to move the window too. "deep": its twin tag as well.
+          <h1 data-tauri-drag-region="deep" className={cn("truncate font-semibold tracking-tight", compact ? "text-[15px]" : "text-xl", compact && "min-w-0 flex-1", active ? "text-ink" : "text-ink-2")}>
             {agent.name}
             {agent.twin && <span className="ml-2 font-mono text-sm font-normal text-ink-3">{agent.twin}</span>}
           </h1>
         )}
-        {!dense && <span className={cn("shrink-0 text-ink-3", compact ? "text-xs @max-[420px]:hidden" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
+        {!dense && <span data-tauri-drag-region className={cn("shrink-0 text-ink-3", compact ? "text-xs @max-[420px]:hidden" : "text-sm")}>{STATUS_LABEL[agent.status]}</span>}
         {closing && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
             {request?.waiting ? `closing when done · waiting: ${request.waiting}` : "closing after this turn…"}
