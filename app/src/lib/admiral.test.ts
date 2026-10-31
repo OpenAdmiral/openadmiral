@@ -77,3 +77,10 @@ describe("applyDelta", () => {
     expect(next.sessions).toBe(base.sessions);
   });
 });
+
+describe("what the CLI says about a session", () => {
+  const cli = (over: object) => ({ pid: 1, cwd: "/r", kind: "background", startedAt: now - 60_000, sessionId: "s", id: "s", name: "s", ...over });
+  const status = (over: object) => mergeAgents([session()], [cli(over)], now, new Map(), new Map(), [])[0].status;
+  it("a turn in progress is working", () => expect(status({ status: "busy", state: "working" })).toBe("working"));
+  it("a finished turn with a shell left running is not", () => expect(status({ status: "busy", state: "done" })).toBe("idle"));
+});

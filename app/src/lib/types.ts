@@ -75,6 +75,8 @@ export type CliAgent = {
   id?: string;
   name?: string;
   status?: string; // "idle" | "busy" | …
+  /** The turn's own state: "done" stays "busy" while a background shell runs. */
+  state?: string;
 };
 
 export type AgentStatus = "working" | "waiting" | "idle" | "starting" | "ended";

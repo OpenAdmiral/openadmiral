@@ -1,6 +1,7 @@
 import { DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { useEffect, useRef } from "react";
-import { slotOf, type Group } from "@/lib/order";
+import { slotOf, spaceKey, type Group, type Node as TreeNode } from "@/lib/order";
+import { SpaceTile, useFolded } from "./Sidebar";
 import { listMenus, type AgentActions } from "@/lib/lifecycle";
 import { cn } from "@/lib/utils";
 import { StatusIcon } from "./StatusIcon";
@@ -9,6 +10,8 @@ import { AgentTip, Tip, TipLabel } from "./Tooltip";
 
 type Props = {
   groups: Group[];
+  /** The agents by project, as the sidebar has them (none in Recent: a flat list). */
+  tree?: TreeNode[];
   view: View | null;
   onSelect: (v: View) => void;
   onExpand: () => void;
@@ -25,7 +28,7 @@ type Props = {
  * grouped by project, three nav icons, the expand button at the bottom.
  * Everything else is in the tooltips, which appear at once.
  */
-export function Rail({ groups, view, onSelect, onExpand, onShortcuts, openDelegations, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
+export function Rail({ groups, tree, view, onSelect, onExpand, onShortcuts, openDelegations, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
   // The same right-click menus as the full sidebar.
   const menus = listMenus(actions, { onClearEnded, onResetOrder });
   const nav: { kind: "agents" | "delegations" | "queue" | "costs" | "artifacts"; icon: typeof RoutingLinearIcon; label: string; kbd: string; badge: boolean }[] = [
@@ -37,6 +40,8 @@ export function Rail({ groups, view, onSelect, onExpand, onShortcuts, openDelega
   ];
   // ⌘1–9 count agents in the order drawn, as in the full sidebar.
   let n = 0;
+  const [folded, toggleFolded] = useFolded();
+  const nodes: TreeNode[] = (tree ?? groups.map((group): TreeNode => ({ kind: "group", group }))).filter((x) => x.kind === "group" || x.groups.length > 0);
   // Moving with the keyboard (⌥↑/⌥↓, ⌘1–9): the selected dot shows its tooltip for a moment.
   const selectedId = view?.kind === "agent" ? view.id : undefined;
   const selectedN = selectedId ? groups.flatMap((g) => g.agents).findIndex((a) => a.id === selectedId) + 1 : 0;
@@ -77,26 +82,49 @@ export function Rail({ groups, view, onSelect, onExpand, onShortcuts, openDelega
       </nav>
       <div className="mt-3 mb-1 h-px w-5 bg-line" />
       <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1" onContextMenu={menus.empty}>
-        {groups.map((g) => (
-          <div key={slotOf(g)} className="flex flex-col items-center gap-0.5">
-            {g.agents.map((a) => {
-              const selected = view?.kind === "agent" && view.id === a.id;
-              n += 1;
-              return (
-                <Tip key={a.id} id={`rail-agent-${n}`} content={<AgentTip agent={a} n={n} />}>
+        {nodes.map((node, i) => {
+          const list = node.kind === "group" ? [node.group] : node.groups;
+          const all = list.flatMap((g) => g.agents);
+          const foldKey = node.kind === "space" ? spaceKey(node.space.id) : undefined;
+          const isFolded = !!foldKey && folded.has(foldKey);
+          // Folded agents keep their ⌘ numbers, as in the full sidebar.
+          if (isFolded) n += all.length;
+          return (
+            <div key={foldKey ?? slotOf(list[0])} className="flex w-full flex-col items-center gap-1">
+              {i > 0 && <div className="my-0.5 h-px w-5 shrink-0 bg-line" />}
+              {node.kind === "space" && (
+                <Tip content={<TipLabel label={`${node.space.name} · ${isFolded ? "show" : "hide"} its ${all.length} agent${all.length === 1 ? "" : "s"}`} />}>
                   <button
-                    aria-label={a.name}
-                    onClick={() => onSelect({ kind: "agent", id: a.id })}
-                    onContextMenu={(e) => menus.agent(e, a)}
-                    className={cn("flex h-6 w-8 items-center justify-center rounded-full transition-colors hover:bg-line", selected && "bg-line-strong")}
+                    aria-label={node.space.name}
+                    aria-expanded={!isFolded}
+                    onClick={() => toggleFolded(foldKey!)}
+                    className={cn("relative rounded-[7px] transition-transform hover:scale-105", isFolded && all.some((a) => view?.kind === "agent" && view.id === a.id) && "ring-2 ring-brand-500")}
                   >
-                    <StatusIcon status={a.status} tip={false} />
+                    <SpaceTile space={node.space} />
+                    {isFolded && all.some((a) => a.status === "waiting") && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-amber-500 ring-2 ring-sidebar" />}
                   </button>
                 </Tip>
-              );
-            })}
-          </div>
-        ))}
+              )}
+              {!isFolded &&
+                all.map((a) => {
+                  const selected = view?.kind === "agent" && view.id === a.id;
+                  n += 1;
+                  return (
+                    <Tip key={a.id} id={`rail-agent-${n}`} content={<AgentTip agent={a} n={n} />}>
+                      <button
+                        aria-label={a.name}
+                        onClick={() => onSelect({ kind: "agent", id: a.id })}
+                        onContextMenu={(e) => menus.agent(e, a)}
+                        className={cn("flex h-6 w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-line", selected && "bg-line-strong")}
+                      >
+                        <StatusIcon status={a.status} tip={false} />
+                      </button>
+                    </Tip>
+                  );
+                })}
+            </div>
+          );
+        })}
       </div>
       <Tip content={<TipLabel label="Keyboard shortcuts" kbd="⌘/" />}>
         <button
