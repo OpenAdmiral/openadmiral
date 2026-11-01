@@ -14,6 +14,7 @@ export type AgentActions = {
   resume: (a: Agent) => void;
   rename: (a: Agent) => void;
   restart: (a: Agent) => void; // asks first
+  float: (a: Agent) => void;
 };
 
 const running = (a: Agent) => !!a.cli;
@@ -26,6 +27,7 @@ export const ACTION_HELP = {
   rename: "Gives the session a new name (runs /rename in it).",
   remove: "Hides it from OpenAdmiral. The conversation stays available with claude --resume.",
   closeRemove: "Closes the session after the current turn, then hides it from OpenAdmiral.",
+  float: "Shows it in a window of its own, to carry to another desktop. Same session.",
   restart: "Restarts it on the installed Claude Code after the current turn. Same conversation; background shells keep running.",
 } as const;
 
@@ -34,6 +36,7 @@ export function agentActionItems(a: Agent, actions: AgentActions) {
   const on = running(a);
   return [
     ...(a.update ? [{ id: "restart", label: `Restart to Update (${a.update.to})`, description: ACTION_HELP.restart, run: () => actions.restart(a) }] : []),
+    { id: "float", label: "Open in New Window", description: ACTION_HELP.float, run: () => actions.float(a) },
     { id: "close", label: "Close", shortcut: "⌘W", description: ACTION_HELP.close, disabledReason: on ? undefined : "Not running.", run: () => actions.close(a) },
     { id: "force", label: "Force Quit…", danger: true, description: ACTION_HELP.force, disabledReason: on ? undefined : "Not running.", run: () => actions.forceQuit(a) },
     ...(canRename(a) || renameNeedsReload(a)
@@ -50,6 +53,8 @@ export function agentActionItems(a: Agent, actions: AgentActions) {
 export function agentMenuEntries(a: Agent, actions: AgentActions, extra: { text: string; action: () => void }[] = []): MenuEntry[] {
   const entries: MenuEntry[] = [
     ...(a.update ? [{ id: `agent:restart:${a.id}`, text: `Restart to Update (${a.update.to})…`, action: () => actions.restart(a) }, { separator: true as const }] : []),
+    { id: `agent:float:${a.id}`, text: "Open in New Window", action: () => actions.float(a) },
+    { separator: true },
     { id: `agent:close:${a.id}`, text: "Close", accelerator: "CmdOrCtrl+W", enabled: running(a), action: () => actions.close(a) },
     { id: `agent:force:${a.id}`, text: "Force Quit…", enabled: running(a), action: () => actions.forceQuit(a) },
     { separator: true },
@@ -158,6 +163,8 @@ export function useLifecycle(agents: Agent[]) {
   }, [notify]);
 
   const actions: AgentActions = {
+    // Its window if it has one, else a new one (float.rs).
+    float: (a) => void invoke("float_open", { sessionId: a.id, title: a.name }).catch((e) => notify(String(e), "error")),
     restart: (a) => {
       const shells = (a.session?.jobs ?? []).filter((j) => j.status === "running").map((j) => j.label || "a background command");
       setConfirm({

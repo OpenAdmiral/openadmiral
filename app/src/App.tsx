@@ -407,18 +407,18 @@ export default function App() {
   useEffect(() => {
     for (const id of floats) setTerminalAway(id, true);
     for (const id of floatsBefore.current) if (!floats.includes(id)) setTerminalAway(id, false);
+    // Into its own window, from wherever it was asked: a split's pane frees up, and the next
+    // agent on screen is the active one.
+    const left = floats.filter((id) => !floatsBefore.current.includes(id) && split.panes.includes(id));
+    if (left.length && split.layout !== "1") {
+      const panes = split.panes.map((p) => (p && left.includes(p) ? null : p));
+      ui.setSplit((s) => ({ ...(s ?? SINGLE), panes: (s ?? SINGLE).panes.map((p) => (p && left.includes(p) ? null : p)) }));
+      const next = panes.find(Boolean);
+      if (next) setView({ kind: "agent", id: next });
+    }
     floatsBefore.current = floats;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floats]);
-  /** Into its own window: a split's pane frees up, and the next agent on screen is the active one. */
-  const floatAgent = (a: Agent) => {
-    setTerminalAway(a.id, true);
-    invoke("float_open", { sessionId: a.id, title: a.name }).catch((e) => life.notify(String(e), "error"));
-    if (split.layout === "1") return;
-    const panes = split.panes.map((p) => (p === a.id ? null : p));
-    ui.setSplit((s) => ({ ...(s ?? SINGLE), panes }));
-    const next = panes.find(Boolean);
-    if (next) setView({ kind: "agent", id: next });
-  };
   // Back from its window: it takes an empty pane if there is one, else the active one.
   const dockRef = useRef<(id: string) => void>(() => {});
   dockRef.current = (id) => {
@@ -531,7 +531,7 @@ export default function App() {
                     viewMenu={viewMenu}
       textScale={textScale}
       restarting={life.restarting.includes(a.id)}
-      floatAction={floats.includes(a.id) ? undefined : { kind: "float", run: () => floatAgent(a) }}
+      floatAction={floats.includes(a.id) ? undefined : { kind: "float", run: () => life.actions.float(a) }}
       floating={
         floats.includes(a.id)
           ? {
