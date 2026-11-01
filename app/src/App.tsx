@@ -129,14 +129,22 @@ export default function App() {
     () => (palette !== false ? collect(agents, delegations, artifacts, queues, [...new Map(order.groups.map((g) => [g.key, { key: g.key, label: g.label }])).values()]) : []),
     [palette, agents, delegations, artifacts, queues, order.groups],
   );
+  /** An artifact in its agent's Artifacts tab, in the window that agent is in. */
+  const showArtifact = (sessionId: string, artifactId: string) => {
+    if (floats.includes(sessionId)) {
+      void invoke("float_focus", { sessionId, focus: { kind: "artifact", sessionId, artifactId, at: Date.now() } });
+      return;
+    }
+    setView({ kind: "agent", id: sessionId });
+    setArtifactFocus({ sessionId, key: `${sessionId}/${artifactId}`, at: Date.now() });
+  };
   const openTarget = (t: Target) => {
     if (t.kind === "agent") setView({ kind: "agent", id: t.id });
     else if (t.kind === "view") setView({ kind: t.view });
     else if (t.kind === "new-agent") setSheet({ cwd: t.cwd });
     else if (t.kind === "shortcuts") setShortcuts(true);
     else {
-      setView({ kind: "agent", id: t.sessionId });
-      setArtifactFocus({ sessionId: t.sessionId, key: `${t.sessionId}/${t.artifactId}`, at: Date.now() });
+      showArtifact(t.sessionId, t.artifactId);
     }
   };
   // Clicking a "needs you" notification brings OpenAdmiral forward: open that agent (its terminal shows the prompt).
@@ -183,7 +191,7 @@ export default function App() {
       if (view?.kind === "agent" && view.id === a.sessionId) {
         life.notify(n > 1 ? `New version of “${a.title}” (v${n})` : `New artifact: “${a.title}”`, "info", {
           label: "Open",
-          run: () => setArtifactFocus({ sessionId: a.sessionId, key: keyOf(a), at: Date.now() }),
+          run: () => (floats.includes(a.sessionId) ? showArtifact(a.sessionId, a.id) : setArtifactFocus({ sessionId: a.sessionId, key: keyOf(a), at: Date.now() })),
         });
       }
     }

@@ -1068,8 +1068,12 @@ fn watch_admiral(app: AppHandle) {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
                 if at > last_focus && now.saturating_sub(at) < 10_000 && !preview() {
                     last_focus = at;
-                    show_main(&app);
-                    let _ = app.emit("openadmiral://focus", focus);
+                    // To where the agent is: its floating window, if it has one.
+                    let session = focus.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string();
+                    if !float::focus(&app, &session, &focus) {
+                        show_main(&app);
+                        let _ = app.emit_to("main", "openadmiral://focus", focus);
+                    }
                 }
             }
         }
@@ -1297,6 +1301,7 @@ pub fn run() {
             float::float_close,
             float::float_recall,
             float::float_jump,
+            float::float_focus,
             messages::agent_traffic,
             restart::agent_restart,
             restart::agent_restart_cancel,

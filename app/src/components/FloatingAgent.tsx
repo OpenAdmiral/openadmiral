@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useRef, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
 import { useSeen } from "@/lib/artifacts";
 import { devEnv } from "@/lib/dev";
+import { parseFocus } from "@/lib/focus";
 import { useHandoffs } from "@/lib/handoffs";
 import { useLifecycle } from "@/lib/lifecycle";
 import { matchShortcut } from "@/lib/shortcuts";
@@ -26,6 +28,18 @@ export function FloatingAgent({ id }: { id: string }) {
   const seen = useSeen(artifacts, loaded);
   const handoffs = useHandoffs(() => {});
   const agent = agents.find((a) => a.id === current);
+  // "Open in OpenAdmiral" on an artifact of this agent: the backend raised this window.
+  const [artifactFocus, setArtifactFocus] = useState<{ key: string; at: number; version?: number } | undefined>();
+  const lastFocus = useRef(0);
+  useEffect(() => {
+    const off = listen<unknown>("openadmiral://focus", (e) => {
+      const f = parseFocus(e.payload, Date.now(), lastFocus.current);
+      if (!f) return;
+      lastFocus.current = f.at;
+      setArtifactFocus({ key: `${f.sessionId}/${f.artifactId}`, at: f.at, version: f.version });
+    });
+    return () => void off.then((u) => u());
+  }, []);
   const textScale = ui.textScale ?? 1;
 
   useEffect(() => void devEnv.then((d) => setPreview(d.preview)), []);
@@ -83,6 +97,7 @@ export function FloatingAgent({ id }: { id: string }) {
             onNotice={(m) => life.notify(m)}
             onConfirm={life.setConfirm}
             artifacts={artifacts.filter((x) => x.sessionId === agent.id)}
+            artifactFocus={artifactFocus}
             seen={seen}
             onClaudeLink={(href) => invoke("browser_open", { url: href }).catch((e) => life.notify(String(e), "error"))}
             pluginInstalled={pluginInstalled}

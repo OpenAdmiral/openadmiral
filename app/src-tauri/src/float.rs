@@ -99,6 +99,23 @@ pub fn float_close(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+/// Brings forward the floating window showing this session and hands it `focus` (an artifact
+/// to open). False when no window shows it: the main window is the one to ask.
+pub fn focus(app: &AppHandle, session_id: &str, focus: &serde_json::Value) -> bool {
+    let label = with(|m| m.iter().find(|(_, v)| *v == session_id).map(|(k, _)| k.clone()));
+    let Some(w) = label.as_ref().and_then(|l| app.get_webview_window(l)) else { return false };
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+    app.emit_to(label.unwrap().as_str(), "openadmiral://focus", focus).is_ok()
+}
+
+/// From the main window: an artifact of an agent that lives in a floating window.
+#[tauri::command]
+pub fn float_focus(app: AppHandle, session_id: String, focus: serde_json::Value) -> bool {
+    self::focus(&app, &session_id, &focus)
+}
+
 /// From a floating view: the main window comes forward showing this agent.
 #[tauri::command]
 pub fn float_jump(app: AppHandle, session_id: String) {
