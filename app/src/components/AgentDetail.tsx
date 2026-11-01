@@ -15,11 +15,10 @@ import {
   SidebarMinimalisticLinearIcon,
   MonitorLinearIcon,
   RecordCircleLinearIcon,
-  RoutingLinearIcon,
   RefreshLinearIcon,
 } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
+import type { Agent, AdmiralSession } from "@/lib/types";
 import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, modelLabel, usd } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
@@ -43,7 +42,7 @@ import type { AdmiralRequest } from "@/lib/admiral";
 import { Conversation } from "./Conversation";
 import { matchShortcut } from "@/lib/shortcuts";
 import { pickTasks, useTranscript, type TranscriptTask } from "@/lib/transcript";
-import { Chip, DelegationPill, Meter, STATUS_LABEL } from "./primitives";
+import { Chip, Meter, STATUS_LABEL } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
 import { hasNow, NowPanel } from "./Progress";
 import { UnderwayPill } from "@/components/UnderwayPill";
@@ -52,9 +51,7 @@ import { inExtension, runsElsewhere, whereLabel } from "@/lib/host";
 
 type Props = {
   agent: Agent;
-  delegations: AdmiralDelegation[];
   now: number;
-  onOpenDelegations: () => void;
   handoff?: Handoff;
   request?: AdmiralRequest;
   actions: AgentActions;
@@ -115,7 +112,7 @@ type Props = {
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, delegations, now, onOpenDelegations, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset, restarting }: Props) {
+export function AgentDetail({ agent, now, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset, restarting }: Props) {
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -187,12 +184,9 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
     }
   }, [tab, agent.id, attached, active]);
   const unseenHere = artifacts.filter(seen.isUnseen).length;
-  const mine = delegations.filter(
-    (d) => d.from.sessionId === agent.id || d.to.sessionId === agent.id || (!d.to.sessionId && d.to.address === agent.name),
-  );
   // With the inspector hidden, a dot on its toggle says something there changed:
-  // the mod sent a queued prompt, or one of this agent's delegations moved.
-  const attentionKey = `${queue?.sent?.sent.length ?? 0}|${Math.max(0, ...mine.map((d) => d.updatedAt))}`;
+  // the mod sent a queued prompt.
+  const attentionKey = `${queue?.sent?.sent.length ?? 0}`;
   const [baseline, setBaseline] = useState<string | null>(null);
   useEffect(() => {
     setBaseline(inspectorHidden ? attentionKey : null);
@@ -238,7 +232,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
                 body: agent.unplugged ? (
                   <p className="px-4 py-3 text-xs leading-relaxed text-ink-3">Up next needs the OpenAdmiral plugin in this session: it is the plugin that submits queued prompts.</p>
                 ) : (
-                  <UpNext agent={agent} entry={queue} agents={agents} delegations={delegations} onError={onError} />
+                  <UpNext agent={agent} entry={queue} agents={agents} onError={onError} />
                 ),
               },
               {
@@ -250,30 +244,6 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
               },
               ...(s?.subagents?.length
                 ? [{ id: "subagents", title: "Subagents", aside: `${s.subagents.filter((a) => a.status === "running").length} running`, body: <div className="px-3 pb-3"><Subagents session={s} now={now} /></div> }]
-                : []),
-              ...(mine.length
-                ? [{ id: "delegations", title: "Delegations", aside: mine.length, body: (
-            <div className="px-3 pb-3">
-              <ul className="space-y-1.5">
-                {mine.slice(0, 8).map((d) => {
-                  const outgoing = d.from.sessionId === agent.id;
-                  return (
-                    <li key={d.id} className="rounded-lg py-1">
-                      <div className="flex items-center gap-2">
-                        <RoutingLinearIcon size={14} className={cn("shrink-0", outgoing ? "text-brand-500" : "rotate-180 text-emerald-500")} />
-                        <span className="flex-1 truncate text-xs font-semibold text-ink">{d.title}</span>
-                        <DelegationPill status={d.status} />
-                      </div>
-                      <div className="mt-0.5 pl-[22px] text-[11px] text-ink-3">
-                        {outgoing ? `to ${d.to.project ?? d.to.address}` : `from ${d.from.project}`} · {ago(d.updatedAt, now)}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-              <button onClick={onOpenDelegations} className="mt-1 text-[11px] text-ink-3 hover:text-brand-600">View all</button>
-            </div>
-                  ) }]
                 : []),
               { id: "activity", title: "Activity", defaultCollapsed: true, aside: s?.activity?.length || undefined, body: <div className="px-3 pb-3"><Activity session={s} now={now} /></div> },
             ]}

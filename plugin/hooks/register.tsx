@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { delegationCard, ICON, parseAnswer, repoHolds, slugOf } from './card'
+import { ICON, parseAnswer, repoHolds, slugOf } from './card'
 import { classifyQueueText, isDone, isDueByTime, isTimed, nextDue, queueCommandsFrom, runNowPending, type QueueCommand, type QueueCondition, type QueueItemCore, type SentEntry } from './queue'
 import { hostOf, type Host } from './host'
 import { backgroundStart, taskNotification, upsertJob, type Job } from './jobs'
@@ -9,7 +9,6 @@ const OPENS_IN_APP = new Set(['html', 'image', 'pdf'])
 // Contract: docs/CONTRACT.md. This module is the writer side.
 
 type Status = 'starting' | 'idle' | 'working' | 'waiting' | 'ended'
-type DelegationStatus = 'draft' | 'sent' | 'accepted' | 'in_progress' | 'blocked' | 'done' | 'cancelled'
 type ActivityKind = 'prompt' | 'tool' | 'reply' | 'sent' | 'received' | 'permission'
 type TaskStatus = 'pending' | 'in_progress' | 'completed'
 
@@ -67,21 +66,6 @@ type AdmiralArtifact = {
   updatedAt: number
 }
 
-type AdmiralDelegation = {
-  v: 1
-  id: string
-  title: string
-  detail: string
-  from: { sessionId: string; project: string; name?: string }
-  to: { address: string; sessionId?: string; project?: string }
-  status: DelegationStatus
-  dependsOn?: string[]
-  notes: { at: number; by: string; status?: DelegationStatus; text: string }[]
-  result?: string
-  createdAt: number
-  updatedAt: number
-}
-
 const HEARTBEAT_MS = 20_000
 const REQUEST_POLL_MS = 2_000
 const FILL_POLL_MS = 400
@@ -93,14 +77,12 @@ const QUEUE_IDLE_GRACE_MS = 3_000
 const STALE_MS = 90_000
 const GIT_EVERY_MS = 10_000
 const MAX_ACTIVITY = 40
-const DELEGATION_STATUSES: DelegationStatus[] = ['accepted', 'in_progress', 'blocked', 'done', 'cancelled']
 
 const clip = (text: string, n: number) => {
   const one = text.replace(/\s+/g, ' ').trim()
   return one.length > n ? one.slice(0, n - 1) + '…' : one
 }
 const basename = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
-const newId = () => 'dlg_' + Math.random().toString(36).slice(2, 10).padEnd(8, '0')
 
 // One session per process; module variables reset on reload, so session.start rebuilds them.
 let me: AdmiralSession | undefined
@@ -238,20 +220,6 @@ async function refreshUsage($: EngineInterface) {
   })
 }
 
-async function readDelegation($: EngineInterface, id: string): Promise<AdmiralDelegation | undefined> {
-  if (!/^dlg_[a-z0-9]+$/.test(id)) return undefined
-  try {
-    return JSON.parse(await $.fs.read(`${root}/delegations/${id}.json`)) as AdmiralDelegation
-  } catch {
-    return undefined
-  }
-}
-
-async function writeDelegation($: EngineInterface, d: AdmiralDelegation) {
-  d.updatedAt = await $.clock.now()
-  await $.fs.write(`${root}/delegations/${d.id}.json`, JSON.stringify(d, null, 1))
-}
-
 async function listJson<T>($: EngineInterface, dir: string): Promise<T[]> {
   const entries = await $.fs.list(dir).catch(() => [])
   const out: T[] = []
@@ -262,27 +230,6 @@ async function listJson<T>($: EngineInterface, dir: string): Promise<T[]> {
     } catch {}
   }
   return out
-}
-
-// A delegation accepted here and a turn that started after it, using tools: the work
-// is under way, whether or not the model calls delegation_update. Without this the
-// board shows "accepted" for as long as the recipient works quietly. Checked at most
-// every 20 s, on tool calls.
-let lastStartCheck = 0
-async function markStarted($: EngineInterface) {
-  if (!me?.turn) return
-  const now = await $.clock.now()
-  if (now - lastStartCheck < 20_000) return
-  lastStartCheck = now
-  for (const d of await listJson<AdmiralDelegation>($, `${root}/delegations`)) {
-    if (d.status !== 'accepted' || d.to.sessionId !== me.sessionId) continue
-    const acceptedAt = [...d.notes].reverse().find(n => n.status === 'accepted')?.at ?? d.updatedAt
-    // A brief that arrived in the middle of other work waits for the turn that takes it up.
-    if (me.turn.startedAt < acceptedAt - 2_000) continue
-    d.status = 'in_progress'
-    d.notes.push({ at: now, by: me.project, status: 'in_progress', text: 'working on it' })
-    await writeDelegation($, d)
-  }
 }
 
 function toolSummary(tool: string, e: Record<string, unknown>): string {
@@ -378,11 +325,9 @@ async function readJson<T>($: EngineInterface, path: string): Promise<T | undefi
 }
 
 async function conditionHolds($: EngineInterface, after: QueueCondition | undefined, now: number) {
-  if (!after || after.kind === 'time' || after.kind === 'schedule') return true   // time is checked by the caller
-  if (after.kind === 'delegation') {
-    const d = await readDelegation($, after.id)
-    return d !== undefined && (after.status as string[]).includes(d.status)
-  }
+  // Time is checked by the caller. Any other kind counts as no condition, so an old item
+  // queued to run after a delegation (a feature since removed) runs instead of staying stuck.
+  if (after?.kind !== 'session-idle') return true
   const other = await readJson<AdmiralSession>($, `${root}/sessions/${after.sessionId}.json`)
   return other !== undefined && other.status === 'idle' && now - other.updatedAt < STALE_MS
 }
@@ -465,32 +410,6 @@ Run a shell command you expect to take more than about two minutes (a full build
 
 // A plugin tool answers the model with text; `result` must be a string too.
 const answer = (text: string) => ({ result: text, text })
-
-// Sends through the engine's session.send. A send a plugin makes can come back
-// undecided from auto mode's classifier ("no verdict … issue it again once"),
-// so retry once; the caller falls back to asking the model to SendMessage.
-// Once both tries fail that way, this session stops trying: the classifier keeps
-// refusing plugin sends, and each attempt only delays the model's own send.
-let pluginSendsBlocked = false
-const BLOCKED = 'auto mode does not let OpenAdmiral send for this session'
-async function deliver($: EngineInterface, to: Parameters<EngineInterface['session']['send']>[0]['to'], text: string): Promise<string | undefined> {
-  if (pluginSendsBlocked) return BLOCKED
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const sent = await $.session
-      .send({ to, text })
-      .catch((err: unknown) => ({ isDelivered: false as const, reason: String(err) }))
-    const failure: string | undefined =
-      'deny' in sent && sent.deny ? String(sent.deny) : sent.isDelivered === false ? String(sent.reason ?? 'not delivered') : undefined
-    if (!failure) return undefined
-    const undecided = /no verdict|again once/i.test(failure)
-    if (undecided && attempt === 1) {
-      pluginSendsBlocked = true
-      return BLOCKED
-    }
-    if (!undecided) return failure
-  }
-  return 'not delivered'
-}
 
 // Other live Claude Code sessions, for the @ typeahead and @mentions: names from
 // `claude agents --json` (the address SendMessage takes), state from their OpenAdmiral
@@ -656,8 +575,6 @@ async function remoteFromTranscript($: EngineInterface): Promise<boolean | undef
   return state
 }
 
-const DELEGATE_TOOL = 'delegate'
-const UPDATE_TOOL = 'delegation_update'
 const STATUS_TOOL = 'status'
 const SHOW_TOOL = 'show'
 const PROGRESS_TOOL = 'progress'
@@ -683,33 +600,9 @@ function progressNudgeText(now: number): string | undefined {
     : `<system-reminder>${NUDGE_TAG}: this turn has run ${secs} s with no progress report. If the work goes on, call mcp__openadmiral__progress now with percent and step, and keep reporting at each milestone. Don't mention this reminder.</system-reminder>`
 }
 
-// A delegation call's row: what happened, the result's first line, and whether Claude sends it.
-// Takes the resolved elements, not $ (a hook's $ stays at its call site).
-function delegationRow(ui: { Box: any; Text: any }, card: ReturnType<typeof delegationCard>, running: boolean) {
-  const { Box, Text } = ui
-  if (running) {
-    return (
-      <Box paddingX={1}>
-        <Text dimColor>⇄ {card.head}…</Text>
-      </Box>
-    )
-  }
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
-      <Box gap={1}>
-        <Text color="#a9c1ff">⇄</Text>
-        <Text bold>{card.head}</Text>
-      </Box>
-      {card.detail ? <Text dimColor>{card.detail}</Text> : null}
-      {card.warn ? <Text color="#e0a030">{card.warn}</Text> : null}
-    </Box>
-  )
-}
-
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await admiralRoot($)
-    pluginSendsBlocked = false
     const sessionId = await $.session.id()
     const now = await $.clock.now()
     let previous: Partial<AdmiralSession> = {}
@@ -733,43 +626,9 @@ export const register: Register = on => {
     for (const t of me.tasks ?? []) todoIds.set(t.id, t)
 
     await $.tool.register({
-      name: DELEGATE_TOOL,
-      isDeferred: false,
-      description:
-        'Delegate a piece of work to another Claude Code session (a peer working in another project, e.g. the MCP server or auth service) and track it on the OpenAdmiral board. ' +
-        'Use this instead of a bare SendMessage when you hand off work you depend on. The recipient receives the brief plus the delegation id and reports progress with delegation_update. ' +
-        'Write a self-contained brief: scope, files/APIs involved, acceptance checks, and what to report back (commit hash, PR, endpoint).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: 'Recipient address as SendMessage takes it (the peer session name from ListAgents).' },
-          title: { type: 'string', description: 'Short imperative title, e.g. "Add scopes claim to MCP auth tokens".' },
-          detail: { type: 'string', description: 'The full self-contained brief.' },
-          dependsOn: { type: 'array', items: { type: 'string' }, description: 'Ids of other delegations this one waits on.' },
-        },
-        required: ['to', 'title', 'detail'],
-      },
-    })
-    await $.tool.register({
-      name: UPDATE_TOOL,
-      isDeferred: false,
-      description:
-        'Report progress on an OpenAdmiral delegation (an id like dlg_xxxxxxxx you received or sent). Call it when you accept the work, start, get blocked, finish (with a result: commit hash, PR, what changed) or cancel. The other side is notified.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string' },
-          status: { type: 'string', enum: DELEGATION_STATUSES },
-          note: { type: 'string', description: 'What changed, or what is blocking.' },
-          result: { type: 'string', description: 'On done: the outcome to hand back.' },
-        },
-        required: ['id', 'status'],
-      },
-    })
-    await $.tool.register({
       name: STATUS_TOOL,
       description:
-        'List the Claude Code sessions on this machine (project, branch, status, current task) and the open OpenAdmiral delegations, to decide whom to delegate to or what you are waiting on.',
+        'List the Claude Code sessions on this machine (project, branch, status, current task), to decide whom to message with SendMessage or what you are waiting on.',
       inputSchema: { type: 'object', properties: {} },
     })
     await $.tool.register({
@@ -893,7 +752,6 @@ export const register: Register = on => {
     const ran = await next(e)
     if ('deny' in ran && ran.deny !== undefined) return ran
     if (me?.status === 'waiting') touch($, { status: 'working', waiting: undefined })
-    if (!mine) await markStarted($).catch(() => undefined)
 
     if (tool === 'TodoWrite' && Array.isArray(args.todos)) {
       const todos = args.todos as { content: string; status: TaskStatus; activeForm: string }[]
@@ -923,101 +781,14 @@ export const register: Register = on => {
       await refreshSubagents($)
     } else if (tool === 'SendMessage') {
       await log($, 'sent', `→ ${String(args.to)}: ${String(args.summary ?? args.message ?? '')}`)
-      for (const id of new Set(String(args.message ?? '').match(/\bdlg_[a-z0-9]{8}\b/g) ?? [])) {
-        const d = await readDelegation($, id)
-        if (d?.status === 'draft') {
-          d.status = 'sent'
-          d.to = { ...d.to, address: String(args.to) }
-          d.notes.push({ at: await $.clock.now(), by: me?.project ?? '', status: 'sent', text: 'delivered with SendMessage' })
-          await writeDelegation($, d)
-        } else if (d?.status === 'accepted' && me && d.to.sessionId === me.sessionId) {
-          // The recipient writing about it means the work has started, even if its
-          // model never called delegation_update.
-          d.status = 'in_progress'
-          d.notes.push({ at: await $.clock.now(), by: me.project, status: 'in_progress', text: clip(String(args.summary ?? args.message ?? ''), 200) })
-          await writeDelegation($, d)
-        }
-      }
     }
     return ran
   }).catch(($, e, next) => next(e))
-
-  on('tool.call', { tool: 'mcp__openadmiral__delegate' }, async ($, e) => {
-    if (!me) return { deny: 'OpenAdmiral is not ready yet' }
-    const args = e as unknown as { to: string; title: string; detail: string; dependsOn?: string[] }
-    const now = await $.clock.now()
-    const d: AdmiralDelegation = {
-      v: 1,
-      id: newId(),
-      title: clip(args.title, 120),
-      detail: args.detail,
-      from: { sessionId: me.sessionId, project: me.project },
-      to: { address: args.to },
-      status: 'draft',
-      dependsOn: args.dependsOn?.length ? args.dependsOn : undefined,
-      notes: [],
-      createdAt: now,
-      updatedAt: now,
-    }
-    const brief =
-      `[OpenAdmiral delegation ${d.id}] from ${me.project}${me.branch ? ` (${me.branch})` : ''}\n` +
-      `Title: ${d.title}\n\n${d.detail}\n\n` +
-      (d.dependsOn ? `Depends on: ${d.dependsOn.join(', ')}\n` : '') +
-      `Report progress with the delegation_update tool (id ${d.id}): accepted → in_progress → done (with result) or blocked (with what is missing).`
-    const failure = await deliver($, args.to, brief)
-    if (failure) {
-      // Kept as a draft: the model's own SendMessage (which carries the id) marks it sent.
-      d.notes.push({ at: now, by: me.project, status: 'draft', text: `handed to the agent to send (${clip(failure, 120)})` })
-      await writeDelegation($, d)
-      return answer(
-        `Delegation ${d.id} is recorded but OpenAdmiral could not deliver it (${clip(failure, 160)}). ` +
-          `Send it yourself now with SendMessage to "${args.to}", using exactly this message:\n\n${brief}`,
-      )
-    }
-    d.status = 'sent'
-    await writeDelegation($, d)
-    await log($, 'sent', `⇢ ${args.to}: ${d.title}`)
-    return answer(`Delegated as ${d.id} to ${args.to}. You will be messaged on status changes.`)
-  }).catch(() => ({ deny: 'openadmiral: this tool failed (claude --debug has the reason).' }))
-
-  on('tool.call', { tool: 'mcp__openadmiral__delegation_update' }, async ($, e) => {
-    if (!me) return { deny: 'OpenAdmiral is not ready yet' }
-    const args = e as unknown as { id: string; status: DelegationStatus; note?: string; result?: string }
-    const d = await readDelegation($, args.id)
-    if (!d) return answer(`No delegation ${args.id}.`)
-    const now = await $.clock.now()
-    const isSender = d.from.sessionId === me.sessionId
-    if (!isSender && !d.to.sessionId) d.to = { ...d.to, sessionId: me.sessionId, project: me.project }
-    d.status = args.status
-    if (args.result) d.result = args.result
-    d.notes.push({ at: now, by: me.project, status: args.status, text: args.note ?? args.result ?? '' })
-    await writeDelegation($, d)
-    const counterpart = isSender ? d.to.sessionId ?? d.to.address : d.from.sessionId
-    const text =
-      `[OpenAdmiral delegation ${d.id}] "${d.title}" is now ${d.status} (by ${me.project}).` +
-      (args.note ? `\nNote: ${args.note}` : '') +
-      (args.result ? `\nResult: ${args.result}` : '')
-    const other = isSender ? d.to.project ?? d.to.address : d.from.project
-    const failure = counterpart
-      ? await deliver($, counterpart === d.from.sessionId || counterpart === d.to.sessionId ? { sessionId: counterpart } : counterpart, text)
-      : 'no recipient known'
-    await log($, isSender ? 'sent' : 'received', `${d.id} → ${d.status}`)
-    if (failure) {
-      return answer(
-        `${d.id} is now ${d.status} on the OpenAdmiral board, but OpenAdmiral could not notify ${other} (${clip(failure, 160)}). ` +
-          `Tell them yourself with SendMessage (find the session with ListAgents), using exactly this message:\n\n${text}`,
-      )
-    }
-    return answer(`${d.id} is now ${d.status}; ${other} was notified.`)
-  }).catch(() => ({ deny: 'openadmiral: this tool failed (claude --debug has the reason).' }))
 
   on('tool.call', { tool: 'mcp__openadmiral__status' }, async $ => {
     const now = await $.clock.now()
     const sessions = (await listJson<AdmiralSession>($, `${root}/sessions`)).filter(
       s => s.status !== 'ended' && now - s.updatedAt < 90_000 && !s.sessionId.startsWith('fixture-'),
-    )
-    const delegations = (await listJson<AdmiralDelegation>($, `${root}/delegations`)).filter(
-      d => d.status !== 'done' && d.status !== 'cancelled' && !d.id.startsWith('fixture-'),
     )
     const lines = [
       'Sessions:',
@@ -1027,11 +798,6 @@ export const register: Register = on => {
           (s.turn ? ` — working on: ${s.turn.prompt}` : '') +
           (s.sessionId === me?.sessionId ? ' (you)' : ''),
       ),
-      '',
-      'Open delegations:',
-      ...(delegations.length
-        ? delegations.map(d => `- ${d.id} ${d.from.project} → ${d.to.project ?? d.to.address}: ${d.title} [${d.status}]`)
-        : ['- none']),
     ]
     return answer(lines.join('\n'))
   }).catch(() => ({ deny: 'openadmiral: this tool failed (claude --debug has the reason).' }))
@@ -1067,7 +833,7 @@ export const register: Register = on => {
     const note =
       `The user @mentioned these other Claude Code sessions (OpenAdmiral peers):\n` +
       mentioned.map(p => `- ${p.name} (session ${p.sessionId}): ${describePeer(p, now)}`).join('\n') +
-      `\nIf they ask one of them to do something, hand it over with the OpenAdmiral \`delegate\` tool (to: "<name>") and a self-contained brief; ` +
+      `\nIf they ask one of them to do something, hand it over with SendMessage (to: "<name>") and a self-contained brief; ` +
       `if they ask what they are doing, answer from the line above or call \`status\`.`
     return next({ ...e, context: [...(e.context ?? []), note] })
   }).catch(($, e, next) => next(e))
@@ -1087,39 +853,15 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // A delegation brief: a card with its title and sender; ctrl+o shows the whole brief.
-    const brief = text.match(/^\[OpenAdmiral delegation (dlg_[a-z0-9]{8})\] from ([^\n]*)\nTitle: ([^\n]*)/)
-    if (brief && !expanded) {
-      const { Box, Text } = $.ui.resolve(e)
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor="#5c8bff" paddingX={1}>
-          <Box gap={1}>
-            <Text color="#a9c1ff">⇄</Text>
-            <Text bold>{brief[3]}</Text>
-          </Box>
-          <Text dimColor>Delegation from {brief[2]} · {brief[1]} · ctrl+o for the brief</Text>
-        </Box>
-      )
-    }
     return next(e)
   })
 
-  // Delegation calls: a card instead of every argument and the plugin's long answer.
   // Progress reports are for the app's bar, not for reading: hidden in the chat unless the
   // person turns them on (OpenAdmiral menu → Show Progress Reports in Chat).
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__progress' } }, ($, e, next) => {
     if (showProgressCalls || e.props.isErrored) return next(e)
     const { Box } = $.ui.resolve(e)
     return <Box />
-  })
-
-  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__delegate' } }, ($, e, next) => {
-    if (e.props.isErrored || e.props.isInterrupted) return next(e)
-    return delegationRow($.ui.resolve(e), delegationCard('delegate', e.props.input, e.props.output), e.props.isRunning)
-  })
-  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__delegation_update' } }, ($, e, next) => {
-    if (e.props.isErrored || e.props.isInterrupted) return next(e)
-    return delegationRow($.ui.resolve(e), delegationCard('delegation_update', e.props.input, e.props.output), e.props.isRunning)
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__openadmiral__show' } }, ($, e, next) => {
@@ -1262,16 +1004,6 @@ export const register: Register = on => {
   on('session.receive', async ($, e, next) => {
     if (e.origin.kind === 'peer' || e.origin.kind === 'peer-send-message' || e.origin.kind === 'coordinator') {
       await log($, 'received', e.text)
-      // A delegation brief reached its recipient: on the board it is accepted from now on,
-      // not "sent" until the recipient's model gets round to delegation_update.
-      const id = e.text.match(/\[OpenAdmiral delegation (dlg_[a-z0-9]{8})\] from /)?.[1]
-      const d = id && me ? await readDelegation($, id) : undefined
-      if (d && me && d.from.sessionId !== me.sessionId && (d.status === 'sent' || d.status === 'draft')) {
-        d.status = 'accepted'
-        d.to = { ...d.to, sessionId: me.sessionId, project: me.project }
-        d.notes.push({ at: await $.clock.now(), by: me.project, status: 'accepted', text: 'received' })
-        await writeDelegation($, d)
-      }
     }
     return next(e)
   }).catch(($, e, next) => next(e))

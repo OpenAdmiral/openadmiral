@@ -46,24 +46,6 @@ export type AdmiralSession = {
   hasTranscript?: boolean;
 };
 
-/** `draft`: recorded but not delivered yet (the send is still waiting on auto mode's classifier). */
-export type DelegationStatus = "draft" | "sent" | "accepted" | "in_progress" | "blocked" | "done" | "cancelled";
-
-export type AdmiralDelegation = {
-  v: 1;
-  id: string;
-  title: string;
-  detail: string;
-  from: { sessionId: string; project: string; name?: string };
-  to: { address: string; sessionId?: string; project?: string };
-  status: DelegationStatus;
-  dependsOn?: string[];
-  notes: { at: number; by: string; status?: DelegationStatus; text: string }[];
-  result?: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
 /** One row of `claude agents --json`. */
 export type CliAgent = {
   pid: number;

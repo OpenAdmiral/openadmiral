@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collect, fold, search } from "./search";
-import type { Agent, AdmiralDelegation } from "./types";
+import type { Agent } from "./types";
 
 const agent = (id: string, name: string, project: string, prompts: string[] = []): Agent =>
   ({
@@ -15,8 +15,7 @@ const agent = (id: string, name: string, project: string, prompts: string[] = []
   }) as Agent;
 
 const agents = [agent("a1", "checkout-redesign", "app", ["Añade el botón de Apple Pay"]), agent("b2", "rate-limits", "api", ["Per-key rate limiting"])];
-const delegations = [{ v: 1, id: "dlg_ab12cd34", title: "Return 429 with Retry-After", detail: "", from: { sessionId: "b2", project: "api" }, to: { address: "app", project: "app" }, status: "done", notes: [], createdAt: 1, updatedAt: 5 }] as AdmiralDelegation[];
-const hits = collect(agents, delegations, [], { a1: { queue: { v: 1, paused: false, items: [{ id: "q1", text: "Run the e2e suite" } as never] } } }, [{ key: "/x/app", label: "app" }]);
+const hits = collect(agents, [], { a1: { queue: { v: 1, paused: false, items: [{ id: "q1", text: "Run the e2e suite" } as never] } } }, [{ key: "/x/app", label: "app" }]);
 
 describe("search", () => {
   it("folds case and accents", () => {
@@ -24,9 +23,8 @@ describe("search", () => {
     expect(search(hits, "boton apple").map((h) => h.section)).toEqual(["Prompts"]);
   });
 
-  it("finds agents, delegations, queued prompts and actions", () => {
+  it("finds agents, queued prompts and actions", () => {
     expect(search(hits, "rate")[0]).toMatchObject({ section: "Agents", title: "rate-limits" });
-    expect(search(hits, "429")[0]).toMatchObject({ section: "Delegations", target: { kind: "view", view: "delegations" } });
     expect(search(hits, "e2e")[0]).toMatchObject({ section: "Up next", detail: "checkout-redesign" });
     expect(search(hits, "new agent app").find((h) => h.section === "Actions")).toMatchObject({ target: { kind: "new-agent", cwd: "/x/app" } });
     expect(search(hits, "costs")[0]).toMatchObject({ target: { kind: "view", view: "costs" } });

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { search, type Hit, type Target } from "@/lib/search";
 import { ago, cn } from "@/lib/utils";
 
-/** ⌘K: search agents, prompts, delegations, artifacts and Up next, and jump to what you pick. */
+/** ⌘K: search agents, prompts, artifacts and Up next, and jump to what you pick. */
 export function CommandPalette({ open, initialQuery = "", hits, onClose, onPick }: { open: boolean; initialQuery?: string; hits: Hit[]; onClose: () => void; onPick: (t: Target) => void }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -68,7 +68,7 @@ export function CommandPalette({ open, initialQuery = "", hits, onClose, onPick 
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKey}
-                placeholder="Search agents, prompts, delegations, artifacts…"
+                placeholder="Search agents, prompts, artifacts…"
                 spellCheck={false}
                 className="h-12 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-3 focus:outline-none"
               />

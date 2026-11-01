@@ -106,8 +106,8 @@ pub fn needs_session_now(queue: &Value, sent: &[Value], now: i64) -> bool {
 /// Queued work that will start within `window` ms (Underway keeps the Mac awake for
 /// it): Run now pending, a plain item when its session is running (`live`: it runs
 /// as soon as that session is idle; a closed one is not woken for it), or a
-/// time/schedule item due by then. Items gated on a delegation or another
-/// session wait on agents that are working, which count on their own.
+/// time/schedule item due by then. Items gated on another session wait on
+/// agents that are working, which count on their own.
 pub fn work_ahead(queue: &Value, sent: &[Value], now: i64, window: i64, live: bool) -> bool {
     if queue.get("paused").and_then(Value::as_bool) == Some(true) {
         return false;
@@ -118,9 +118,11 @@ pub fn work_ahead(queue: &Value, sent: &[Value], now: i64, window: i64, live: bo
             && i.get("text").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty());
         active && (run_now_pending(i, sent)
             || match kind(i) {
-                None => live && !is_done(i, sent),
                 Some("time") | Some("schedule") => next_due(i, sent).is_some_and(|due| due <= now + window),
-                _ => false,
+                Some("session-idle") => false,
+                // No condition, or one that no longer exists (old items queued to run after a
+                // delegation, a feature since removed): a plain item, as the mod treats it.
+                _ => live && !is_done(i, sent),
             })
     })
 }
@@ -324,8 +326,10 @@ mod tests {
         let later = json!({ "items": [{ "id": "q_t", "text": "x", "createdAt": 0, "after": { "kind": "time", "at": t + 2 * 3600_000 } }] });
         assert!(!work_ahead(&later, &[], t, 3600_000, true));
         assert!(work_ahead(&later, &[], t + 3600_000, 3600_000, false));
-        let gated = json!({ "items": [{ "id": "q_d", "text": "x", "createdAt": 0, "after": { "kind": "delegation", "id": "dlg_1", "status": ["done"] } }] });
+        let gated = json!({ "items": [{ "id": "q_d", "text": "x", "createdAt": 0, "after": { "kind": "session-idle", "sessionId": "s" } }] });
         assert!(!work_ahead(&gated, &[], t, 3600_000, true));
+        let retired = json!({ "items": [{ "id": "q_o", "text": "x", "createdAt": 0, "after": { "kind": "retired", "id": "x", "status": ["done"] } }] });
+        assert!(work_ahead(&retired, &[], t, 0, true)); // a condition kind that no longer exists: plain
         let paused = json!({ "paused": true, "items": [{ "id": "q_p", "text": "y", "createdAt": 0 }] });
         assert!(!work_ahead(&paused, &[], t, 0, true));
     }

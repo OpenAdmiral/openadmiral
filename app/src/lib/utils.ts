@@ -95,7 +95,7 @@ export function fillText(v: number | undefined) {
 
 /** Deterministic hue per project, so a project keeps its color everywhere. */
 /**
- * A project's color, the same everywhere (sidebar, Costs, Delegations, Artifacts):
+ * A project's color, the same everywhere (sidebar, Costs, Artifacts):
  * the n-th project in the sidebar takes the n-th chart series color. Projects past
  * the palette, or not in the sidebar, fall back to a hue from the name.
  */

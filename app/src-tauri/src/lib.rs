@@ -136,7 +136,7 @@ struct DevEnv {
     tab: Option<String>,
     /// Preview only: menu item ids to fire at start, comma-separated (`agent:remove:<sessionId>`).
     debug_menu: Option<String>,
-    /// Preview only: open on this view (delegations, costs, artifacts) / with the sidebar as a rail.
+    /// Preview only: open on this view (agents, costs, artifacts) / with the sidebar as a rail.
     view: Option<String>,
     rail: bool,
     /// Preview only: start with the inspector hidden (OPENADMIRAL_INSPECTOR_HIDDEN).
@@ -191,7 +191,6 @@ pub fn admiral_dir() -> PathBuf {
 #[derive(Serialize, Clone)]
 struct Snapshot {
     sessions: Vec<Value>,
-    delegations: Vec<Value>,
     /// sessionId → { queue, sent }: the user's queued prompts and what the mod submitted.
     queues: serde_json::Map<String, Value>,
     artifacts: Vec<Value>,
@@ -250,36 +249,6 @@ fn queue_save(session_id: String, mut queue: Value) -> Result<(), String> {
     std::fs::rename(tmp, path).map_err(|e| e.to_string())
 }
 
-/// The user closes a delegation by hand (done or cancelled), e.g. one whose agents are gone.
-/// Same shape the mod writes: status, a note saying who and why, updatedAt.
-#[tauri::command]
-fn delegation_close(id: String, status: String, note: String) -> Result<(), String> {
-    if preview() {
-        return Ok(());
-    }
-    if !id.starts_with("dlg_") || !id[4..].chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err("bad delegation id".into());
-    }
-    if status != "done" && status != "cancelled" {
-        return Err("status must be done or cancelled".into());
-    }
-    let dir = admiral_dir().join("delegations");
-    let path = dir.join(format!("{id}.json"));
-    let mut d: Value = serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-    d["status"] = Value::from(status.clone());
-    d["updatedAt"] = Value::from(now);
-    if !d["notes"].is_array() {
-        d["notes"] = Value::Array(vec![]);
-    }
-    if let Some(notes) = d["notes"].as_array_mut() {
-        notes.push(serde_json::json!({ "at": now, "by": "OpenAdmiral", "status": status, "text": note }));
-    }
-    let tmp = dir.join(format!(".{id}.json.tmp"));
-    std::fs::write(&tmp, serde_json::to_string_pretty(&d).unwrap_or_default()).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
-}
-
 pub(crate) fn read_dir_json(dir: &Path) -> Vec<Value> {
     let Ok(entries) = std::fs::read_dir(dir) else { return vec![] };
     entries
@@ -298,7 +267,6 @@ fn load_snapshot() -> Snapshot {
     Snapshot {
         // A session without a transcript never ran as a real session (see isPhantom in the UI).
         sessions: session_files::all(),
-        delegations: read_dir_json(&dir.join("delegations")),
         queues: read_queues(&dir.join("queue")),
         artifacts: artifacts::read_all(),
         requests: read_requests(&dir.join("requests")),
@@ -1010,7 +978,6 @@ fn watch_admiral(app: AppHandle) {
     std::thread::spawn(move || {
         let dir = admiral_dir();
         let _ = std::fs::create_dir_all(dir.join("sessions"));
-        let _ = std::fs::create_dir_all(dir.join("delegations"));
         let (tx, rx) = mpsc::channel();
         let Ok(mut watcher) = notify::recommended_watcher(tx) else { return };
         if watcher.watch(&dir, RecursiveMode::Recursive).is_err() {
@@ -1047,9 +1014,6 @@ fn watch_admiral(app: AppHandle) {
                 if !upsert.is_empty() || !remove.is_empty() {
                     delta.insert("sessions".into(), serde_json::json!({ "upsert": upsert, "remove": remove }));
                 }
-            }
-            if touched("delegations") {
-                delta.insert("delegations".into(), Value::Array(read_dir_json(&dir.join("delegations"))));
             }
             if touched("queue") {
                 delta.insert("queues".into(), Value::Object(read_queues(&dir.join("queue"))));
@@ -1316,7 +1280,6 @@ pub fn run() {
             reveal_path,
             queue_save,
             scheduler::queue_move,
-            delegation_close,
             artifacts::artifact_text,
             artifacts::artifact_action,
             artifacts::browser_open,

@@ -1,4 +1,4 @@
-import { DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { DollarLinearIcon, KeyboardLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { useEffect, useRef } from "react";
 import { slotOf, spaceKey, type Group, type Node as TreeNode } from "@/lib/order";
 import { popupMenu } from "@/lib/menu";
@@ -19,7 +19,6 @@ type Props = {
   onSelect: (v: View) => void;
   onExpand: () => void;
   onShortcuts: () => void;
-  openDelegations: number;
   scheduledCount?: number;
   actions: AgentActions;
   onClearEnded: () => void;
@@ -31,12 +30,11 @@ type Props = {
  * grouped by project, three nav icons, the expand button at the bottom.
  * Everything else is in the tooltips, which appear at once.
  */
-export function Rail({ groups, tree, onFloatView, view, onSelect, onExpand, onShortcuts, openDelegations, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
+export function Rail({ groups, tree, onFloatView, view, onSelect, onExpand, onShortcuts, scheduledCount = 0, actions, onClearEnded, onResetOrder }: Props) {
   // The same right-click menus as the full sidebar.
   const menus = listMenus(actions, { onClearEnded, onResetOrder });
-  const nav: { kind: "agents" | "delegations" | "queue" | "costs" | "artifacts"; icon: typeof RoutingLinearIcon; label: string; kbd: string; badge: boolean }[] = [
+  const nav: { kind: "agents" | "queue" | "costs" | "artifacts"; icon: typeof StructureLinearIcon; label: string; kbd: string; badge: boolean }[] = [
     { kind: "agents", icon: StructureLinearIcon, label: "Agents", kbd: "⌘E", badge: false },
-    { kind: "delegations", icon: RoutingLinearIcon, label: "Delegations", kbd: "⌘D", badge: openDelegations > 0 },
     { kind: "queue", icon: PlaylistMinimalisticLinearIcon, label: "Up next", kbd: "⌘J", badge: scheduledCount > 0 },
     { kind: "costs", icon: DollarLinearIcon, label: "Costs", kbd: "⌘U", badge: false },
     { kind: "artifacts", icon: GalleryLinearIcon, label: "Artifacts", kbd: "⌘G", badge: false },

@@ -15,20 +15,5 @@ export function parseAnswer(output: unknown) {
   return m ? { version: Number(m[1]), kind: m[2]! } : undefined
 }
 
-/** What a delegation tool call draws in the chat: one line of what happened, one of detail. */
-export function delegationCard(tool: 'delegate' | 'delegation_update', input: unknown, output: unknown): { head: string; detail?: string; warn?: string } {
-  const args = (input ?? {}) as { to?: string; title?: string; id?: string; status?: string; note?: string; result?: string }
-  const text = typeof output === 'string' ? output : JSON.stringify(output ?? '')
-  const first = (s?: string) => s?.split('\n')[0]?.trim() || undefined
-  // The plugin could not deliver it: Claude sends it itself, which the next row shows.
-  const unsent = text.match(/could not (?:deliver it|notify ([^(]+?)) \(/)
-  const warn = unsent ? `OpenAdmiral could not deliver it${unsent[1] ? ` to ${unsent[1].trim()}` : ''}: Claude sends it with SendMessage` : undefined
-  if (tool === 'delegate') {
-    const id = text.match(/\b(dlg_[a-z0-9]{8})\b/)?.[1]
-    return { head: `Delegated “${args.title ?? 'work'}” to ${args.to ?? 'another session'}`, detail: id, warn }
-  }
-  return { head: `${args.id ?? 'Delegation'} → ${args.status ?? 'updated'}`, detail: first(args.result) ?? first(args.note), warn }
-}
-
 /** Whether a session whose root is `cwd` is inside the repo at `root`. */
 export const repoHolds = (root: string, cwd: string) => cwd === root || cwd.startsWith(`${root.replace(/\/$/, '')}/`)

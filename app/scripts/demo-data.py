@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake OpenAdmiral data for screenshots: a made-up team of sessions, delegations,
+"""Fake OpenAdmiral data for screenshots: a made-up team of sessions,
 artifacts and queued prompts, written under <home>/openadmiral (see docs/CONTRACT.md).
 
     python3 app/scripts/demo-data.py /tmp/demo-home          # write once
@@ -137,37 +137,6 @@ def sessions(now):
     return out
 
 
-def delegations(now):
-    def d(i, title, frm, to, status, notes, mins, result=None, depends=None):
-        x = {
-            "v": 1, "id": f"dlg_demo{i:04d}", "title": title,
-            "detail": f"{title}.\n\nAcceptance: tests pass and the change is documented. Report back the commit hash.",
-            "from": {"sessionId": sid(frm), "project": SESSIONS[frm - 1][2], "name": SESSIONS[frm - 1][1]},
-            "to": {"address": SESSIONS[to - 1][1], "sessionId": sid(to), "project": SESSIONS[to - 1][2]},
-            "status": status,
-            "notes": [{"at": now - (mins - j * 4) * MIN, "by": SESSIONS[to - 1][1], "status": st, "text": t} for j, (st, t) in enumerate(notes)],
-            "createdAt": now - mins * MIN, "updatedAt": now - max(1, mins - 4 * len(notes)) * MIN,
-        }
-        if result:
-            x["result"] = result
-        if depends:
-            x["dependsOn"] = depends
-        return x
-
-    return [
-        d(1, "Expose an idempotent POST /orders for the new checkout", 1, 3, "in_progress",
-          [("accepted", "On it"), ("in_progress", "Migration ready, waiting for approval to run it")], 25),
-        d(2, "Return 429 with Retry-After from the public API", 3, 4, "done",
-          [("accepted", "Accepted"), ("done", "Shipped behind a flag")], 26 * 60, result="commit 4e1d9b0 on main"),
-        d(3, "Document the new checkout webhooks", 5, 6, "blocked",
-          [("accepted", "Picked up"), ("blocked", "Need to know which SDK version the examples target")], 50),
-        d(4, "Handle payment_intent.requires_action in the app", 5, 7, "done",
-          [("accepted", "Accepted"), ("done", "Shipped in 4.2")], 90, result="commit 8f3c2a1 on release/4.2"),
-        d(6, "Add a minimum app version endpoint", 7, 3, "sent", [], 3),
-        d(5, "Lazy-load the product carousel", 1, 2, "done", [("accepted", "Accepted"), ("done", "Merged")], 30 * 60, result="PR #87 merged"),
-    ]
-
-
 ARCH = """flowchart LR
   web[App] -->|POST /orders| api[Orders API]
   api --> db[(Postgres)]
@@ -220,7 +189,7 @@ def queues(home, now):
         {"id": "q_demo0004", "text": "Run the e2e suite against staging and fix what broke overnight", "createdAt": now - 7 * MIN,
          "after": {"kind": "schedule", "time": "08:00", "days": [1, 2, 3, 4, 5]}, "armedAt": now - 7 * MIN},
         {"id": "q_demo0001", "text": "Wire the saved addresses picker to the new /orders endpoint", "createdAt": now - 9 * MIN,
-         "after": {"kind": "delegation", "id": "dlg_demo0001", "status": ["done"]}},
+         "after": {"kind": "session-idle", "sessionId": sid(3)}},
     ]})
     write(f"{home}/openadmiral/queue/{sid(2)}.json", {"v": 1, "paused": False, "updatedAt": now, "items": [
         {"id": "q_demo0003", "text": "Run Lighthouse on the top 20 product pages and post the report", "createdAt": now - 60 * MIN,
@@ -247,7 +216,7 @@ CHECKOUT = [
     (38, "Go ahead with 1 and 2. Keep the guest checkout. Ask the api session for the idempotent endpoint.", None, [
         ("TaskCreate", {"subject": "Merge address and shipping steps", "activeForm": "Merging address and shipping steps"}, "Task 1 created"),
         ("TaskCreate", {"subject": "Add Apple Pay button", "activeForm": "Adding Apple Pay button"}, "Task 2 created"),
-        ("mcp__openadmiral__delegate", {"to": "orders-api", "title": "Expose an idempotent POST /orders for the new checkout"}, "Delegated as dlg_demo0001"),
+        ("SendMessage", {"to": "orders-api", "summary": "Expose an idempotent POST /orders for the new checkout", "message": "Please expose an idempotent POST /orders for the new checkout."}, "Message sent to orders-api"),
         ("Write", {"file_path": "/Users/demo/code/app/src/checkout/DeliveryForm.tsx"}, "Created DeliveryForm.tsx (126 lines)"),
         ("Edit", {"file_path": "/Users/demo/code/app/src/checkout/CheckoutPage.tsx"}, "Updated with 41 additions and 87 removals"),
         ("Bash", {"command": "pnpm test src/checkout", "description": "Run the checkout tests"}, "✓ 23 passed (1.8s)"),
@@ -378,9 +347,6 @@ def main():
     home = os.path.abspath(sys.argv[1])
     keep = "--keep" in sys.argv
     now = int(time.time() * 1000)
-    delegations_ = delegations(now)
-    for x in delegations_:
-        write(f"{home}/openadmiral/delegations/{x['id']}.json", x)
     artifacts(home, now)
     queues(home, now)
     transcripts(home, now)

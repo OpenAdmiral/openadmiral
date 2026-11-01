@@ -151,12 +151,10 @@ left before the limit, always in view.
     <td align="center"><b>Read the log.</b> The whole conversation, every prompt, tool call and reply, searchable even when you were never attached.</td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/delegations-light.png" alt="Work handed between agents, from sent to done"></td>
-    <td><img src="docs/screenshots/artifacts-light.png" alt="A report an agent published, with its versions"></td>
+    <td colspan="2"><img src="docs/screenshots/artifacts-light.png" alt="A report an agent published, with its versions"></td>
   </tr>
   <tr>
-    <td align="center"><b>Watch the crew coordinate.</b> Work handed between agents, from sent to done, and what is blocked on whom.</td>
-    <td align="center"><b>Collect the results.</b> What your agents publish for you to see, every version kept.</td>
+    <td colspan="2" align="center"><b>Collect the results.</b> What your agents publish for you to see, every version kept.</td>
   </tr>
 </table>
 
@@ -297,7 +295,7 @@ OpenAdmiral stands on the work of these projects and the people who maintain the
 OpenAdmiral has two parts that only talk through JSON files under `~/.claude/openadmiral/`:
 
 - **`plugin/`**: a Claude Code plugin that runs inside every session, publishes its state
-  and gives agents the `delegate`, `delegation_update`, `status` and `show` tools.
+  and gives agents the `status`, `show` and `progress` tools.
 - **`app/`**: a Tauri 2 + React app that reads those files, embeds terminals and writes
   requests back (queued prompts, hand-offs, renames).
 

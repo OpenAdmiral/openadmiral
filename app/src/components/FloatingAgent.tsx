@@ -19,7 +19,7 @@ const GONE_AFTER_MS = 5000;
 
 /** The whole of a floating window: one agent, with the inspector a shortcut away. */
 export function FloatingAgent({ id }: { id: string }) {
-  const { agents, delegations, now, queues, artifacts, requests, loaded, cliReady, superseded, pluginInstalled } = useAdmiral({ quiet: true });
+  const { agents, now, queues, artifacts, requests, loaded, cliReady, superseded, pluginInstalled } = useAdmiral({ quiet: true });
   const [current, setCurrent] = useState(id);
   const [inspectorHidden, setInspectorHidden] = useState(true);
   const [preview, setPreview] = useState(false);
@@ -80,9 +80,7 @@ export function FloatingAgent({ id }: { id: string }) {
         {agent ? (
           <AgentDetail
             agent={agent}
-            delegations={delegations}
             now={now}
-            onOpenDelegations={() => {}}
             handoff={handoffs.find((h) => h.sessionId === agent.id)}
             request={requests[agent.id]}
             inspectorHidden={inspectorHidden}

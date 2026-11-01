@@ -1,14 +1,12 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { delegationCard, repoHolds } from '../hooks/card'
+import { repoHolds } from '../hooks/card'
 
-// Stands in for the machine: an in-memory ~/.claude/openadmiral and a recorded peer inbox.
+// Stands in for the machine: an in-memory ~/.claude/openadmiral.
 function engine(
   on: On,
   sessionId: string | (() => string),
   files: Map<string, string>,
-  sent: { to: unknown; text: string }[],
-  deliveries: ('ok' | 'no-verdict')[] = [],
   agents: unknown[] = [],
   contextPercent = 0,
   shell?: (argv: readonly string[]) => void,
@@ -41,12 +39,6 @@ function engine(
       .filter(p => p.startsWith(prefix))
       .map(p => ({ name: p.slice(prefix.length), kind: 'file' as const, size: 0, mtimeMs: 0, isLink: false })) }
   })
-  on('session.send', (_$, e) => {
-    sent.push({ to: e.to, text: e.text })
-    if (deliveries.shift() === 'no-verdict')
-      return { isDelivered: false as const, reason: 'The server-side auto mode classifier gave no verdict for SendMessage. Issue the action again once, as-is' }
-    return { isDelivered: true as const }
-  })
   const prompts: string[] = []
   on('prompt.submit', (_$, e) => {
     prompts.push(e.text)
@@ -56,62 +48,16 @@ function engine(
   return { clock, prompts }
 }
 
-test('delegate writes a tracked delegation and briefs the peer', async ($, on) => {
-  const files = new Map<string, string>()
-  const sent: { to: unknown; text: string }[] = []
-  engine(on, 'sess-intel', files, sent)
-  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
-
-  const answer = await $.tool.call({
-    tool: 'mcp__openadmiral__delegate',
-    tool_use_id: 'tu1',
-    to: 'acme-mcp-auth',
-    title: 'Add scopes claim',
-    detail: 'Tokens need a scopes claim.',
-  })
-
-  expect(typeof answer.result).toBe('string')   // plugin tools must answer the model with text
-  const id = String(answer.result).match(/dlg_[a-z0-9]{8}/)![0]
-  const stored = JSON.parse(files.get(`/home/t/.claude/openadmiral/delegations/${id}.json`)!)
-  expect(stored.status).toBe('sent')
-  expect(stored.from.project).toBe('acme-intelligence')
-  expect(sent[0]!.to).toBe('acme-mcp-auth')
-  expect(sent[0]!.text).toContain(id)
-  expect(files.has('/home/t/.claude/openadmiral/sessions/sess-intel.json')).toBe(true)
-})
-
-test('delegation_update from the recipient claims it and notifies the sender', async ($, on) => {
-  const files = new Map<string, string>()
-  const sent: { to: unknown; text: string }[] = []
-  files.set(
-    '/home/t/.claude/openadmiral/delegations/dlg_abc12345.json',
-    JSON.stringify({
-      v: 1, id: 'dlg_abc12345', title: 'Add scopes claim', detail: '', status: 'sent', notes: [],
-      from: { sessionId: 'sess-intel', project: 'acme-intelligence' }, to: { address: 'acme-mcp-auth' },
-      createdAt: 0, updatedAt: 0,
-    }),
-  )
-  engine(on, 'sess-auth', files, sent)
-  await $.session.start({ cwd: '/work/acme-mcp-auth', surface: null, isInteractive: true })
-
-  await $.tool.call({ tool: 'mcp__openadmiral__delegation_update', tool_use_id: 'tu2', id: 'dlg_abc12345', status: 'done', result: 'abc123f' })
-
-  const stored = JSON.parse(files.get('/home/t/.claude/openadmiral/delegations/dlg_abc12345.json')!)
-  expect(stored.status).toBe('done')
-  expect(stored.result).toBe('abc123f')
-  expect(stored.to.sessionId).toBe('sess-auth')
-  expect(sent[0]!.to).toBe('sess-intel')
-})
-
 test('Up next submits the first ready prompt once idle, honouring conditions', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock, prompts } = engine(on, 'sess-intel', files, [])
+  const { clock, prompts } = engine(on, 'sess-intel', files)
   const q = '/home/t/.claude/openadmiral/queue/sess-intel'
-  files.set('/home/t/.claude/openadmiral/delegations/dlg_wait0001.json', JSON.stringify({ id: 'dlg_wait0001', status: 'in_progress' }))
+  const other = '/home/t/.claude/openadmiral/sessions/sess-other.json'
+  files.set(other, JSON.stringify({ sessionId: 'sess-other', status: 'working', updatedAt: clock.now() }))
   files.set(`${q}.json`, JSON.stringify({
     v: 1, paused: false, updatedAt: 0,
     items: [
-      { id: 'q_gated', text: 'Integrate the scope', createdAt: 0, after: { kind: 'delegation', id: 'dlg_wait0001', status: ['done'] } },
+      { id: 'q_gated', text: 'Integrate the scope', createdAt: 0, after: { kind: 'session-idle', sessionId: 'sess-other' } },
       { id: 'q_free', text: 'Run the linter', createdAt: 0 },
     ],
   }))
@@ -124,7 +70,7 @@ test('Up next submits the first ready prompt once idle, honouring conditions', a
   expect(prompts).toEqual(['Run the linter'])   // the gated one waits; the free one goes
   expect(JSON.parse(files.get(`${q}.sent.json`)!).sent.map((s: { id: string }) => s.id)).toEqual(['q_free'])
 
-  files.set('/home/t/.claude/openadmiral/delegations/dlg_wait0001.json', JSON.stringify({ id: 'dlg_wait0001', status: 'done' }))
+  files.set(other, JSON.stringify({ sessionId: 'sess-other', status: 'idle', updatedAt: clock.now() }))
   await clock.advance(10_000)
   expect(prompts).toEqual(['Run the linter'])   // no turn finished since: one item per idle period
 
@@ -133,9 +79,21 @@ test('Up next submits the first ready prompt once idle, honouring conditions', a
   expect(prompts).toEqual(['Run the linter', 'Integrate the scope'])
 })
 
+test('an item with a condition kind that no longer exists runs as if it had none', async ($, on) => {
+  const files = new Map<string, string>()
+  const { clock, prompts } = engine(on, 'sess-intel', files)
+  files.set('/home/t/.claude/openadmiral/queue/sess-intel.json', JSON.stringify({
+    v: 1, paused: false, updatedAt: 0,
+    items: [{ id: 'q_old', text: 'Integrate the scope', createdAt: 0, after: { kind: 'retired', id: 'x', status: ['done'] } }],
+  }))
+  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
+  await clock.advance(4_000)
+  expect(prompts).toEqual(['Integrate the scope'])
+})
+
 test('show stores versioned artifacts and the prompt tells the model to use it', async ($, on) => {
   const files = new Map<string, string>()
-  engine(on, 'sess-ai', files, [])
+  engine(on, 'sess-ai', files)
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'base', scope: 'shared' as const }] }))
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
 
@@ -154,97 +112,10 @@ test('show stores versioned artifacts and the prompt tells the model to use it',
   expect(without.sections.map(s => s.id)).toEqual(['intro'])
 })
 
-test('an undelivered delegation stays a draft until the model sends it itself', async ($, on) => {
-  const files = new Map<string, string>()
-  const sent: { to: unknown; text: string }[] = []
-  engine(on, 'sess-intel', files, sent, ['no-verdict', 'no-verdict'])
-  on('tool.call', { tool: 'SendMessage' }, () => ({ result: { success: true } as never }))
-  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
-
-  const answer = await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu1', to: 'mcp-b3', title: 'T', detail: 'D' })
-  expect(sent.length).toBe(2)                       // retried once after "no verdict"
-  const text = String(answer.result)
-  const id = text.match(/dlg_[a-z0-9]{8}/)![0]
-  expect(text).toContain('SendMessage')
-  const path = `/home/t/.claude/openadmiral/delegations/${id}.json`
-  expect(JSON.parse(files.get(path)!).status).toBe('draft')
-
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'tu2', to: 'mcp-b3', message: `[OpenAdmiral delegation ${id}] …` })
-  expect(JSON.parse(files.get(path)!).status).toBe('sent')
-})
-
-test('after a send auto mode kept undecided, the next delegation goes straight to the model', async ($, on) => {
-  const files = new Map<string, string>()
-  const sent: { to: unknown; text: string }[] = []
-  engine(on, 'sess-intel', files, sent, ['no-verdict', 'no-verdict'])
-  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
-  await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu1', to: 'mcp-b3', title: 'T1', detail: 'D' })
-  const second = await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu2', to: 'mcp-b3', title: 'T2', detail: 'D' })
-  expect(sent.length).toBe(2)                       // no new attempts for the second one
-  expect(String(second.result)).toContain('SendMessage')
-})
-
-test('a delegation brief reaching its recipient marks it accepted', async ($, on) => {
-  const files = new Map<string, string>()
-  engine(on, 'sess-mcp', files, [])
-  on('session.receive', (_$, e) => ({ text: e.text }))
-  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
-  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
-  files.set(path, JSON.stringify({
-    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
-    to: { address: 'acme-mcp-server' }, status: 'sent', notes: [], createdAt: 0, updatedAt: 0,
-  }))
-  await $.session.receive({ text: '[OpenAdmiral delegation dlg_abcd1234] from acme-intelligence\nTitle: T', origin: { kind: 'peer' } } as never)
-  const d = JSON.parse(files.get(path)!)
-  expect(d.status).toBe('accepted')
-  expect(d.to.sessionId).toBe('sess-mcp')
-})
-
-test('the recipient writing about an accepted delegation moves it to in progress', async ($, on) => {
-  const files = new Map<string, string>()
-  engine(on, 'sess-mcp', files, [])
-  on('tool.call', { tool: 'SendMessage' }, () => ({ result: { success: true } as never }))
-  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
-  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
-  files.set(path, JSON.stringify({
-    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
-    to: { address: 'acme-mcp-server', sessionId: 'sess-mcp', project: 'acme-mcp-server' }, status: 'accepted', notes: [], createdAt: 0, updatedAt: 0,
-  }))
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'tu1', to: 'acme-intelligence', summary: 'Building it', message: 'dlg_abcd1234: building the endpoint now' })
-  expect(JSON.parse(files.get(path)!).status).toBe('in_progress')
-})
-
-test('an accepted delegation goes in progress once a later turn uses tools', async ($, on) => {
-  const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-mcp', files, [])
-  on('tool.call', { tool: 'Read' }, () => ({ result: 'ok' as never }))
-  on('turn.start', (_$, e) => ({ ...e }) as never)
-  await $.session.start({ cwd: '/work/acme-mcp-server', surface: null, isInteractive: true })
-  const path = '/home/t/.claude/openadmiral/delegations/dlg_abcd1234.json'
-  const accepted = (at: number) => JSON.stringify({
-    v: 1, id: 'dlg_abcd1234', title: 'T', detail: 'D', from: { sessionId: 'sess-intel', project: 'acme-intelligence' },
-    to: { address: 'acme-mcp-server', sessionId: 'sess-mcp', project: 'acme-mcp-server' }, status: 'accepted',
-    notes: [{ at, by: 'acme-mcp-server', status: 'accepted', text: 'received' }], createdAt: 0, updatedAt: at,
-  })
-  // Arrived during other work: the turn already running does not count.
-  await $.turn.start({ text: 'something else', turnId: 't1' })
-  await clock.advance(60_000)
-  files.set(path, accepted(60_000))
-  await $.tool.call({ tool: 'Read', tool_use_id: 'tu1', file_path: '/x' } as never)
-  expect(JSON.parse(files.get(path)!).status).toBe('accepted')
-  // The turn that takes it up does.
-  await clock.advance(30_000)
-  await $.turn.start({ text: '[OpenAdmiral delegation dlg_abcd1234] from acme-intelligence', turnId: 't2' })
-  await $.tool.call({ tool: 'Read', tool_use_id: 'tu2', file_path: '/x' } as never)
-  const d = JSON.parse(files.get(path)!)
-  expect(d.status).toBe('in_progress')
-  expect(d.notes.at(-1).text).toBe('working on it')
-})
-
 test("@ shows one row per session: Claude Code's own, described by OpenAdmiral", async ($, on) => {
   const files = new Map<string, string>()
   const agents = [{ sessionId: 'sess-web', name: 'Acme Website', cwd: '/work/acme-website', status: 'idle' }]
-  engine(on, 'sess-intel', files, [], [], agents)
+  engine(on, 'sess-intel', files, agents)
   on('prompt.autocomplete', () => ({ suggestions: [{ text: '@README.md' }, { text: '@"Acme Website"', label: '@"Acme Website"', description: 'message session · on this machine' }] }))
   files.set('/home/t/.claude/openadmiral/sessions/sess-web.json', JSON.stringify({ sessionId: 'sess-web', project: 'acme-website', branch: 'landing', status: 'idle', updatedAt: 0 }))
   await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
@@ -257,21 +128,12 @@ test("@ shows one row per session: Claude Code's own, described by OpenAdmiral",
 
 test('the session file says when this plugin was loaded, for the app to spot stale ones', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-x', files, [])
+  const { clock } = engine(on, 'sess-x', files)
   await clock.advance(5_000)
   await $.session.start({ cwd: '/work/acme', surface: null, isInteractive: true })
   await clock.advance(1_000)
   const s = JSON.parse(files.get('/home/t/.claude/openadmiral/sessions/sess-x.json')!)
   expect(s.plugin.loadedAt).toBeGreaterThanOrEqual(5_000)
-})
-
-test('a retried send that gets through marks the delegation sent', async ($, on) => {
-  const files = new Map<string, string>()
-  engine(on, 'sess-intel', files, [], ['no-verdict', 'ok'])
-  await $.session.start({ cwd: '/work/acme-intelligence', surface: null, isInteractive: true })
-  const answer = await $.tool.call({ tool: 'mcp__openadmiral__delegate', tool_use_id: 'tu1', to: 'mcp-b3', title: 'T', detail: 'D' })
-  const id = String(answer.result).match(/dlg_[a-z0-9]{8}/)![0]
-  expect(JSON.parse(files.get(`/home/t/.claude/openadmiral/delegations/${id}.json`)!).status).toBe('sent')
 })
 
 test('@ lists live peers with what they are doing, and a mention briefs the model', async ($, on) => {
@@ -281,7 +143,7 @@ test('@ lists live peers with what they are doing, and a mention briefs the mode
     { sessionId: 'sess-mcp', name: 'acme-mcp-server-b3', cwd: '/work/acme-mcp-server', status: 'busy' },
     { sessionId: 'sess-auth', name: 'acme-auth-61', cwd: '/work/acme-auth', status: 'idle' },
   ]
-  engine(on, 'sess-intel', files, [], [], agents)
+  engine(on, 'sess-intel', files, agents)
   on('prompt.autocomplete', () => ({ suggestions: [{ text: '@README.md' }] }))
   files.set('/home/t/.claude/openadmiral/sessions/sess-mcp.json', JSON.stringify({
     sessionId: 'sess-mcp', project: 'acme-mcp-server', branch: 'sandbox', status: 'working',
@@ -297,13 +159,13 @@ test('@ lists live peers with what they are doing, and a mention briefs the mode
   expect(all.suggestions.map(r => r.text)).not.toContain('@acme-intelligence-f3')   // never yourself
 
   const submitted = (await $.prompt.submit({ text: '@acme-auth-61 add the scope', wait: false } as never)) as unknown as { context?: string[] }
-  expect(submitted.context?.join('\n')).toContain('delegate')
+  expect(submitted.context?.join('\n')).toContain('SendMessage')
   expect(submitted.context?.join('\n')).toContain('acme-auth-61')
 })
 
 test('follows the session out of a removed worktree and keeps the heartbeat alive', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-intel', files, [])
+  const { clock } = engine(on, 'sess-intel', files)
   let cwd = '/work/acme-intelligence/.claude/worktrees/df92bbb3'
   on('session.root', () => ({ value: cwd }))
   await $.session.start({ cwd, surface: null, isInteractive: true })
@@ -319,7 +181,7 @@ test('follows the session out of a removed worktree and keeps the heartbeat aliv
 
 test('a hand-off waits while background agents run, then exits', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   let agents: { id: string; status: string }[] = [{ id: 'a1', status: 'running' }]
   on('agent.list', () => ({ value: agents as never }))
   const commands: string[] = []
@@ -343,7 +205,7 @@ test('a hand-off waits while background agents run, then exits', async ($, on) =
 
 test('a background-task notification is labelled, not shown as raw tags', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   on('turn.start', (_$, e) => ({ ...e }) as never)
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
   await $.turn.start({ text: '<task-notification>\n<task-id>a158</task-id>\n<summary>Agent "Build OpenAdmiral Tauri app" finished</summary>\n</task-notification>', turnId: 't1' })
@@ -354,7 +216,7 @@ test('a background-task notification is labelled, not shown as raw tags', async 
 
 test('subagents come from the engine list, forks and resumed agents included', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   let agents = [{ id: 'fork1', description: 'Build OpenAdmiral Tauri app', type: 'fork', status: 'running' }]
   on('agent.list', () => ({ value: agents as never }))
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
@@ -368,7 +230,7 @@ test('subagents come from the engine list, forks and resumed agents included', a
 
 test('a show call draws as a card whose button opens it in OpenAdmiral', async ($, on) => {
   const files = new Map<string, string>()
-  engine(on, 'sess-ai', files, [])
+  engine(on, 'sess-ai', files)
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
   for (const surface of ['terminal', 'desktop'] as const) {
     files.delete('/home/t/.claude/openadmiral/focus.json')
@@ -396,7 +258,7 @@ test('a show call draws as a card whose button opens it in OpenAdmiral', async (
 
 test('context is also reported as a share of the usable window, like the statusline', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [], [], [], 63)
+  const { clock } = engine(on, 'sess-ai', files, [], 63)
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
   await clock.advance(1_000)
   const ctx = JSON.parse(files.get('/home/t/.claude/openadmiral/sessions/sess-ai.json')!).context
@@ -406,7 +268,7 @@ test('context is also reported as a share of the usable window, like the statusl
 
 test('a chip pressed in OpenAdmiral fills the prompt box, once, and never submits', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock, prompts } = engine(on, 'sess-ai', files, [])
+  const { clock, prompts } = engine(on, 'sess-ai', files)
   const fills: string[] = []
   on('prompt.fill', (_$, e) => {
     fills.push(e.text)
@@ -422,7 +284,7 @@ test('a chip pressed in OpenAdmiral fills the prompt box, once, and never submit
 
 test('remote control state is published from /config and the attached surfaces', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   on('session.surfaces', () => ({ value: ['terminal', 'mobile'] as never }))
   on('config.list', () => ({ value: [{ key: 'remoteControlAtStartup', label: 'Enable Remote Control for all sessions', kind: 'boolean', value: true, provider: { kind: 'engine' }, isLocked: false }] as never }))
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
@@ -433,7 +295,7 @@ test('remote control state is published from /config and the attached surfaces',
 
 test('/remote-control in this session marks Remote Control on, even with the /config default off', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   on('config.list', () => ({ value: [{ key: 'remoteControlAtStartup', label: 'Enable Remote Control for all sessions', kind: 'boolean', value: false, provider: { kind: 'engine' }, isLocked: false }] as never }))
   on('command.run', () => ({ text: '/remote-control is active · Continue here, on your phone, or at https://claude.ai/code/session_x' }))
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
@@ -444,7 +306,7 @@ test('/remote-control in this session marks Remote Control on, even with the /co
 
 test('the bridge_status notice turns the RC chip on', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   await $.session.start({ cwd: '/work/ai-tooling', surface: null, isInteractive: true })
   await $.session.append({
     message: { type: 'system', name: 'bridge_status', content: [{ type: 'text', text: '/remote-control is active · Continue here, on your phone, or at https://claude.ai/code/session_x' }] },
@@ -455,7 +317,7 @@ test('the bridge_status notice turns the RC chip on', async ($, on) => {
 
 test('the app can run /rename outright, but nothing outside the allow-list', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock } = engine(on, 'sess-ai', files, [])
+  const { clock } = engine(on, 'sess-ai', files)
   const ran: string[] = []
   on('command.run', (_$, e) => {
     ran.push(`${e.command} ${e.args}`)
@@ -479,7 +341,7 @@ const LIST = [
 
 test('Up next runs slash commands through command.run and refuses interactive ones', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock, prompts } = engine(on, 'sess-ai', files, [])
+  const { clock, prompts } = engine(on, 'sess-ai', files)
   on('command.list', () => ({ value: LIST as never }))
   const ran: string[] = []
   on('command.run', (_$, e) => {
@@ -519,7 +381,7 @@ test('Up next runs slash commands through command.run and refuses interactive on
 
 test('a timed item waits for its time; a schedule runs once per occurrence and re-arms', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock, prompts } = engine(on, 'sess-ai', files, [])
+  const { clock, prompts } = engine(on, 'sess-ai', files)
   const start = clock.now()
   const q = '/home/t/.claude/openadmiral/queue/sess-ai'
   const at = start + 60_000
@@ -550,7 +412,7 @@ test('a timed item waits for its time; a schedule runs once per occurrence and r
 
 test('Run now sends an item at once, even a gated one', async ($, on) => {
   const files = new Map<string, string>()
-  const { clock, prompts } = engine(on, 'sess-ai', files, [])
+  const { clock, prompts } = engine(on, 'sess-ai', files)
   const q = '/home/t/.claude/openadmiral/queue/sess-ai'
   files.set(`${q}.json`, JSON.stringify({
     v: 1, paused: false, updatedAt: 0,
@@ -579,7 +441,7 @@ test('a queued /clear keeps the rest of the queue: the files follow the new sess
       }
     }
   }
-  const { clock, prompts } = engine(on, () => id, files, [], [], [], 0, shell)
+  const { clock, prompts } = engine(on, () => id, files, [], 0, shell)
   on('command.list', () => ({ value: LIST as never }))
   on('command.run', (_$, e) => {
     if (e.command === 'clear') id = 'sess-new'
@@ -596,21 +458,6 @@ test('a queued /clear keeps the rest of the queue: the files follow the new sess
   expect(files.has(`${dir}/sess-new.json`)).toBe(true)
   expect(JSON.parse(files.get('/home/t/.claude/openadmiral/sessions/sess-old.json')!).supersededBy).toBe('sess-new')
   expect(prompts).toEqual(['Start the next task'])
-})
-
-test('delegation tool calls draw as one line and a detail', () => {
-  const sent = delegationCard('delegate', { to: 'api', title: 'Add rate limits' }, 'Delegated as dlg_ab12cd34 to api. You will be messaged on status changes.')
-  expect(sent).toEqual({ head: 'Delegated “Add rate limits” to api', detail: 'dlg_ab12cd34', warn: undefined })
-  const updated = delegationCard(
-    'delegation_update',
-    { id: 'dlg_cc6f8xq8', status: 'done', note: 'Follow-up', result: 'Fix deployed to sandbox.\nMore lines' },
-    'dlg_cc6f8xq8 is now done on the OpenAdmiral board, but OpenAdmiral could not notify applivery-intelligence (auto mode does not let OpenAdmiral send for this session). Tell them yourself…',
-  )
-  expect(updated).toEqual({
-    head: 'dlg_cc6f8xq8 → done',
-    detail: 'Fix deployed to sandbox.',
-    warn: 'OpenAdmiral could not deliver it to applivery-intelligence: Claude sends it with SendMessage',
-  })
 })
 
 test('a repo only counts when it holds the session folder', () => {

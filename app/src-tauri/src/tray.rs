@@ -3,7 +3,7 @@
 //! The icon stays the plain template glyph (colours read badly on some menu bar
 //! backgrounds); a count beside it says how many agents wait for a permission or
 //! an answer. Everything else is in the menu. Clicking it opens a native menu: who needs you, who is working,
-//! Underway, today's cost and plan, what runs next, open delegations, and the
+//! Underway, today's cost and plan, what runs next, and the
 //! usual Show / New Agent / Quit. It is rebuilt only when what it says changes.
 
 use serde_json::Value;
@@ -24,7 +24,6 @@ pub struct Report {
     pub today: Option<f64>,
     pub plan: Option<String>,
     pub next: Option<String>,
-    pub delegations: (usize, usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,8 +84,8 @@ fn num(v: &Value, k: &str) -> Option<i64> {
     v.get(k).and_then(Value::as_f64).map(|f| f as i64)
 }
 
-/// Builds the report from session files, the CLI listing (names), queues and delegations.
-pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<Value>)], delegations: &[Value], now: i64) -> Report {
+/// Builds the report from session files, the CLI listing (names) and queues.
+pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<Value>)], now: i64) -> Report {
     let name_of = |id: &str, s: &Value| {
         agents
             .as_array()
@@ -189,15 +188,6 @@ pub fn report(sessions: &[Value], agents: &Value, queues: &[(String, Value, Vec<
             let who = names.get(&id).map(|n| format!(" · {n}")).unwrap_or_default();
             format!("Next: {}{who} at {at}", clip(&text, 30))
         });
-    // Open delegations (quiet for two days counts as stale, as on the board).
-    let open: Vec<&Value> = delegations
-        .iter()
-        .filter(|d| matches!(d.get("status").and_then(Value::as_str), Some("draft" | "sent" | "accepted" | "in_progress" | "blocked")))
-        .filter(|d| now - num(d, "updatedAt").unwrap_or(0) < 2 * 86_400_000)
-        .filter(|d| !d.get("id").and_then(Value::as_str).unwrap_or("").starts_with("fixture-"))
-        .collect();
-    let blocked = open.iter().filter(|d| d.get("status").and_then(Value::as_str) == Some("blocked")).count();
-    r.delegations = (open.len(), blocked);
     r
 }
 
@@ -265,11 +255,6 @@ fn lines(r: &Report) -> Vec<Line> {
     }
     if let Some(next) = &r.next {
         extra.push(Line::Item("tray:view:queue".into(), next.clone()));
-    }
-    if r.delegations.0 > 0 {
-        let blocked = if r.delegations.1 > 0 { format!(" · {} blocked", r.delegations.1) } else { String::new() };
-        let n = r.delegations.0;
-        extra.push(Line::Item("tray:view:delegations".into(), format!("{n} delegation{} open{blocked}", if n == 1 { "" } else { "s" })));
     }
     if !extra.is_empty() {
         out.push(Line::Sep);
@@ -355,7 +340,6 @@ pub fn refresh(app: &AppHandle, agents: &Value) {
     let Some(tray) = app.tray_by_id(ID) else { return };
     let dir = crate::admiral_dir();
     let sessions = crate::session_files::all();
-    let delegations = crate::read_dir_json(&dir.join("delegations"));
     let qdir = dir.join("queue");
     let queues: Vec<(String, Value, Vec<Value>)> = std::fs::read_dir(&qdir)
         .into_iter()
@@ -371,7 +355,7 @@ pub fn refresh(app: &AppHandle, agents: &Value) {
         .collect();
     let now = crate::underway::now_ms();
     let state = app.state::<Tray>();
-    let mut r = report(&sessions, agents, &queues, &delegations, now);
+    let mut r = report(&sessions, agents, &queues, now);
     r.today = *state.today.lock().unwrap();
     if let Some(u) = app.state::<crate::underway::Underway>().state() {
         r.underway = Some((u.settings.enabled, u.title.clone(), if u.settings.enabled { u.detail.clone() } else { String::new() }));
@@ -440,22 +424,20 @@ mod tests {
         let agents = json!([{ "sessionId": "b", "name": "checkout-redesign" }]);
         let at = now + 3 * 3_600_000;
         let queues = vec![("c".to_string(), json!({ "items": [{ "id": "q1", "text": "Run the e2e suite", "createdAt": 0, "after": { "kind": "time", "at": at } }] }), vec![])];
-        let delegations = vec![json!({ "id": "dlg_1", "status": "blocked", "updatedAt": now }), json!({ "id": "dlg_2", "status": "done", "updatedAt": now })];
-        let r = report(&sessions, &agents, &queues, &delegations, now);
+        let r = report(&sessions, &agents, &queues, now);
         assert_eq!(r.waiting, vec![Row { session_id: "a".into(), name: "api".into(), detail: "Approve Bash · 4m".into() }]);
         assert_eq!(r.working.len(), 1, "a stale session is not counted");
         assert_eq!(r.working[0].name, "checkout-redesign");
         assert_eq!(r.working[0].detail, "12m · Add the Apple Pay button…");
         assert_eq!(r.idle, 1);
         assert!(r.next.as_deref().unwrap().starts_with("Next: Run the e2e suite · docs at "));
-        assert_eq!(r.delegations, (1, 1));
     }
 
     #[test]
     fn a_working_row_shows_this_turns_progress() {
         let now = 1_800_000_000_000_i64;
         let turn = |progress: Value| json!({ "sessionId": "a", "project": "app", "status": "working", "updatedAt": now, "turn": { "startedAt": now - 5 * 60_000, "prompt": "Ship it", "progress": progress } });
-        let detail = |s: Value| report(&[s], &json!([]), &[], &[], now).working[0].detail.clone();
+        let detail = |s: Value| report(&[s], &json!([]), &[], now).working[0].detail.clone();
         assert_eq!(detail(turn(json!([{ "percent": 43, "step": "Editing lib.rs", "at": now - 60_000 }]))), "43% · 5m · Editing lib.rs");
         assert_eq!(detail(turn(json!([{ "percent": 43, "at": now - 60_000 }]))), "43% · 5m · Ship it");
         // A report from before this turn says nothing about it.
@@ -466,15 +448,15 @@ mod tests {
     fn subagents_working_on_after_the_turn_keep_a_row() {
         let now = 1_800_000_000_000_i64;
         let idle = |subagents: Value| json!({ "sessionId": "a", "project": "app", "status": "idle", "updatedAt": now, "subagents": subagents });
-        let r = report(&[idle(json!([{ "id": "x", "status": "running", "startedAt": now - 3 * 60_000, "description": "Market scan" }]))], &json!([]), &[], &[], now);
+        let r = report(&[idle(json!([{ "id": "x", "status": "running", "startedAt": now - 3 * 60_000, "description": "Market scan" }]))], &json!([]), &[], now);
         assert_eq!((r.idle, r.working[0].detail.as_str()), (0, "1 agent · 3m · Market scan"));
         let r = report(&[idle(json!([
             { "id": "x", "status": "running", "startedAt": now - 3 * 60_000, "progress": [{ "percent": 70, "at": now, "step": "Writing" }] },
             { "id": "y", "status": "running", "startedAt": now - 60_000, "progress": [{ "percent": 40, "at": now, "step": "Reading the docs" }] },
             { "id": "z", "status": "done", "startedAt": now - 9 * 60_000 },
-        ]))], &json!([]), &[], &[], now);
+        ]))], &json!([]), &[], now);
         assert_eq!(r.working[0].detail, "2 agents · 40% · 3m · Reading the docs");
-        let r = report(&[idle(json!([{ "id": "z", "status": "done", "startedAt": now - 9 * 60_000 }]))], &json!([]), &[], &[], now);
+        let r = report(&[idle(json!([{ "id": "z", "status": "done", "startedAt": now - 9 * 60_000 }]))], &json!([]), &[], now);
         assert_eq!((r.idle, r.working.len()), (1, 0));
     }
 

@@ -1,6 +1,6 @@
 import type { Artifact } from "./artifacts";
 import type { QueueEntry } from "./queue";
-import type { Agent, AdmiralDelegation } from "./types";
+import type { Agent } from "./types";
 import { basename } from "./utils";
 
 // ⌘K: one search over what the app already holds. Every hit says what it opens; the
@@ -8,12 +8,12 @@ import { basename } from "./utils";
 
 export type Target =
   | { kind: "agent"; id: string }
-  | { kind: "view"; view: "agents" | "delegations" | "costs" | "artifacts" | "queue" }
+  | { kind: "view"; view: "agents" | "costs" | "artifacts" | "queue" }
   | { kind: "new-agent"; cwd?: string }
   | { kind: "artifact"; sessionId: string; artifactId: string }
   | { kind: "shortcuts" };
 
-export type Section = "Actions" | "Agents" | "Prompts" | "Delegations" | "Artifacts" | "Up next";
+export type Section = "Actions" | "Agents" | "Prompts" | "Artifacts" | "Up next";
 
 export type Hit = { key: string; section: Section; title: string; detail?: string; at?: number; target: Target; haystack: string };
 
@@ -22,14 +22,13 @@ export const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").to
 
 const VIEWS: [Target & { kind: "view" }, string, string][] = [
   [{ kind: "view", view: "agents" }, "Agents map", "⌘E"],
-  [{ kind: "view", view: "delegations" }, "Delegations", "⌘D"],
   [{ kind: "view", view: "queue" }, "Up next", "⌘J"],
   [{ kind: "view", view: "costs" }, "Costs", "⌘U"],
   [{ kind: "view", view: "artifacts" }, "Artifacts", "⌘G"],
 ];
 
 /** Everything searchable, newest first within each section. */
-export function collect(agents: Agent[], delegations: AdmiralDelegation[], artifacts: Artifact[], queues: Record<string, QueueEntry>, projects: { key: string; label: string }[]): Hit[] {
+export function collect(agents: Agent[], artifacts: Artifact[], queues: Record<string, QueueEntry>, projects: { key: string; label: string }[]): Hit[] {
   const hits: Hit[] = [];
   const add = (h: Omit<Hit, "haystack">, ...extra: (string | undefined)[]) => hits.push({ ...h, haystack: fold([h.title, h.detail, ...extra].filter(Boolean).join(" ")) });
   const nameOf = new Map(agents.map((a) => [a.id, a.name]));
@@ -52,14 +51,6 @@ export function collect(agents: Agent[], delegations: AdmiralDelegation[], artif
       add({ key: `prompt:${a.id}:${p.at}`, section: "Prompts", title: p.text, detail: a.name, at: p.at, target: { kind: "agent", id: a.id } });
     }
   }
-  for (const d of delegations) {
-    add(
-      { key: `dlg:${d.id}`, section: "Delegations", title: d.title, detail: `${d.from.project} → ${d.to.project ?? d.to.address} · ${d.status}`, at: d.updatedAt, target: { kind: "view", view: "delegations" } },
-      d.id,
-      d.detail,
-      d.result,
-    );
-  }
   for (const art of artifacts) {
     add({ key: `art:${art.sessionId}:${art.id}`, section: "Artifacts", title: art.title, detail: `${nameOf.get(art.sessionId) ?? art.project} · ${art.kind}`, at: art.updatedAt, target: { kind: "artifact", sessionId: art.sessionId, artifactId: art.id } });
   }
@@ -72,7 +63,7 @@ export function collect(agents: Agent[], delegations: AdmiralDelegation[], artif
 }
 
 // What is already running comes first: actions (a new agent, a view) are what you reach for least.
-const ORDER: Section[] = ["Agents", "Prompts", "Delegations", "Artifacts", "Up next", "Actions"];
+const ORDER: Section[] = ["Agents", "Prompts", "Artifacts", "Up next", "Actions"];
 /** Hits shown per section, so one busy section does not push the others out. */
 const PER_SECTION = 6;
 

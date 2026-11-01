@@ -8,7 +8,6 @@ in epoch milliseconds.
 ```
 ~/.claude/openadmiral/
   sessions/<sessionId>.json      one per Claude Code session, rewritten on every change
-  delegations/<delegationId>.json one per delegated piece of work
   requests/<sessionId>.json      app → mod: { action: 'handoff' | 'exit', at } ; the mod adds servedAt and runs /exit
   attached.json                  app → statusline: { updatedAt, sessions: [sessionId] }
   queue/<sessionId>.json         app → mod: prompts queued for a session ("Up next"); only the app writes it
@@ -102,38 +101,6 @@ elapsed time: "usually ≈ 4 min left" before any report, "longer than usual" pa
 A session file whose `updatedAt` is older than 90 s and whose `sessionId` is
 not in `claude agents --json` is stale (the app shows it as ended / greys it).
 
-## delegations/<delegationId>.json
-
-Created by the mod's `delegate` tool in the *sender*; status changed by the
-`delegation_update` tool in the *recipient* (or the sender, to cancel). The
-recipient's mod also marks a `sent`/`draft` delegation `accepted` (note
-"received", `to.sessionId` filled) the moment its brief arrives, so the board
-does not wait for the recipient's model. Likewise an `accepted` delegation
-turns `in_progress` when the recipient's model sends a SendMessage that names
-its id (its summary becomes the note), or once the recipient uses a tool in a
-turn that started after the delegation was accepted (note "working on it";
-checked at most every 20 s), so quiet work still shows as under way. Delivery: the sender's mod sends the
-brief itself; when auto mode leaves both tries undecided it keeps it `draft`,
-asks its model to SendMessage it (that send marks it `sent`), and makes no
-further attempts of its own for the rest of the session.
-
-```ts
-type AdmiralDelegation = {
-  v: 1
-  id: string                   // "dlg_" + 8 base36 chars
-  title: string                // short, imperative
-  detail: string               // full brief as sent
-  from: { sessionId: string; project: string; name?: string }
-  to: { address: string; sessionId?: string; project?: string }  // address = SendMessage `to`; sessionId filled when the recipient accepts
-  status: 'draft' | 'sent' | 'accepted' | 'in_progress' | 'blocked' | 'done' | 'cancelled'  // draft = recorded, not delivered yet (the model's SendMessage carrying the id marks it sent)
-  dependsOn?: string[]         // other delegation ids
-  notes: { at: number; by: string; status?: AdmiralDelegation['status']; text: string }[]
-  result?: string              // summary on done (commit hash, PR, files)
-  createdAt: number
-  updatedAt: number
-}
-```
-
 ## Liveness from the CLI
 
 The app also polls `claude agents --json` (≈2 s):
@@ -201,7 +168,6 @@ type AdmiralQueue = {
     text: string               // a prompt, submitted as if typed, or a slash command ("/compact keep the API notes")
     createdAt: number
     after?:                    // optional condition, besides the session being idle
-      | { kind: 'delegation'; id: string; status: ('done' | 'blocked' | 'cancelled' | 'in_progress' | 'accepted')[] }
       | { kind: 'session-idle'; sessionId: string }   // another session finished its turn
       | { kind: 'time'; at: number }                  // one-shot, at an epoch ms
       | { kind: 'schedule'; time: string; days: number[] }  // recurring: local "HH:MM" on these weekdays (0 = Sunday; [] = every day)
@@ -231,12 +197,12 @@ run), else the first item in order that is not paused, not done, whose time
 has come (time/schedule) and whose `after` holds; it appends a sent entry, then
 submits it. One item per idle period: the next waits for the turn it started to
 finish. Items whose condition does not hold yet are skipped, so a later item
-may go first. A delegation condition holds when `delegations/<id>.json` has one
-of the listed statuses; a session-idle condition when that session's file is
-`idle` (not stale, < 90 s).
+may go first. A session-idle condition holds when that session's file is `idle`
+(not stale, < 90 s). A condition of any other kind counts as no condition: old
+items may still carry `kind: 'delegation'` (a feature since removed; nothing
+reads or deletes the `delegations/` folder older versions left behind).
 
-**Done / recurring.** A one-shot item (no `after`, or delegation, session-idle,
-time) is done once a sent entry has its id (and no newer `runNowAt`); the app
+**Done / recurring.** A one-shot item (no `after`, or session-idle, time) is done once a sent entry has its id (and no newer `runNowAt`); the app
 removes done items from its file. A `schedule` item is never done: its next
 occurrence is computed from `max(last run, armedAt ?? createdAt)`, so it
 re-arms after every run. **Missed runs:** however many occurrences were missed

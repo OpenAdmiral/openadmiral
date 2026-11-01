@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, AgentStatus, CliAgent, AdmiralDelegation, AdmiralSession, DiscoveredSession } from "./types";
+import type { Agent, AgentStatus, CliAgent, AdmiralSession, DiscoveredSession } from "./types";
 import { basename } from "./utils";
 import type { QueueEntry } from "./queue";
 import { formatElapsed } from "./progress";
@@ -27,14 +27,13 @@ export function applyDelta(prev: Snapshot, d: SnapshotDelta): Snapshot {
     for (const s of d.sessions.upsert) byId.set(s.sessionId, s);
     next.sessions = [...byId.values()];
   }
-  if (d.delegations) next.delegations = d.delegations;
   if (d.queues) next.queues = d.queues;
   if (d.artifacts) next.artifacts = d.artifacts;
   if (d.requests) next.requests = d.requests;
   return next;
 }
 
-export type Snapshot = { sessions: AdmiralSession[]; delegations: AdmiralDelegation[]; queues?: Record<string, QueueEntry>; artifacts?: Artifact[]; requests?: Record<string, AdmiralRequest> };
+export type Snapshot = { sessions: AdmiralSession[]; queues?: Record<string, QueueEntry>; artifacts?: Artifact[]; requests?: Record<string, AdmiralRequest> };
 
 /** A session file this old, whose session the CLI no longer lists, has ended. */
 const STALE_MS = 90_000;
@@ -194,7 +193,7 @@ export function withUpdates(agents: Agent[], installed: string | null) {
 
 /** `quiet`: a floating window reads the same data; only the main window notifies and sets the badge. */
 export function useAdmiral({ quiet = false } = {}) {
-  const [snapshot, setSnapshot] = useState<Snapshot>({ sessions: [], delegations: [] });
+  const [snapshot, setSnapshot] = useState<Snapshot>({ sessions: [] });
   const [cli, setCli] = useState<CliAgent[]>([]);
   const [cliReady, setCliReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -265,11 +264,6 @@ export function useAdmiral({ quiet = false } = {}) {
     [snapshot.sessions, cli, now, cliReady, discovery.sessions, installed],
   );
   const superseded = useMemo(() => supersededMap(snapshot.sessions, cli), [snapshot.sessions, cli]);
-  const delegations = useMemo(
-    () => [...snapshot.delegations].sort((a, b) => b.updatedAt - a.updatedAt),
-    [snapshot.delegations],
-  );
-
   // Each plan window from the freshest session that has a reading of it.
   const rateLimits = useMemo(() => {
     const byKind = new Map<string, { r: NonNullable<AdmiralSession["rateLimits"]>[number]; at: number }>();
@@ -289,11 +283,10 @@ export function useAdmiral({ quiet = false } = {}) {
   }, [attention, quiet]);
 
   // Notify on transitions only: the first snapshot is the baseline.
-  const prev = useRef<{ agents: Map<string, AgentStatus>; dlg: Map<string, string>; ended: Map<string, number> } | null>(null);
+  const prev = useRef<{ agents: Map<string, AgentStatus>; ended: Map<string, number> } | null>(null);
   useEffect(() => {
     if (quiet) return;
     const agentMap = new Map(agents.map((a) => [a.id, a.status]));
-    const dlgMap = new Map(delegations.map((d) => [d.id, d.status]));
     const ended = new Map(agents.flatMap((a) => (a.session?.lastTurn ? [[a.id, a.session.lastTurn.endedAt] as const] : [])));
     const before = prev.current;
     if (before) {
@@ -313,15 +306,9 @@ export function useAdmiral({ quiet = false } = {}) {
           else notify(`${a.name} is done`, `Finished in ${took}`);
         }
       }
-      for (const d of delegations) {
-        const was = before.dlg.get(d.id);
-        if (was !== d.status && (d.status === "done" || d.status === "blocked")) {
-          notify(d.status === "done" ? `Done: ${d.title}` : `Blocked: ${d.title}`, `${d.to.project ?? d.to.address} → ${d.from.project}`);
-        }
-      }
     }
-    if (agents.length || delegations.length) prev.current = { agents: agentMap, dlg: dlgMap, ended };
-  }, [agents, delegations, quiet]);
+    if (agents.length) prev.current = { agents: agentMap, ended };
+  }, [agents, quiet]);
 
-  return { agents, delegations, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, pluginInstalled: discovery.pluginInstalled, hasData: snapshot.sessions.length > 0 || cli.length > 0 };
+  return { agents, rateLimits, attention, now, superseded, cliReady, queues: snapshot.queues ?? {}, artifacts: snapshot.artifacts ?? [], requests: snapshot.requests ?? {}, loaded, pluginInstalled: discovery.pluginInstalled, hasData: snapshot.sessions.length > 0 || cli.length > 0 };
 }

@@ -16,7 +16,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { conditionLabel, conditionUnmet, emptyQueue, pending, saveQueue, sentList, type QueueEntry, type QueueItem } from "@/lib/queue";
 import { centralGroup, isLate, isTimed, recentSent, runNowPending, scheduledSortKey, whenLabel, type CentralGroup, type QueueCommand } from "@/lib/schedule";
-import type { Agent, AdmiralDelegation } from "@/lib/types";
+import type { Agent } from "@/lib/types";
 import { ago, cn, projectColor, projectLabel } from "@/lib/utils";
 import { Info } from "./Info";
 import { QueueInput, QueueText, queueTextProblem } from "./QueueBits";
@@ -26,7 +26,6 @@ import { UnderwayPill } from "@/components/UnderwayPill";
 type Props = {
   queues: Record<string, QueueEntry>;
   agents: Agent[];
-  delegations: AdmiralDelegation[];
   now: number;
   onJump: (agentId: string) => void;
   onError: (msg: string) => void;
@@ -36,12 +35,12 @@ type Row = { sessionId: string; agent?: Agent; item: QueueItem; entry: QueueEntr
 
 const SECTIONS: { id: CentralGroup; title: string; icon: typeof AlarmLinearIcon; help: string }[] = [
   { id: "scheduled", title: "Scheduled", icon: AlarmLinearIcon, help: "Runs at a time, once or repeating, soonest first. If the agent is closed then, OpenAdmiral resumes it to run the item." },
-  { id: "waiting", title: "Waiting on a condition", icon: HourglassLinearIcon, help: "Held until a delegation reaches a status or another agent finishes its turn." },
+  { id: "waiting", title: "Waiting on a condition", icon: HourglassLinearIcon, help: "Held until another agent finishes its turn." },
   { id: "ready", title: "Ready", icon: PlayLinearIcon, help: "Goes in order as soon as its agent is idle (one per idle turn)." },
 ];
 
 /** Every Up next item of every session in one place: what runs when, and where. */
-export function QueueView({ queues, agents, delegations, now, onJump, onError }: Props) {
+export function QueueView({ queues, agents, now, onJump, onError }: Props) {
   const [filter, setFilter] = useState<string>("");
   const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
@@ -51,13 +50,13 @@ export function QueueView({ queues, agents, delegations, now, onJump, onError }:
       const sent = sentList(entry);
       const agent = byId.get(sessionId);
       pending(entry).forEach((item, i) => {
-        const met = conditionUnmet(item.after, agents, delegations) === null;
+        const met = conditionUnmet(item.after, agents) === null;
         const group = centralGroup(item, met);
         out.push({ sessionId, agent, item, entry, group, sortKey: group === "scheduled" ? scheduledSortKey(item, sent) : i });
       });
     }
     return out;
-  }, [queues, byId, agents, delegations]);
+  }, [queues, byId, agents]);
 
   // Filter by an agent ("a:<id>") or a project ("p:<name>").
   const projects = useMemo(() => [...new Set(rows.map((r) => r.agent?.project ?? "Removed"))].sort(), [rows]);
@@ -147,7 +146,6 @@ export function QueueView({ queues, agents, delegations, now, onJump, onError }:
                           row={r}
                           now={now}
                           agents={agents}
-                          delegations={delegations}
                           onJump={onJump}
                           onSave={(text) => patch(r, { text })}
                           onTogglePause={() => patch(r, { paused: !r.item.paused })}
@@ -228,7 +226,6 @@ function QueueRow({
   row,
   now,
   agents,
-  delegations,
   onJump,
   onSave,
   onTogglePause,
@@ -238,7 +235,6 @@ function QueueRow({
   row: Row;
   now: number;
   agents: Agent[];
-  delegations: AdmiralDelegation[];
   onJump: (id: string) => void;
   onSave: (text: string) => void;
   onTogglePause: () => void;
@@ -252,7 +248,7 @@ function QueueRow({
   const commands: readonly QueueCommand[] | undefined = agent?.session?.queueCommands;
   const forced = runNowPending(item, sent);
   const queuePaused = !!entry.queue?.paused;
-  const condition = item.after ? conditionLabel(item.after, agents, delegations, item, sent, now) : undefined;
+  const condition = item.after ? conditionLabel(item.after, agents, item, sent, now) : undefined;
   const save = () => {
     if (draft.trim() && draft.trim() !== item.text && !queueTextProblem(draft, commands)) onSave(draft.trim());
     setEditing(false);

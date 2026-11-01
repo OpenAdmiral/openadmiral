@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import { isDone, isDueByTime, isTimed, runNowPending, timeLabel, type QueueCondition, type QueueItemCore, type SentEntry } from "./schedule";
-import type { Agent, AdmiralDelegation } from "./types";
+import type { Agent } from "./types";
 
 /** docs/CONTRACT.md "queue/": the app owns the queue file, the mod writes `.sent.json`. */
 export type { QueueCondition, SentEntry };
@@ -41,7 +41,7 @@ export type ItemState =
   | { kind: "queued"; label: string };
 
 /** What the mod would do with each pending item now, mirroring its rules. */
-export function itemStates(items: QueueItem[], paused: boolean, agent: Agent, agents: Agent[], delegations: AdmiralDelegation[], sent: readonly SentEntry[] = [], now = Date.now()): Map<string, ItemState> {
+export function itemStates(items: QueueItem[], paused: boolean, agent: Agent, agents: Agent[], sent: readonly SentEntry[] = [], now = Date.now()): Map<string, ItemState> {
   const out = new Map<string, ItemState>();
   let nextTaken = false;
   const ordered = [...items.filter((i) => runNowPending(i, sent)), ...items.filter((i) => !runNowPending(i, sent))];
@@ -55,7 +55,7 @@ export function itemStates(items: QueueItem[], paused: boolean, agent: Agent, ag
       out.set(item.id, { kind: "waiting", label: "" });
       continue;
     }
-    const unmet = forced ? null : conditionUnmet(item.after, agents, delegations);
+    const unmet = forced ? null : conditionUnmet(item.after, agents);
     if (unmet) {
       out.set(item.id, { kind: "waiting", label: `waiting for ${unmet}` });
       continue;
@@ -77,29 +77,24 @@ export function itemStates(items: QueueItem[], paused: boolean, agent: Agent, ag
   return out;
 }
 
-/** A short phrase for what the condition still waits on, or null when it holds (time is shown apart). */
-export function conditionUnmet(after: QueueCondition | undefined, agents: Agent[], delegations: AdmiralDelegation[]): string | null {
-  if (!after || after.kind === "time" || after.kind === "schedule") return null;
-  if (after.kind === "delegation") {
-    const d = delegations.find((x) => x.id === after.id);
-    if (d && after.status.includes(d.status as never)) return null;
-    return `“${d?.title ?? after.id}” ${after.status.join("/")}`;
-  }
+/**
+ * A short phrase for what the condition still waits on, or null when it holds (time is shown
+ * apart). Any other kind counts as no condition, so an old item queued to run after a delegation
+ * (a feature since removed) runs instead of staying stuck, as in the mod and scheduler.rs.
+ */
+export function conditionUnmet(after: QueueCondition | undefined, agents: Agent[]): string | null {
+  if (after?.kind !== "session-idle") return null;
   const a = agents.find((x) => x.id === after.sessionId);
   if (a && a.status === "idle") return null;
   return `${a?.name ?? after.sessionId.slice(0, 8)} to finish`;
 }
 
-export function conditionLabel(after: QueueCondition, agents: Agent[], delegations: AdmiralDelegation[], item?: QueueItemCore, sent: readonly SentEntry[] = [], now = Date.now()) {
-  if (after.kind === "time" || after.kind === "schedule") {
-    return timeLabel(after, item ?? { id: "", text: "", createdAt: now, after }, sent, now) ?? "";
+export function conditionLabel(after: QueueCondition, agents: Agent[], item?: QueueItemCore, sent: readonly SentEntry[] = [], now = Date.now()) {
+  if (after.kind === "session-idle") {
+    const a = agents.find((x) => x.id === after.sessionId);
+    return `after ${a?.name ?? after.sessionId.slice(0, 8)} finishes`;
   }
-  if (after.kind === "delegation") {
-    const d = delegations.find((x) => x.id === after.id);
-    return `after “${d?.title ?? after.id}” is ${after.status.join(" or ")}`;
-  }
-  const a = agents.find((x) => x.id === after.sessionId);
-  return `after ${a?.name ?? after.sessionId.slice(0, 8)} finishes`;
+  return timeLabel(after, item ?? { id: "", text: "", createdAt: now, after }, sent, now) ?? "";
 }
 
 /**

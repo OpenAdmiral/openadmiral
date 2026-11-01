@@ -31,7 +31,7 @@ const EVERY: Duration = Duration::from_secs(5);
 /// The helper keeps sleep off this long after the last renewal.
 const LEASE_SECS: u64 = 90;
 /// Work keeps Underway holding this long after the last agent went idle: between
-/// turns, while Up next submits the next item, while a delegation bounces back.
+/// turns, while Up next submits the next item, while a message bounces back.
 const LINGER_MS: i64 = 5 * 60 * 1000;
 /// Up next items due within this window count as work.
 const AHEAD_MS: i64 = 60 * 60 * 1000;

@@ -14,7 +14,6 @@ export type ShortcutId =
   | "close-agent"
   | "search"
   | "view-agents"
-  | "view-delegations"
   | "view-costs"
   | "view-artifacts"
   | "view-queue"
@@ -46,7 +45,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { id: "agent-prev", keys: [["⌘", "⌥", "↑"]], description: "Previous agent (plain ⌥↑ too, outside the terminal)", match: (e) => arrow(e, "ArrowUp") && !e.shiftKey },
       { id: "agent-next", keys: [["⌘", "⌥", "↓"]], description: "Next agent (plain ⌥↓ too, outside the terminal)", match: (e) => arrow(e, "ArrowDown") && !e.shiftKey },
       { id: "needs-prev", keys: [["⌘", "⌥", "⇧", "↑"]], description: "Previous agent that needs you", match: (e) => arrow(e, "ArrowUp") && e.shiftKey },
-      { id: "needs-next", keys: [["⌘", "⌥", "⇧", "↓"]], description: "Next agent that needs you: waiting first, then new artifacts or finished delegations", match: (e) => arrow(e, "ArrowDown") && e.shiftKey },
+      { id: "needs-next", keys: [["⌘", "⌥", "⇧", "↓"]], description: "Next agent that needs you: waiting first, then new artifacts", match: (e) => arrow(e, "ArrowDown") && e.shiftKey },
       { id: "new-agent", keys: [["⌘", "N"]], description: "Start a new agent", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "n" },
       { id: "close-agent", keys: [["⌘", "W"]], description: "Close the selected agent (it can be resumed later)", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "w" },
     ],
@@ -54,9 +53,8 @@ export const SHORTCUTS: ShortcutGroup[] = [
   {
     title: "Views",
     items: [
-      { id: "search", keys: [["⌘", "K"]], description: "Search agents, prompts, delegations, artifacts and Up next", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyK" },
+      { id: "search", keys: [["⌘", "K"]], description: "Search agents, prompts, artifacts and Up next", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyK" },
       { id: "view-agents", keys: [["⌘", "E"]], description: "Agents map: every agent and how they relate", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyE" },
-      { id: "view-delegations", keys: [["⌘", "D"]], description: "Delegations between agents", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "d" },
       { id: "view-costs", keys: [["⌘", "U"]], description: "Costs and plan usage", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "u" },
       { id: "view-artifacts", keys: [["⌘", "G"]], description: "All artifacts", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && e.key === "g" },
       { id: "view-queue", keys: [["⌘", "J"]], description: "Up next: every queued and scheduled prompt, across agents", match: (e) => e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey && e.code === "KeyJ" },

@@ -17,7 +17,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddFolderLinearIcon, AddLinearIcon, MaximizeSquare3LinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, RoutingLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddFolderLinearIcon, AddLinearIcon, MaximizeSquare3LinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
@@ -30,8 +30,7 @@ import { NameEditor } from "./NameEditor";
 import { listMenus, openAgentMenu, type AgentActions } from "@/lib/lifecycle";
 import { pending, type QueueEntry } from "@/lib/queue";
 import type { AdmiralRequest } from "@/lib/admiral";
-import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
-import { activeOpenCount } from "@/lib/delegations";
+import type { Agent, AdmiralSession } from "@/lib/types";
 import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel, sharedPrefix, until } from "@/lib/utils";
 import { isReset, PlanMeters } from "./PlanMeters";
 import { Tip, TipLabel } from "./Tooltip";
@@ -42,11 +41,10 @@ import { ProgressLine } from "./Progress";
 import { runsElsewhere, whereLabel } from "@/lib/host";
 import { lastActivity, type SortMode } from "@/lib/recent";
 
-export type View = { kind: "agent"; id: string } | { kind: "agents" } | { kind: "delegations" } | { kind: "costs" } | { kind: "artifacts" } | { kind: "queue" };
+export type View = { kind: "agent"; id: string } | { kind: "agents" } | { kind: "costs" } | { kind: "artifacts" } | { kind: "queue" };
 
 type Props = {
   groups: Group[];
-  delegations: AdmiralDelegation[];
   rateLimits: NonNullable<AdmiralSession["rateLimits"]>;
   view: View | null;
   todayCost?: number;
@@ -55,7 +53,7 @@ type Props = {
   onNew: (cwd?: string) => void;
   /** A folder on its own or a project (`space:<id>`), moved onto another's place at the top level. */
   onMoveTop: (from: string, to: string) => void;
-  /** Opens a view (Delegations, Costs…) in a floating window. */
+  /** Opens a view (Costs, Artifacts…) in a floating window. */
   onFloatView: (view: FloatableView) => void;
   /** The projects the person made, holding folders. */
   spaces: Spaces;
@@ -113,13 +111,12 @@ const collisionFor =
     return closestCenter({ ...args, droppableContainers: only((c) => c.startsWith("p:") && containerOf(c.slice(2)) === mine) });
   };
 
-export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSelect, onNew, onFloatView, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
+export function Sidebar({ groups, rateLimits, view, todayCost, onSelect, onNew, onFloatView, onMoveTop, spaces, onMoveAgent, onResetOrder, actions, onClearEnded, queues, unseen, artifactCount, requests, onCollapse, onShortcuts, renaming, scheduledCount = 0, update,
   pluginBehind,
   unplugged,
   sort }: Props) {
   const newArtifacts = Object.values(unseen).reduce((n, x) => n + x, 0);
   // Stale ones (agents gone, quiet for a day) do not count: nobody is waiting on them.
-  const openDelegations = activeOpenCount(delegations, groups.flatMap((g) => g.agents), Date.now());
   const [active, setActive] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [folded, toggleFolded] = useFolded();
@@ -325,11 +322,6 @@ export function Sidebar({ groups, delegations, rateLimits, view, todayCost, onSe
 
       <nav className="px-3">
         <NavItem active={view?.kind === "agents"} onClick={() => onSelect({ kind: "agents" })} onFloat={() => onFloatView("agents")} icon={StructureLinearIcon} label="Agents" kbd="⌘E" />
-        <NavItem active={view?.kind === "delegations"} onClick={() => onSelect({ kind: "delegations" })} onFloat={() => onFloatView("delegations")} icon={RoutingLinearIcon} label="Delegations" kbd="⌘D">
-          {openDelegations > 0 && (
-            <span className="rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold leading-4 text-white tabular">{openDelegations}</span>
-          )}
-        </NavItem>
         <NavItem active={view?.kind === "queue"} onClick={() => onSelect({ kind: "queue" })} onFloat={() => onFloatView("queue")} icon={PlaylistMinimalisticLinearIcon} label="Up next" kbd="⌘J">
           {scheduledCount > 0 && (
             <span title={`${scheduledCount} scheduled`} className="rounded-full bg-brand-500/15 px-1.5 text-[10px] font-semibold leading-4 text-brand-700 tabular dark:text-brand-300">
@@ -636,7 +628,7 @@ function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCos
   );
 }
 
-function NavItem({ active, onClick, onFloat, icon: Icon, label, kbd, children }: { active: boolean; onClick: () => void; onFloat: () => void; icon: typeof RoutingLinearIcon; label: string; kbd: string; children?: React.ReactNode }) {
+function NavItem({ active, onClick, onFloat, icon: Icon, label, kbd, children }: { active: boolean; onClick: () => void; onFloat: () => void; icon: typeof StructureLinearIcon; label: string; kbd: string; children?: React.ReactNode }) {
   return (
     <div className="group relative">
       <button

@@ -1,13 +1,10 @@
 // Pure "Up next" rules shared by the mod (register.tsx) and the OpenAdmiral app
 // (app/src/lib/queue.ts imports this file). No `$`, no I/O. Contract: docs/CONTRACT.md "queue/".
 
-export type DelegationWait = 'done' | 'blocked' | 'cancelled' | 'in_progress' | 'accepted'
-
 /** Every day, weekdays, or chosen days, at a local HH:MM. `days`: 0 = Sunday … 6 = Saturday. */
 export type ScheduleCondition = { kind: 'schedule'; time: string; days: number[] }
 
 export type QueueCondition =
-  | { kind: 'delegation'; id: string; status: DelegationWait[] }
   | { kind: 'session-idle'; sessionId: string }
   | { kind: 'time'; at: number }
   | ScheduleCondition

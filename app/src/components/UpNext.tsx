@@ -4,7 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { AlarmLinearIcon, CloseCircleLinearIcon, HourglassLinearIcon, LinkLinearIcon, PauseLinearIcon, Pen2LinearIcon, PlayLinearIcon, RepeatLinearIcon, TrashBinMinimalisticLinearIcon } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   conditionLabel,
   emptyQueue,
@@ -22,19 +22,19 @@ import {
 import { isTimed, runNowPending, type QueueCommand } from "@/lib/schedule";
 import { typeIntoTerminal } from "./Terminal";
 import { QueueInput, QueueText, SchedulePicker, queueTextProblem, useNow } from "./QueueBits";
-import type { Agent, AdmiralDelegation } from "@/lib/types";
+import type { Agent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Info } from "./Info";
 
-type Props = { agent: Agent; entry?: QueueEntry; agents: Agent[]; delegations: AdmiralDelegation[]; onError: (msg: string) => void };
+type Props = { agent: Agent; entry?: QueueEntry; agents: Agent[]; onError: (msg: string) => void };
 
 /** The user's queue for this agent: prompts submitted one per idle turn, in order. */
-export function UpNext({ agent, entry, agents, delegations, onError }: Props) {
+export function UpNext({ agent, entry, agents, onError }: Props) {
   const queue = entry?.queue ?? emptyQueue();
   const items = pending(entry);
   const sent = sentList(entry);
   const now = useNow();
-  const states = itemStates(items, queue.paused, agent, agents, delegations, sent, now);
+  const states = itemStates(items, queue.paused, agent, agents, sent, now);
   const commands = agent.session?.queueCommands;
 
   const write = (next: Partial<typeof queue>) => saveQueue(agent.id, { ...queue, ...next }).catch((e) => onError(String(e)));
@@ -88,7 +88,7 @@ export function UpNext({ agent, entry, agents, delegations, onError }: Props) {
                     item={item}
                     n={i + 1}
                     state={states.get(item.id)}
-                    condition={item.after ? conditionLabel(item.after, agents, delegations, item, sent, now) : undefined}
+                    condition={item.after ? conditionLabel(item.after, agents, item, sent, now) : undefined}
                     commands={commands}
                     forced={runNowPending(item, sent)}
                     onSave={(text) => update(item.id, { text })}
@@ -104,7 +104,7 @@ export function UpNext({ agent, entry, agents, delegations, onError }: Props) {
         </DndContext>
       )}
 
-      <Composer agent={agent} agents={agents} delegations={delegations} commands={commands} onAdd={add} />
+      <Composer agent={agent} agents={agents} commands={commands} onAdd={add} />
     </div>
   );
 }
@@ -228,11 +228,10 @@ function Item({
   );
 }
 
-function Composer({ agent, agents, delegations, commands, onAdd }: { agent: Agent; agents: Agent[]; delegations: AdmiralDelegation[]; commands: readonly QueueCommand[] | undefined; onAdd: (text: string, after?: QueueCondition) => void }) {
+function Composer({ agent, agents, commands, onAdd }: { agent: Agent; agents: Agent[]; commands: readonly QueueCommand[] | undefined; onAdd: (text: string, after?: QueueCondition) => void }) {
   const [text, setText] = useState("");
   const [after, setAfter] = useState<QueueCondition | undefined>();
   const [picking, setPicking] = useState<"after" | "schedule" | null>(null);
-  const openDelegations = useMemo(() => delegations.filter((d) => d.status !== "done" && d.status !== "cancelled"), [delegations]);
   const others = agents.filter((a) => a.id !== agent.id && a.status !== "ended");
   const timed = after?.kind === "time" || after?.kind === "schedule";
   const problem = text.trim() ? queueTextProblem(text, commands) : undefined;
@@ -272,46 +271,21 @@ function Composer({ agent, agents, delegations, commands, onAdd }: { agent: Agen
         <div className="mt-1.5 space-y-1.5 rounded-lg border border-line bg-canvas p-2 text-xs">
           <label className="block text-[10.5px] font-semibold text-ink-3">Run after…</label>
           <select
-            value={after && !timed ? `${after.kind}:${after.kind === "delegation" ? after.id : after.kind === "session-idle" ? after.sessionId : ""}` : ""}
-            onChange={(e) => {
-              const [kind, id] = e.target.value.split(/:(.*)/s);
-              setAfter(!kind ? undefined : kind === "delegation" ? { kind, id, status: ["done"] } : { kind: "session-idle", sessionId: id });
-            }}
+            value={after?.kind === "session-idle" ? after.sessionId : ""}
+            onChange={(e) => setAfter(e.target.value ? { kind: "session-idle", sessionId: e.target.value } : undefined)}
             className="w-full rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-ink focus:border-brand-500 focus:outline-none"
           >
             <option value="">No condition</option>
-            {openDelegations.length > 0 && (
-              <optgroup label="A delegation reaches a status">
-                {openDelegations.map((d) => (
-                  <option key={d.id} value={`delegation:${d.id}`}>
-                    {d.title} ({d.from.project} → {d.to.project ?? d.to.address})
-                  </option>
-                ))}
-              </optgroup>
-            )}
             {others.length > 0 && (
               <optgroup label="Another agent finishes its turn">
                 {others.map((a) => (
-                  <option key={a.id} value={`session-idle:${a.id}`}>
+                  <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
                 ))}
               </optgroup>
             )}
           </select>
-          {after?.kind === "delegation" && (
-            <select
-              value={after.status[0]}
-              onChange={(e) => setAfter({ ...after, status: [e.target.value as "done"] })}
-              className="w-full rounded-md border border-line-strong bg-canvas px-2 py-1 text-xs text-ink focus:border-brand-500 focus:outline-none"
-            >
-              {(["done", "blocked", "in_progress", "accepted", "cancelled"] as const).map((s) => (
-                <option key={s} value={s}>
-                  is {s.replace("_", " ")}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
       )}
       {picking === "schedule" && (
@@ -326,16 +300,16 @@ function Composer({ agent, agents, delegations, commands, onAdd }: { agent: Agen
           className={cn("inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-ink-3 transition-colors hover:bg-line hover:text-ink", after && !timed && "font-semibold text-brand-600 dark:text-brand-400")}
         >
           <LinkLinearIcon size={12} className="shrink-0" />
-          <span className="truncate">{after && !timed ? conditionLabel(after, agents, delegations) : "Run after…"}</span>
+          <span className="truncate">{after && !timed ? conditionLabel(after, agents) : "Run after…"}</span>
         </button>
         <button
           onClick={() => toggle("schedule")}
           className={cn("inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-ink-3 transition-colors hover:bg-line hover:text-ink", timed && "font-semibold text-brand-600 dark:text-brand-400")}
         >
           {after?.kind === "schedule" ? <RepeatLinearIcon size={12} className="shrink-0" /> : <AlarmLinearIcon size={12} className="shrink-0" />}
-          <span className="truncate">{timed ? conditionLabel(after, agents, delegations) : "Schedule…"}</span>
+          <span className="truncate">{timed ? conditionLabel(after, agents) : "Schedule…"}</span>
         </button>
-        <Info tip="Run after holds a prompt until another agent finishes its turn or a delegation reaches a status. Schedule runs it at a time, once or repeating; if the agent is closed then, OpenAdmiral resumes it. Slash commands work too: type / to pick one." align="left" />
+        <Info tip="Run after holds a prompt until another agent finishes its turn. Schedule runs it at a time, once or repeating; if the agent is closed then, OpenAdmiral resumes it. Slash commands work too: type / to pick one." align="left" />
         <span className="ml-auto text-[10px] text-ink-3">⌘↵</span>
         <button
           disabled={!text.trim() || !!problem || pastTime}

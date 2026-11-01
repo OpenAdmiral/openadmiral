@@ -5,7 +5,7 @@
     {
       "name": "openadmiral",
       "source": "./plugin",
-      "description": "Publishes each Claude Code session's live state and tracked delegations for the OpenAdmiral app."
+      "description": "Publishes each Claude Code session's live state for the OpenAdmiral app."
     }
   ]
 }

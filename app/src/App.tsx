@@ -6,7 +6,6 @@ import { AboutSheet } from "@/components/AboutSheet";
 import { AgentDetail } from "@/components/AgentDetail";
 import { CostsView } from "@/components/CostsView";
 import { useCostReport, useCosts, type RangeDays } from "@/lib/costs";
-import { DelegationsView } from "@/components/DelegationsView";
 import { AgentsMap } from "@/components/AgentsMap";
 import { NewAgentSheet } from "@/components/NewAgentSheet";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -16,7 +15,6 @@ import { useSidebarOrder } from "@/lib/order";
 import { cn, setProjectOrder } from "@/lib/utils";
 import { SidebarMinimalisticLinearIcon } from "@solar-icons/react";
 import { takeAttention } from "@/lib/attention";
-import { activeOpenCount } from "@/lib/delegations";
 import { useUiState } from "@/lib/ui";
 import { parseFocus } from "@/lib/focus";
 import { listen } from "@tauri-apps/api/event";
@@ -43,13 +41,13 @@ import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
 import { PluginSetup } from "@/components/PluginSetup";
-import { VIEW_TITLE, viewFloatId, type FloatableView } from "@/components/FloatingView";
+import { isFloatableView, VIEW_TITLE, viewFloatId, type FloatableView } from "@/components/FloatingView";
 import { PanePicker, SplitPanes, ViewMenu } from "@/components/Split";
 import { setTerminalAway, setTerminalScale } from "@/components/Terminal";
 import { prune, relayout, show, SINGLE, type SplitLayout } from "@/lib/split";
 
 export default function App() {
-  const { agents: rawAgents, delegations, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded, pluginInstalled } = useAdmiral();
+  const { agents: rawAgents, rateLimits, now, cliReady, queues, artifacts, requests, loaded, superseded, pluginInstalled } = useAdmiral();
   const [view, setView] = useState<View | null>(null);
   // A new agent from the + sheet: open it as soon as the CLI lists it (give up after a minute).
   const [openWhenListed, setOpenWhenListed] = useState<{ shortId: string; at: number } | null>(null);
@@ -126,8 +124,8 @@ export default function App() {
   // ⌘K's search: closed, or open on a query ("" from the keyboard).
   const [palette, setPalette] = useState<false | string>(false);
   const paletteHits = useMemo(
-    () => (palette !== false ? collect(agents, delegations, artifacts, queues, [...new Map(order.groups.map((g) => [g.key, { key: g.key, label: g.label }])).values()]) : []),
-    [palette, agents, delegations, artifacts, queues, order.groups],
+    () => (palette !== false ? collect(agents, artifacts, queues, [...new Map(order.groups.map((g) => [g.key, { key: g.key, label: g.label }])).values()]) : []),
+    [palette, agents, artifacts, queues, order.groups],
   );
   /** An artifact in its agent's Artifacts tab, in the window that agent is in. */
   const showArtifact = (sessionId: string, artifactId: string) => {
@@ -259,7 +257,7 @@ export default function App() {
       listen<{ kind: string; id?: string }>("openadmiral://navigate", (e) => {
         const { kind, id } = e.payload;
         if (kind === "agent" && id) setView({ kind: "agent", id });
-        else if (kind === "agents" || kind === "costs" || kind === "queue" || kind === "delegations" || kind === "artifacts") setView({ kind });
+        else if (kind === "agents" || kind === "costs" || kind === "queue" || kind === "artifacts") setView({ kind });
       }),
       listen("openadmiral://new-agent", () => setSheet({})),
       listen("openadmiral://underway-panel", () => window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: "underway" }))),
@@ -274,7 +272,7 @@ export default function App() {
       setPreview(d.preview);
       setPreviewChecks({ attach: !!d.attach, probe: !!d.probe });
       if (d.select) setView({ kind: "agent", id: d.select });
-      if (d.view === "agents" || d.view === "delegations" || d.view === "costs" || d.view === "artifacts" || d.view === "queue") setView({ kind: d.view });
+      if (d.view === "agents" || d.view === "costs" || d.view === "artifacts" || d.view === "queue") setView({ kind: d.view });
       if (d.view === "about") setAbout(true);
       // OPENADMIRAL_VIEW=search:<query> (preview): ⌘K open on that query, for a screenshot.
       if (d.view?.startsWith("search")) setTimeout(() => setPalette(d.view!.slice(7)), 1500);
@@ -355,12 +353,9 @@ export default function App() {
     if (i === -1) return dir === 1 ? list[0] : list.at(-1);
     return list[i + dir];
   };
-  // Like Slack's unread jump: agents waiting on you first, then those with unseen
-  // artifacts or a delegation of theirs that just finished or got blocked.
+  // Like Slack's unread jump: agents waiting on you first, then those with unseen artifacts.
   const nextNeedingYou = (dir: 1 | -1) => {
-    const recent = Date.now() - 30 * 60_000;
-    const flagged = (a: (typeof shown)[number]) =>
-      (seen.unseen[a.id] ?? 0) > 0 || delegations.some((d) => d.from.sessionId === a.id && (d.status === "done" || d.status === "blocked") && d.updatedAt > recent);
+    const flagged = (a: (typeof shown)[number]) => (seen.unseen[a.id] ?? 0) > 0;
     const list = [...shown.filter((a) => a.status === "waiting"), ...shown.filter((a) => a.status !== "waiting" && flagged(a))];
     if (!list.length) return undefined;
     const i = view?.kind === "agent" ? list.findIndex((a) => a.id === view.id) : -1;
@@ -422,7 +417,11 @@ export default function App() {
   // Back from its window: it takes an empty pane if there is one, else the active one.
   const dockRef = useRef<(id: string) => void>(() => {});
   dockRef.current = (id) => {
-    if (id.startsWith("view-")) return setView({ kind: id.slice(5) as FloatableView });
+    if (id.startsWith("view-")) {
+      const kind = id.slice(5);
+      if (isFloatableView(kind)) setView({ kind });
+      return;
+    }
     const empty = split.panes.indexOf(null);
     if (empty !== -1 && !split.panes.includes(id)) ui.setSplit((s) => ({ ...(s ?? SINGLE), active: empty }));
     setView({ kind: "agent", id });
@@ -465,7 +464,6 @@ export default function App() {
         search: () => setPalette((p) => (p === false ? "" : false)),
         "new-agent": () => setSheet({}),
         "view-agents": () => setView({ kind: "agents" }),
-        "view-delegations": () => setView({ kind: "delegations" }),
         "view-artifacts": () => setView({ kind: "artifacts" }),
         "view-costs": () => setView({ kind: "costs" }),
         "view-queue": () => setView({ kind: "queue" }),
@@ -494,7 +492,7 @@ export default function App() {
     // Capture: xterm swallows keys once it has focus.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [shown, view, agents, life.actions, ui, seen.unseen, delegations, split]);
+  }, [shown, view, agents, life.actions, ui, seen.unseen, split]);
 
   const selected = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
   const viewMenu = <ViewMenu layout={split.layout} onLayout={setLayout} scale={textScale} onScale={ui.stepText} dense={!!ui.densePanes} onDense={ui.toggleDensePanes} />;
@@ -502,9 +500,7 @@ export default function App() {
   const detail = (a: Agent, extra: { key?: string; part?: "all" | "main" | "inspector"; pane?: { active: boolean; onClose?: () => void }; dense?: boolean }) => (
     <AgentDetail
                 agent={a}
-                delegations={delegations}
                 now={now}
-                onOpenDelegations={() => setView({ kind: "delegations" })}
                 handoff={handoffs.find((h) => h.sessionId === a.id)}
                 request={requests[a.id]}
                 inspectorHidden={ui.rightCollapsed}
@@ -566,7 +562,6 @@ export default function App() {
             view={view}
             onSelect={setView}
             onExpand={ui.toggleLeft}
-            openDelegations={activeOpenCount(delegations, agents, now)}
             scheduledCount={scheduledCount}
             actions={life.actions}
             onClearEnded={() => life.clearEnded(agents)}
@@ -589,7 +584,6 @@ export default function App() {
         unseen={seen.unseen}
         requests={requests}
         artifactCount={artifacts.length}
-        delegations={delegations}
         rateLimits={rateLimits}
         view={view}
         onFloatView={floatView}
@@ -638,9 +632,7 @@ export default function App() {
             ) : view?.kind === "agents" ? (
               <AgentsMap tree={order.spaces.tree} agents={agents} queues={queues} onJump={(id) => setView({ kind: "agent", id })} />
             ) : view?.kind === "queue" ? (
-              <QueueView queues={queues} agents={agents} delegations={delegations} now={now} onJump={(id) => setView({ kind: "agent", id })} onError={(m) => life.notify(m, "error")} />
-            ) : view?.kind === "delegations" ? (
-              <DelegationsView delegations={delegations} agents={agents} now={now} onJump={(id) => setView({ kind: "agent", id })} queues={queues} />
+              <QueueView queues={queues} agents={agents} now={now} onJump={(id) => setView({ kind: "agent", id })} onError={(m) => life.notify(m, "error")} />
             ) : selected && split.layout !== "1" ? (
               <div className="flex h-full flex-col">
                 {/* What the panes share: the same controls wherever the focus is. */}

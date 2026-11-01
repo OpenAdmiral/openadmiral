@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { AgentStatus, DelegationStatus } from "@/lib/types";
+import type { AgentStatus } from "@/lib/types";
 import { cn, fillTone } from "@/lib/utils";
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -47,55 +47,6 @@ export function Chip({ children, icon, className, title, onClick, active }: { ch
     </span>
   );
 }
-
-const PILL: Record<DelegationStatus, string> = {
-  draft: "bg-transparent text-ink-3 ring-0 outline-1 outline-dashed outline-gray-500/50 -outline-offset-1",
-  sent: "bg-gray-500/10 text-ink-2 ring-gray-500/20",
-  accepted: "bg-sky-500/10 text-sky-700 dark:text-sky-300 ring-sky-500/25",
-  in_progress: "bg-brand-500/10 text-brand-700 dark:text-brand-300 ring-brand-500/25",
-  blocked: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/30",
-  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-emerald-500/25",
-  cancelled: "bg-gray-500/10 text-ink-3 ring-gray-500/15 line-through",
-};
-
-export const DELEGATION_LABEL: Record<DelegationStatus, string> = {
-  draft: "Draft · not delivered",
-  sent: "Sent",
-  accepted: "Accepted",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  done: "Done",
-  cancelled: "Cancelled",
-};
-
-/** One sentence per delegation status, for tooltips. */
-export const DELEGATION_HELP: Record<DelegationStatus, string> = {
-  draft: "Recorded but not delivered yet; the agent still has to send it.",
-  sent: "Delivered to the other agent, which has not picked it up yet.",
-  accepted: "The other agent has taken it on.",
-  in_progress: "The other agent is working on it.",
-  blocked: "The other agent is stuck and needs something before it can go on.",
-  done: "Finished; the result is in the card.",
-  cancelled: "Called off; nothing more will happen.",
-};
-
-export function DelegationPill({ status, className }: { status: DelegationStatus; className?: string }) {
-  return (
-    <span title={DELEGATION_HELP[status]} className={cn("inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold ring-1 ring-inset", PILL[status], className)}>
-      {DELEGATION_LABEL[status]}
-    </span>
-  );
-}
-
-export const DELEGATION_STROKE: Record<DelegationStatus, string> = {
-  draft: "#9ca3af",
-  sent: "#9ca3af",
-  accepted: "#38bdf8",
-  in_progress: "#1258ff",
-  blocked: "#f59e0b",
-  done: "#10b981",
-  cancelled: "#9ca3af",
-};
 
 /** Where a session runs, in the person's words rather than the CLI's ("background", "interactive"). */
 export const KIND = {

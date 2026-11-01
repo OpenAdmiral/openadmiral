@@ -11,15 +11,17 @@ import { setProjectOrder } from "@/lib/utils";
 import { AgentsMap } from "./AgentsMap";
 import { ArtifactsGallery } from "./ArtifactsPane";
 import { CostsView } from "./CostsView";
-import { DelegationsView } from "./DelegationsView";
 import { Notices } from "./Overlays";
 import { QueueView } from "./QueueView";
 import { Tip, TipLabel, TooltipProvider } from "./Tooltip";
 import { useLifecycle } from "@/lib/lifecycle";
 
-export type FloatableView = "agents" | "delegations" | "queue" | "costs" | "artifacts";
+export type FloatableView = "agents" | "queue" | "costs" | "artifacts";
 
-export const VIEW_TITLE: Record<FloatableView, string> = { agents: "Agents", delegations: "Delegations", queue: "Up next", costs: "Costs", artifacts: "Artifacts" };
+export const VIEW_TITLE: Record<FloatableView, string> = { agents: "Agents", queue: "Up next", costs: "Costs", artifacts: "Artifacts" };
+
+/** A view name from outside the types (a window label, the navigate event): one that no longer exists is not a view. */
+export const isFloatableView = (view: string): view is FloatableView => Object.hasOwn(VIEW_TITLE, view);
 
 /** The label of a view's floating window, in the same list as the agents'. */
 export const viewFloatId = (view: FloatableView) => `view-${view}`;
@@ -35,9 +37,9 @@ function Costs({ agents, rateLimits, now }: { agents: Agent[]; rateLimits: NonNu
   return <CostsView costs={costs} range={range} onRange={setRange} fetchedAt={report.report?.fetchedAt} loading={report.loading} error={report.error} onRefresh={report.refresh} agents={agents} rateLimits={rateLimits} now={now} onJump={jump} />;
 }
 
-/** A floating window with one of the app's views: Delegations, Costs… */
+/** A floating window with one of the app's views: Costs, Artifacts… */
 export function FloatingView({ view }: { view: FloatableView }) {
-  const { agents, delegations, rateLimits, now, cliReady, queues, artifacts, loaded } = useAdmiral({ quiet: true });
+  const { agents, rateLimits, now, cliReady, queues, artifacts, loaded } = useAdmiral({ quiet: true });
   const life = useLifecycle(agents);
   const underway = useUnderway();
   const seen = useSeen(artifacts, loaded);
@@ -75,10 +77,8 @@ export function FloatingView({ view }: { view: FloatableView }) {
             ) : view === "agents" ? (
               <AgentsMap tree={order.spaces.tree} agents={agents} queues={queues} onJump={jump} />
             ) : view === "queue" ? (
-              <QueueView queues={queues} agents={agents} delegations={delegations} now={now} onJump={jump} onError={onError} />
-            ) : (
-              <DelegationsView delegations={delegations} agents={agents} now={now} onJump={jump} queues={queues} />
-            )}
+              <QueueView queues={queues} agents={agents} now={now} onJump={jump} onError={onError} />
+            ) : null}
           </div>
         </div>
         <Notices notices={life.notices} />

@@ -117,7 +117,7 @@ mod tests {
         std::fs::write(dir.join("hooks/register.tsx"), "x").unwrap();
         let hooks = newest(&dir).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        std::fs::write(dir.join("tests/delegate.test.ts"), "y").unwrap();
+        std::fs::write(dir.join("tests/session.test.ts"), "y").unwrap();
         assert_eq!(newest(&dir), Some(hooks), "tests do not count: sessions never load them");
         let _ = std::fs::remove_dir_all(&dir);
     }
