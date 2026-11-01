@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Agent } from "./types";
 
@@ -220,6 +221,12 @@ export function renameEntry(list: string[], from: string, to: string) {
 const appendMissing = (list: string[], keys: string[]) => [...list, ...keys.filter((k) => !list.includes(k))];
 
 /** `readOnly`: a floating window draws the arrangement; only the main window saves it. */
+/** Saves the order, and floating windows follow it. */
+const store = (order: SidebarOrder) => {
+  invoke("order_save", { order }).catch(() => {});
+  emit("openadmiral://order", order).catch(() => {});
+};
+
 export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly = false } = {}) {
   const [order, setOrder] = useState<SidebarOrder | null>(null);
   const loaded = useRef(false);
@@ -231,9 +238,15 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly =
       .finally(() => (loaded.current = true));
   }, []);
 
+  useEffect(() => {
+    if (!readOnly) return;
+    const off = listen<SidebarOrder>("openadmiral://order", (e) => setOrder(e.payload));
+    return () => void off.then((f) => f());
+  }, [readOnly]);
+
   const save = useCallback((next: SidebarOrder) => {
     setOrder(next);
-    if (!readOnly) invoke("order_save", { order: next }).catch(() => {});
+    if (!readOnly) store(next);
   }, [readOnly]);
 
   // Grouped by project, unknown keys placed by name until they are appended below.
@@ -304,7 +317,7 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly =
     setOrder((prev) => {
       if (!prev) return prev;
       const next = f(prev);
-      if (!readOnly) invoke("order_save", { order: next }).catch(() => {});
+      if (!readOnly) store(next);
       return next;
     });
   }, [readOnly]);
