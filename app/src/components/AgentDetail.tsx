@@ -290,7 +290,7 @@ export function AgentDetail({ agent, delegations, now, onOpenDelegations, handof
       {inspectorEl}
     </div>
   );
-  if (part === "inspector") return <div className="flex h-full pt-3 pr-3 pb-3">{inspectorSlot}</div>;
+  if (part === "inspector") return <div className="flex h-full pr-3 pb-3">{inspectorSlot}</div>;
   const compact = !!pane;
   const dense = compact && !!denseOption;
   const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts" } as const;
@@ -555,16 +555,15 @@ function Header({
           </Tip>
         )}
         {tabs}
-        {/* In panes, the window-wide controls sit on the active one only. */}
+        {/* Panes share these in the bar above them; a floating window has its own inspector. */}
         {!compact && <UnderwayPill />}
-        {(!compact || active) && viewMenu}
-        {(!compact || active) && (
+        {!compact && viewMenu}
+        {(!compact || inset) && (
         <Tip side="bottom" content={<TipLabel label={inspector.hidden ? "Show the inspector" : "Hide the inspector"} kbd="⌘⌥0" />}>
           <button
             onClick={inspector.toggle}
             aria-label={inspector.hidden ? "Show the inspector" : "Hide the inspector"}
             className={cn(
-              compact && "@max-[400px]:hidden",
               "relative inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-2 transition-all duration-200 hover:bg-line hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand-500",
               !inspector.hidden && "text-ink",
             )}

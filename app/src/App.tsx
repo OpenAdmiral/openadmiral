@@ -13,14 +13,15 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { collect, type Target } from "@/lib/search";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { useSidebarOrder } from "@/lib/order";
-import { setProjectOrder } from "@/lib/utils";
+import { cn, setProjectOrder } from "@/lib/utils";
+import { SidebarMinimalisticLinearIcon } from "@solar-icons/react";
 import { takeAttention } from "@/lib/attention";
 import { activeOpenCount } from "@/lib/delegations";
 import { useUiState } from "@/lib/ui";
 import { parseFocus } from "@/lib/focus";
 import { listen } from "@tauri-apps/api/event";
 import { Rail } from "@/components/Rail";
-import { TooltipProvider } from "@/components/Tooltip";
+import { Tip, TipLabel, TooltipProvider } from "@/components/Tooltip";
 import { useHandoffs } from "@/lib/handoffs";
 import { useRename } from "@/lib/rename";
 import { keyOf, latest, useSeen } from "@/lib/artifacts";
@@ -633,8 +634,23 @@ export default function App() {
             ) : view?.kind === "delegations" ? (
               <DelegationsView delegations={delegations} agents={agents} now={now} onJump={(id) => setView({ kind: "agent", id })} queues={queues} />
             ) : selected && split.layout !== "1" ? (
-              <div className="flex h-full">
-                <div className="min-w-0 flex-1 p-1.5">
+              <div className="flex h-full flex-col">
+                {/* What the panes share: the same controls wherever the focus is. */}
+                <div data-tauri-drag-region className="flex h-11 shrink-0 items-center justify-end gap-2 px-3">
+                  <UnderwayPill />
+                  {viewMenu}
+                  <Tip side="bottom" content={<TipLabel label={ui.rightCollapsed ? "Show the inspector" : "Hide the inspector"} kbd="⌘⌥0" />}>
+                    <button
+                      onClick={ui.toggleRight}
+                      aria-label={ui.rightCollapsed ? "Show the inspector" : "Hide the inspector"}
+                      className={cn("inline-flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-line hover:text-ink", ui.rightCollapsed ? "text-ink-2" : "text-ink")}
+                    >
+                      <SidebarMinimalisticLinearIcon size={18} className="-scale-x-100" />
+                    </button>
+                  </Tip>
+                </div>
+                <div className="flex min-h-0 flex-1">
+                <div className="min-w-0 flex-1 px-1.5 pb-1.5">
                   <SplitPanes
                     layout={split.layout}
                     ratios={split.ratios}
@@ -669,6 +685,7 @@ export default function App() {
                   />
                 </div>
                 {detail(selected, { key: `inspector:${selected.id}`, part: "inspector", pane: { active: false } })}
+                </div>
               </div>
             ) : selected ? (
               detail(selected, {})
