@@ -271,7 +271,7 @@ export function bandLayout(cells: Cell[][], width: number) {
     const lastRow = Math.max(0, ...list.map((c) => c.row));
     const height = PAD * 2 + ROW_H + lastRow * HALF_ROW;
     const area = Math.max(0, width - GUTTER - CARD_W - 32);
-    const step = cols > 1 ? Math.max(CARD_W + 96, Math.min(area / (cols - 1), 400)) : 0;
+    const step = cols > 1 ? Math.max(CARD_W + 48, Math.min(area / (cols - 1), 400)) : 0;
     const inset = cols >= 3 ? Math.max(0, (area - step * (cols - 1)) / 2) : 0;
     const band = { top, height, cards: list.map((c) => ({ left: GUTTER + 12 + inset + c.col * step, top: PAD + c.row * HALF_ROW })) };
     top += height + BAND_GAP;
