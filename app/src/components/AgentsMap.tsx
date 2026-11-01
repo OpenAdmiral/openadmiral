@@ -89,9 +89,11 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1000);
   useLayoutEffect(() => {
-    if (!wrap.current) return;
+    // The scroller, not the stage: the stage's own minimum width would keep it from ever shrinking.
+    const scroller = wrap.current?.parentElement;
+    if (!scroller) return;
     const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
-    ro.observe(wrap.current);
+    ro.observe(scroller);
     return () => ro.disconnect();
   }, []);
   // Each band around its busiest agent. Decided once for the period and these agents: cards

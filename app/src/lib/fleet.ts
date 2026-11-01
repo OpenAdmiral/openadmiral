@@ -350,7 +350,7 @@ export function mergeTraffic(have: Traffic, fresh: Traffic, now: number): Traffi
   if (!fresh.messages.length && !fresh.work.length) return have.seq === fresh.seq ? have : { ...have, seq: fresh.seq };
   const known = new Set(have.messages.map((m) => m.id));
   const messages = fresh.messages.length ? [...have.messages, ...fresh.messages.filter((m) => !known.has(m.id))].filter((m) => m.at >= now - KEEP_MESSAGES_MS).sort((a, b) => a.at - b.at).slice(-KEEP_MESSAGES) : have.messages;
-  const work = fresh.work.length ? [...have.work, ...fresh.work].filter((w) => w.at >= now - KEEP_WORK_MS).sort((a, b) => a.at - b.at) : have.work;
+  const work = fresh.work.length ? [...have.work, ...fresh.work.filter((w) => !have.work.some((x) => x.at === w.at && x.session === w.session))].filter((w) => w.at >= now - KEEP_WORK_MS).sort((a, b) => a.at - b.at) : have.work;
   return { seq: fresh.seq, messages, work };
 }
 const POLL_MS = 3000;
