@@ -31,7 +31,10 @@ export function ArtifactViewer({
   onDeleted,
   onError,
   onClaudeLink,
+  hideTitle,
 }: {
+  /** Something above it already says which artifact this is. */
+  hideTitle?: boolean;
   artifact: Artifact;
   /** A version asked for ("Open in OpenAdmiral" on an older card); else the newest. */
   version?: number;
@@ -61,8 +64,8 @@ export function ArtifactViewer({
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-        <h2 className="mr-1 min-w-0 truncate text-sm font-semibold text-ink">{a.title}</h2>
+      <div className={cn("flex items-center gap-2 border-b border-line py-2.5", hideTitle ? "flex-wrap gap-y-1.5 px-3" : "px-4")}>
+        {!hideTitle && <h2 className="mr-1 min-w-0 truncate text-sm font-semibold text-ink">{a.title}</h2>}
         <span className="shrink-0 rounded bg-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{a.kind}</span>
         {versions.length > 1 && (
           <div className="flex items-center gap-0.5 rounded-lg bg-line p-0.5">
