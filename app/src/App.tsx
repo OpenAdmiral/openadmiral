@@ -18,6 +18,7 @@ import { takeAttention } from "@/lib/attention";
 import { useUiState } from "@/lib/ui";
 import { parseFocus } from "@/lib/focus";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Rail } from "@/components/Rail";
 import { Tip, TipLabel, TooltipProvider } from "@/components/Tooltip";
 import { useHandoffs } from "@/lib/handoffs";
@@ -109,7 +110,8 @@ export default function App() {
   // "Open in OpenAdmiral" from a session's transcript (focus.json; the backend already raised the window).
   const lastFocus = useRef(0);
   useEffect(() => {
-    const off = listen<unknown>("openadmiral://focus", (e) => {
+    // This window's own: a plain listen also hears what is sent to a floating window.
+    const off = getCurrentWebviewWindow().listen<unknown>("openadmiral://focus", (e) => {
       const f = parseFocus(e.payload, Date.now(), lastFocus.current);
       if (!f) return;
       lastFocus.current = f.at;
@@ -427,7 +429,7 @@ export default function App() {
     setView({ kind: "agent", id });
   };
   useEffect(() => {
-    const off = listen<string>("openadmiral://float-docked", (e) => dockRef.current(e.payload));
+    const off = getCurrentWebviewWindow().listen<string>("openadmiral://float-docked", (e) => dockRef.current(e.payload));
     return () => void off.then((f) => f());
   }, []);
   const floatView = (kind: FloatableView) => invoke("float_open", { sessionId: viewFloatId(kind), title: VIEW_TITLE[kind] }).catch((e) => life.notify(String(e), "error"));

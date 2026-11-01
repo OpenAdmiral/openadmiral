@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
 import { useSeen } from "@/lib/artifacts";
@@ -32,7 +32,8 @@ export function FloatingAgent({ id }: { id: string }) {
   const [artifactFocus, setArtifactFocus] = useState<{ key: string; at: number; version?: number } | undefined>();
   const lastFocus = useRef(0);
   useEffect(() => {
-    const off = listen<unknown>("openadmiral://focus", (e) => {
+    // This window's own: a plain listen also hears what is sent to the others.
+    const off = getCurrentWebviewWindow().listen<unknown>("openadmiral://focus", (e) => {
       const f = parseFocus(e.payload, Date.now(), lastFocus.current);
       if (!f) return;
       lastFocus.current = f.at;

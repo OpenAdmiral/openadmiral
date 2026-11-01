@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 /**
  * Native context menus. The menu is built and shown by the backend; a click comes
@@ -23,7 +23,8 @@ export function setMenuErrorHandler(fn: (message: string) => void) {
 
 export const trace = (message: string) => invoke("frontend_log", { level: "trace", message }).catch(() => {});
 
-listen<string>("openadmiral://menu", async (e) => {
+// This window's own: a plain listen also hears what is sent to other windows.
+getCurrentWebviewWindow().listen<string>("openadmiral://menu", async (e) => {
   const action = actions.get(e.payload);
   if (debugTrace) trace(`menu event ${e.payload} → ${action ? "action" : "no action"}`);
   if (!action) return onError(`Menu item “${e.payload}” has no action.`);
