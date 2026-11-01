@@ -11,6 +11,7 @@ import { matchShortcut } from "@/lib/shortcuts";
 import { useUiState } from "@/lib/ui";
 import { AgentDetail } from "./AgentDetail";
 import { ConfirmDialog, Notices } from "./Overlays";
+import { RestartTrustDialog } from "./TrustPanel";
 import { setTerminalScale } from "./Terminal";
 import { TooltipProvider } from "./Tooltip";
 
@@ -114,6 +115,7 @@ export function FloatingAgent({ id }: { id: string }) {
         )}
       </div>
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
+      <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
       <Notices notices={life.notices} />
     </TooltipProvider>
   );

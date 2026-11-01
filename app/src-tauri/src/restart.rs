@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 static WAITING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
@@ -78,7 +78,10 @@ fn respawn(app: AppHandle, id: String, row: Value) {
     let mut cmd = crate::claude_cmd();
     cmd.args(["respawn", &job]);
     let result = crate::run_cli_within(cmd, Duration::from_secs(60));
-    let _ = app.emit("openadmiral://restart-done", serde_json::json!({ "sessionId": id, "error": result.err() }));
+    // One answer, in the window that shows it: its own if it floats, else the main one.
+    let floating = format!("{}{id}", crate::float::PREFIX);
+    let target = if app.get_webview_window(&floating).is_some() { floating.as_str() } else { "main" };
+    let _ = app.emit_to(target, "openadmiral://restart-done", serde_json::json!({ "sessionId": id, "error": result.err() }));
 }
 
 static INSTALLED: Mutex<Option<(Instant, Option<String>)>> = Mutex::new(None);

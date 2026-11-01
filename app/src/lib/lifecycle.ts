@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { debugTrace, popupMenu, setMenuErrorHandler, trace, type MenuEntry } from "./menu";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startHandoff } from "./handoffs";
 import { canRename, renameNeedsReload, requestRename } from "./rename";
+import { untrustedFolder, type TrustAsk } from "./trust";
 import type { Agent } from "./types";
 
 export type AgentActions = {
@@ -147,20 +149,45 @@ export function useLifecycle(agents: Agent[]) {
 
   // Sessions waiting for their turn to end, to restart (src-tauri/src/restart.rs).
   const [restarting, setRestarting] = useState<string[]>([]);
+  const [trustAsks, setTrustAsks] = useState<TrustAsk[]>([]);
   const agentsNow = useRef(agents);
   agentsNow.current = agents;
   useEffect(() => {
     invoke<string[]>("agent_restarts").then(setRestarting, () => {});
     const offs = [
       listen<string[]>("openadmiral://restarts", (e) => setRestarting(e.payload)),
-      listen<{ sessionId: string; error?: string | null }>("openadmiral://restart-done", (e) => {
-        const name = agentsNow.current.find((a) => a.id === e.payload.sessionId)?.name ?? "The session";
-        if (e.payload.error) notify(`${name} did not restart: ${e.payload.error}`, "error");
+      // Sent to the one window that shows the session (restart.rs).
+      getCurrentWebviewWindow().listen<{ sessionId: string; error?: string | null }>("openadmiral://restart-done", (e) => {
+        const a = agentsNow.current.find((x) => x.id === e.payload.sessionId);
+        const name = a?.name ?? "The session";
+        const error = e.payload.error;
+        const folder = error ? untrustedFolder(error, a?.cwd ?? "") : null;
+        if (folder) setTrustAsks((l) => [...l.filter((t) => t.sessionId !== e.payload.sessionId), { sessionId: e.payload.sessionId, name, folder }]);
+        else if (error) notify(`${name} did not restart: ${error}`, "error");
         else notify(`${name} restarted on the installed Claude Code.`);
       }),
     ];
-    return () => offs.forEach((p) => void p.then((off) => off()));
+    // OPENADMIRAL_TIP=restart-trust:<folder> (preview): the question, without a failed restart.
+    const tip = (e: Event) => {
+      const d = String((e as CustomEvent).detail);
+      const a = agentsNow.current[0];
+      if (d.startsWith("restart-trust:") && a) setTrustAsks([{ sessionId: a.id, name: a.name, folder: d.slice(14) }]);
+    };
+    window.addEventListener("openadmiral:tip", tip);
+    return () => {
+      window.removeEventListener("openadmiral:tip", tip);
+      offs.forEach((p) => void p.then((off) => off()));
+    };
   }, [notify]);
+
+  const trustAsk = trustAsks[0] ?? null;
+  // Accepted once for a folder: every session waiting on that folder goes again.
+  const trustRetry = () => {
+    if (!trustAsk) return;
+    for (const t of trustAsks) if (t.folder === trustAsk.folder) void invoke("agent_restart", { sessionId: t.sessionId }).catch((e) => notify(String(e), "error"));
+    setTrustAsks((l) => l.filter((t) => t.folder !== trustAsk.folder));
+  };
+  const trustCancel = () => setTrustAsks((l) => l.slice(1));
 
   const actions: AgentActions = {
     // Its window if it has one, else a new one (float.rs).
@@ -234,5 +261,5 @@ export function useLifecycle(agents: Agent[]) {
     });
   };
 
-  return { actions, closing, restarting, confirm, setConfirm, notices, clearEnded, notify };
+  return { actions, closing, restarting, trustAsk, trustRetry, trustCancel, confirm, setConfirm, notices, clearEnded, notify };
 }

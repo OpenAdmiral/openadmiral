@@ -1,5 +1,7 @@
 import { ShieldWarningLinearIcon } from "@solar-icons/react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect } from "react";
+import type { TrustAsk } from "@/lib/trust";
 import { disposeTerminal, AgentTerminal } from "./Terminal";
 
 export const isUntrusted = (error: string | null) => !!error && /workspace not trusted/i.test(error);
@@ -17,8 +19,8 @@ export function TrustPanel({ cwd, onRetry, onCancel }: { cwd: string; onRetry: (
       <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
         <ShieldWarningLinearIcon size={18} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
         <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-          Claude Code has not been trusted in <span className="font-mono">{cwd}</span> yet. Accept the trust prompt below (press{" "}
-          <span className="font-semibold">Enter</span> on “Yes, I trust this folder”), then retry.
+          Claude Code has not been trusted in <span className="font-mono">{cwd}</span> yet. In the prompt below choose “Yes, I trust this folder” (press{" "}
+          <span className="font-semibold">↓</span>, then <span className="font-semibold">Enter</span>: “No” comes selected), then retry.
         </p>
       </div>
       <div className="mb-4 h-64 overflow-hidden rounded-xl border border-line bg-term">
@@ -40,6 +42,23 @@ export function TrustPanel({ cwd, onRetry, onCancel }: { cwd: string; onRetry: (
         </button>
       </div>
     </div>
+  );
+}
+
+/** A restart refused for the same reason. The session keeps running on its old version meanwhile. */
+export function RestartTrustDialog({ ask, onRetry, onCancel }: { ask: TrustAsk | null; onRetry: () => void; onCancel: () => void }) {
+  return (
+    <AnimatePresence>
+      {ask && (
+        <motion.div className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-[12vh] backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <div className="w-[640px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-strong bg-canvas p-5 shadow-xl">
+            <h2 className="text-base font-semibold text-ink">{ask.name} can't restart yet</h2>
+            <p className="mt-1 mb-3 text-sm leading-relaxed text-ink-2">It is still running, nothing was lost. It stays on its current version until the folder is trusted.</p>
+            <TrustPanel key={ask.folder} cwd={ask.folder} onRetry={onRetry} onCancel={onCancel} />
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

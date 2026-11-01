@@ -31,6 +31,7 @@ import { devEnv } from "@/lib/dev";
 import { agentMenuEntries, useLifecycle } from "@/lib/lifecycle";
 import { enableTrace, fireMenuItem, registerMenu, setMenuErrorHandler, trace } from "@/lib/menu";
 import { ConfirmDialog, Notices } from "@/components/Overlays";
+import { RestartTrustDialog } from "@/components/TrustPanel";
 import { useAdmiral } from "@/lib/admiral";
 import { matchShortcut, type ShortcutId } from "@/lib/shortcuts";
 import { ShortcutsSheet } from "@/components/ShortcutsSheet";
@@ -698,6 +699,7 @@ export default function App() {
         </AnimatePresence>
       </main>
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
+      <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
       <Notices notices={life.notices} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
       <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} onClose={() => setPalette(false)} onPick={openTarget} />
