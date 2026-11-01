@@ -13,6 +13,8 @@ export type WaitLink = { id: string; from: string; to: string; text: string; at:
 export function resolveAddress(address: string | undefined, agents: Agent[]): Agent | undefined {
   const a = address?.trim().replace(/^@/, "");
   if (!a) return undefined;
+  const pid = /^uds:.*\/(\d+)\.sock$/.exec(a)?.[1];
+  if (pid) return agents.find((x) => String(x.cli?.pid) === pid);
   const lower = a.toLowerCase();
   const tests: ((x: Agent) => boolean)[] = [
     (x) => x.id === a,
@@ -27,6 +29,9 @@ export function resolveAddress(address: string | undefined, agents: Agent[]): Ag
   }
   return undefined;
 }
+
+/** Text with a session's socket address (`uds:/tmp/cc-socks/1881.sock`) in it, as a person reads it. */
+export const withAgentNames = (text: string, agents: Agent[]) => text.replace(/uds:\S*\.sock/g, (address) => resolveAddress(address, agents)?.name ?? "another session");
 
 type PendingItem = NonNullable<NonNullable<QueueEntry["queue"]>["items"]>[number];
 

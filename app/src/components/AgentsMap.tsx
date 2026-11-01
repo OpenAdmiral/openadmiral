@@ -1,6 +1,6 @@
 import { PauseLinearIcon, PlayLinearIcon, StructureLinearIcon } from "@solar-icons/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { waitLinks } from "@/lib/agentLinks";
+import { waitLinks, withAgentNames } from "@/lib/agentLinks";
 import { activityScores, arrange, bandLayout, CARD_W, curveBetween, fleetAt, histogram, linksOf, placeBand, toolLabel, useTraffic, workAt, type Arrangement, type Band, type Box, type Cell, type Resolved } from "@/lib/fleet";
 import { slotOf, type Node as TreeNode } from "@/lib/order";
 import type { QueueEntry } from "@/lib/queue";
@@ -61,7 +61,7 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
   const working = useMemo(() => {
     if (replay) return workAt(work, at);
     const out = new Map<string, string | null>();
-    for (const a of agents) if (a.status === "working") out.set(a.id, a.session?.turn?.progress?.at(-1)?.step ?? a.session?.lastTool?.summary ?? null);
+    for (const a of agents) if (a.status === "working") out.set(a.id, a.session?.turn?.progress?.at(-1)?.step ?? (a.session?.lastTool ? withAgentNames(a.session.lastTool.summary, agents) : null));
     return out;
   }, [replay, work, at, agents]);
   const fleet = useMemo(() => fleetAt(messages, work, working, at), [messages, work, working, at]);

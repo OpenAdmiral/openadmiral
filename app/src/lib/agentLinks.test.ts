@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAddress, waitLinks } from "./agentLinks";
+import { resolveAddress, waitLinks, withAgentNames } from "./agentLinks";
 import type { Agent, AdmiralSession } from "./types";
 import type { QueueEntry } from "./queue";
 
@@ -53,5 +53,17 @@ describe("waitLinks", () => {
       },
     };
     expect(waitLinks(queues, [A, B])).toEqual([{ id: `wait:${A.id}>${B.id}`, from: A.id, to: B.id, text: "go on", at: 5, count: 1 }]);
+  });
+});
+
+describe("socket addresses", () => {
+  const backend = agent("a1", "backend", { cli: { pid: 1881 } as Agent["cli"] });
+  it("name the agent of that process", () => {
+    expect(resolveAddress("uds:/tmp/cc-socks/1881.sock", [backend])).toBe(backend);
+    expect(withAgentNames("→ uds:/tmp/cc-socks/1881.sock", [backend])).toBe("→ backend");
+  });
+  it("say so plainly when it is gone, and leave other text alone", () => {
+    expect(withAgentNames("→ uds:/tmp/cc-socks/99.sock", [backend])).toBe("→ another session");
+    expect(withAgentNames("grep -n foo", [backend])).toBe("grep -n foo");
   });
 });
