@@ -164,41 +164,163 @@ const CHANNEL = 64;
 const PAD = 26;
 const GUTTER = 136;
 const BAND_GAP = 12;
+/** Half a row: the middle of an X sits between the two rows of its corners. */
+const HALF_ROW = (ROW_H + CHANNEL) / 2;
+
+/** Where a card goes in its band; `row` counts half rows. */
+export type Cell = { col: number; row: number };
+export type Link = { a: string; b: string; weight: number };
+
+/** How much each pair talked since `from`, whichever way. */
+export function linksOf(messages: Resolved[], from: number): Link[] {
+  const pairs = new Map<string, Link>();
+  for (const m of messages) {
+    if (m.at < from) continue;
+    const [a, b] = m.from < m.to ? [m.from, m.to] : [m.to, m.from];
+    const key = `${a}|${b}`;
+    const link = pairs.get(key) ?? { a, b, weight: 0 };
+    link.weight++;
+    pairs.set(key, link);
+  }
+  return [...pairs.values()];
+}
+
+/** The centre of a band of `n` cards, and the places around it, nearest first. */
+function cellsFor(n: number): { hub: Cell; around: Cell[] } {
+  if (n <= 2) return { hub: { col: 0, row: 0 }, around: [{ col: 1, row: 0 }] };
+  if (n === 3) return { hub: { col: 1, row: 0 }, around: [{ col: 0, row: 0 }, { col: 2, row: 0 }] };
+  if (n <= 5) return { hub: { col: 1, row: 1 }, around: [{ col: 0, row: 0 }, { col: 2, row: 0 }, { col: 0, row: 2 }, { col: 2, row: 2 }] };
+  let cols = 3;
+  while (cols * 3 - 1 < n - 1) cols += 2;
+  const hub = { col: (cols - 1) / 2, row: 2 };
+  const around: Cell[] = [];
+  for (const row of [0, 2, 4]) for (let col = 0; col < cols; col++) if (col !== hub.col || row !== hub.row) around.push({ col, row });
+  const away = (c: Cell) => Math.abs(c.col - hub.col) + Math.abs(c.row - hub.row) / 2;
+  return { hub, around: around.sort((x, y) => away(x) - away(y)) };
+}
+
+/** How bad a placement is: a line through a card, then lines that cross, then long lines. */
+function placementCost(cells: Map<string, Cell>, links: Link[]) {
+  const box = (c: Cell): Box => ({ x: c.col * 300, y: c.row * HALF_ROW, w: CARD_W, h: ROW_H });
+  const boxes = new Map([...cells].map(([id, c]) => [id, box(c)]));
+  const all = [...boxes.values()];
+  const lines = links.flatMap((l) => {
+    const a = boxes.get(l.a), b = boxes.get(l.b);
+    if (!a || !b) return [];
+    const curve = curveBetween(a, b, 0, all);
+    return [{ a, b, weight: 1 + Math.log2(l.weight), points: Array.from({ length: 13 }, (_, i) => curve.at(i / 12)) }];
+  });
+  let cost = 0;
+  lines.forEach((line, i) => {
+    for (const other of all) if (other !== line.a && other !== line.b && line.points.some((p) => p.x > other.x - 6 && p.x < other.x + other.w + 6 && p.y > other.y - 6 && p.y < other.y + other.h + 6)) cost += 1000 * line.weight;
+    for (let k = 1; k < line.points.length; k++) cost += Math.hypot(line.points[k].x - line.points[k - 1].x, line.points[k].y - line.points[k - 1].y) * 0.01 * line.weight;
+    for (const other of lines.slice(i + 1)) if (polylinesCross(line.points, other.points)) cost += 100 * Math.min(line.weight, other.weight);
+  });
+  return cost;
+}
+
+type Point = { x: number; y: number };
+function polylinesCross(p: Point[], q: Point[]) {
+  const side = (a: Point, b: Point, c: Point) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  for (let i = 1; i < p.length; i++)
+    for (let j = 1; j < q.length; j++)
+      if (side(p[i - 1], p[i], q[j - 1]) * side(p[i - 1], p[i], q[j]) < 0 && side(q[j - 1], q[j], p[i - 1]) * side(q[j - 1], q[j], p[i]) < 0) return true;
+  return false;
+}
 
 /**
- * A band per project, stacked. Three agents or more zigzag across two rows: every pair then
- * has a way between them that crosses no card. `counts` is how many agents each band has.
+ * Who goes where in a band: the one most lines touch in the middle (the first, most active, if
+ * none does), and the rest wherever their lines run freest. `ids` in order; cells in that order.
  */
-export function bandLayout(counts: number[], width: number) {
+export function placeBand(ids: string[], links: Link[]): Cell[] {
+  const inside = links.filter((l) => l.a !== l.b && ids.includes(l.a) && ids.includes(l.b));
+  const degree = (id: string) => inside.reduce((n, l) => n + (l.a === id || l.b === id ? l.weight : 0), 0);
+  const hub = ids.reduce((best, id) => (degree(id) > degree(best) ? id : best), ids[0]);
+  const { hub: centre, around } = cellsFor(ids.length);
+  // The busiest take the nearest places, then swaps while they help.
+  const others = ids.filter((id) => id !== hub).sort((x, y) => degree(y) - degree(x));
+  const seats: (string | null)[] = around.map((_, i) => others[i] ?? null);
+  const placement = () => {
+    const m = new Map<string, Cell>([[hub, centre]]);
+    seats.forEach((id, i) => id && m.set(id, around[i]));
+    return m;
+  };
+  let best = placementCost(placement(), inside);
+  for (let improved = true, pass = 0; improved && pass < 8; pass++) {
+    improved = false;
+    for (let i = 0; i < seats.length; i++)
+      for (let j = i + 1; j < seats.length; j++) {
+        if (!seats[i] && !seats[j]) continue;
+        [seats[i], seats[j]] = [seats[j], seats[i]];
+        const cost = placementCost(placement(), inside);
+        if (cost < best - 1e-6) {
+          best = cost;
+          improved = true;
+        } else [seats[i], seats[j]] = [seats[j], seats[i]];
+      }
+  }
+  const final = placement();
+  return ids.map((id) => final.get(id) ?? centre);
+}
+
+/** A band per project, stacked, each around its centre. `cells` is where each band's cards go. */
+export function bandLayout(cells: Cell[][], width: number) {
   let top = 0;
-  const bands = counts.map((n) => {
-    const rows = n >= 3 ? 2 : 1;
-    const height = PAD * 2 + rows * ROW_H + (rows - 1) * CHANNEL;
-    const area = Math.max(0, width - GUTTER - CARD_W - 24);
-    const slot = n > 1 ? Math.min(area / (n - 1), rows === 2 ? 300 : 340) : 0;
-    const cards = Array.from({ length: n }, (_, i) => ({ left: GUTTER + 12 + Math.max(slot, rows === 2 ? 150 : CARD_W + 40) * i, top: PAD + (rows === 2 && i % 2 ? ROW_H + CHANNEL : 0) }));
-    const band = { top, height, rows, cards };
+  const bands = cells.map((list) => {
+    const cols = Math.max(0, ...list.map((c) => c.col)) + 1;
+    const lastRow = Math.max(0, ...list.map((c) => c.row));
+    const height = PAD * 2 + ROW_H + lastRow * HALF_ROW;
+    const area = Math.max(0, width - GUTTER - CARD_W - 32);
+    const step = cols > 1 ? Math.max(CARD_W + 96, Math.min(area / (cols - 1), 400)) : 0;
+    const inset = cols >= 3 ? Math.max(0, (area - step * (cols - 1)) / 2) : 0;
+    const band = { top, height, cards: list.map((c) => ({ left: GUTTER + 12 + inset + c.col * step, top: PAD + c.row * HALF_ROW })) };
     top += height + BAND_GAP;
     return band;
   });
   return { bands, height: bands.length ? top - BAND_GAP : 0 };
 }
 
-export type Box = { x: number; y: number; w: number; h: number };
+/** `band` tells apart cards in different bands; lines between bands run up or down. */
+export type Box = { x: number; y: number; w: number; h: number; band?: number };
 export type Curve = { d: string; at: (u: number) => { x: number; y: number } };
 
+const clamp = (v: number, limit: number) => Math.max(-limit, Math.min(limit, v));
+
 /**
- * A line between two cards, always from the sides that face each other: straight along a row,
- * through the channel between rows, and up or down between bands. `lane` keeps the two
- * directions of a pair apart.
+ * A line between two cards, from the sides that face each other: straight along a row, around
+ * a card in between (through the channel beside the row), out of the sides to another column,
+ * up or down otherwise. `lane` keeps the two directions of a pair apart; `obstacles` are all
+ * the cards.
  */
-export function curveBetween(a: Box, b: Box, lane = 0): Curve {
+export function curveBetween(a: Box, b: Box, lane = 0, obstacles: Box[] = []): Curve {
   const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  const gap = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w));
   let p0, p1, p2, p3;
   if (Math.abs(ac.y - bc.y) < a.h / 2) {
+    const blocked = obstacles.some((o) => o !== a && o !== b && Math.abs(o.y + o.h / 2 - ac.y) < a.h / 2 && o.x + o.w / 2 > Math.min(ac.x, bc.x) && o.x + o.w / 2 < Math.max(ac.x, bc.x));
+    if (blocked) {
+      const band = obstacles.filter((o) => o.band === a.band);
+      const down = !band.some((o) => o.y < a.y - 1) && band.some((o) => o.y > a.y + 1);
+      const up = down ? 1 : -1;
+      const dir = bc.x > ac.x ? 1 : -1;
+      p0 = { x: ac.x + dir * a.w * 0.3 + lane, y: ac.y + (up * a.h) / 2 };
+      p3 = { x: bc.x - dir * b.w * 0.3 + lane, y: bc.y + (up * b.h) / 2 };
+      p1 = { x: p0.x + dir * 40, y: p0.y + up * 34 };
+      p2 = { x: p3.x - dir * 40, y: p3.y + up * 34 };
+    } else {
+      const dir = bc.x > ac.x ? 1 : -1;
+      p0 = { x: ac.x + (dir * a.w) / 2, y: ac.y + lane };
+      p3 = { x: bc.x - (dir * b.w) / 2, y: bc.y + lane };
+      const c = (p3.x - p0.x) / 2;
+      p1 = { x: p0.x + c, y: p0.y };
+      p2 = { x: p3.x - c, y: p3.y };
+    }
+  } else if (a.band === b.band && gap >= 24) {
     const dir = bc.x > ac.x ? 1 : -1;
-    p0 = { x: ac.x + (dir * a.w) / 2, y: ac.y + lane };
-    p3 = { x: bc.x - (dir * b.w) / 2, y: bc.y + lane };
+    // Fanned out, so the lines leaving one side do not start on the same point.
+    const fan = clamp((bc.y - ac.y) * 0.2, a.h * 0.3);
+    p0 = { x: ac.x + (dir * a.w) / 2, y: ac.y + fan + lane };
+    p3 = { x: bc.x - (dir * b.w) / 2, y: bc.y - fan + lane };
     const c = (p3.x - p0.x) / 2;
     p1 = { x: p0.x + c, y: p0.y };
     p2 = { x: p3.x - c, y: p3.y };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrange, bandLayout, fleetAt, histogram, resolveMessages, toolLabel, workAt, type Band, type Resolved } from "./fleet";
+import { arrange, bandLayout, curveBetween, fleetAt, histogram, linksOf, placeBand, resolveMessages, toolLabel, workAt, type Band, type Resolved } from "./fleet";
 import type { Agent } from "./types";
 
 const MIN = 60_000;
@@ -73,17 +73,56 @@ describe("who shows, and where", () => {
     const gone = arrange([band("A", "a1", "a2", "a3")], (x) => x, (x) => (x === "a2" ? 0 : 1), later.order);
     expect(gone.bands[0].agents).toEqual(["a1", "a3"]);
   });
-  it("zigzags three or more across two rows, and stacks the bands", () => {
-    const l = bandLayout([2, 4], 1200);
-    expect(l.bands[0].rows).toBe(1);
-    expect(l.bands[1].rows).toBe(2);
+  it("stacks the bands", () => {
+    const l = bandLayout([placeBand(["a", "b"], []), placeBand(["c", "d", "e", "f", "g"], [])], 1200);
     expect(l.bands[1].top).toBeGreaterThan(l.bands[0].top + l.bands[0].height - 1);
-    const ys = l.bands[1].cards.map((c) => c.top);
-    expect(ys[0]).toBe(ys[2]);
-    expect(ys[1]).toBe(ys[3]);
-    expect(ys[1]).toBeGreaterThan(ys[0]);
-    const xs = l.bands[1].cards.map((c) => c.left);
-    expect(xs).toEqual([...xs].sort((a, b) => a - b));
     expect(l.height).toBe(l.bands[1].top + l.bands[1].height);
+  });
+});
+
+describe("a band around its busiest agent", () => {
+  const link = (a: string, b: string, weight = 3) => ({ a, b, weight });
+  // Whether a pair's line runs through a third card, as drawn.
+  const pierced = (ids: string[], links: { a: string; b: string }[]) => {
+    const { bands } = bandLayout([placeBand(ids, links.map((l) => ({ ...l, weight: 3 })))], 1400);
+    const boxes = new Map(ids.map((id, i) => [id, { x: bands[0].cards[i].left, y: bands[0].cards[i].top, w: 228, h: 92 }]));
+    const all = [...boxes.values()];
+    return links.filter((l) => {
+      const a = boxes.get(l.a)!, b = boxes.get(l.b)!;
+      const c = curveBetween(a, b, 0, all);
+      return all.some((o) => o !== a && o !== b && Array.from({ length: 41 }, (_, i) => c.at(i / 40)).some((p) => p.x > o.x && p.x < o.x + o.w && p.y > o.y && p.y < o.y + o.h));
+    });
+  };
+
+  it("puts the one most lines touch in the middle", () => {
+    const ids = ["a", "b", "c", "d", "hub"];
+    const cells = placeBand(ids, ["a", "b", "c", "d"].map((x) => link(x, "hub")));
+    expect(cells[4]).toEqual({ col: 1, row: 1 });
+    expect(new Set(cells.map((c) => `${c.col},${c.row}`)).size).toBe(5);
+  });
+
+  it("the middle's lines touch no other card, at any size", () => {
+    for (const n of [3, 4, 5, 6, 7, 9]) {
+      const others = Array.from({ length: n - 1 }, (_, i) => `s${i}`);
+      expect(pierced(["hub", ...others], others.map((a) => ({ a, b: "hub" })))).toEqual([]);
+    }
+  });
+
+  it("seats those who talk to each other side by side", () => {
+    const ids = ["hub", "a", "b", "c", "d"];
+    const links = [{ a: "hub", b: "a" }, { a: "hub", b: "b" }, { a: "hub", b: "c" }, { a: "hub", b: "d" }, { a: "a", b: "c" }];
+    expect(pierced(ids, links)).toEqual([]);
+  });
+
+  it("goes around a card between two of the same row", () => {
+    const row = (x: number) => ({ x, y: 0, w: 228, h: 92 });
+    const [a, mid, b] = [row(0), row(300), row(600)];
+    const c = curveBetween(a, b, 0, [a, mid, b]);
+    expect(Array.from({ length: 41 }, (_, i) => c.at(i / 40)).some((p) => p.x > 300 && p.x < 528 && p.y > 0 && p.y < 92)).toBe(false);
+  });
+
+  it("counts what was said in the period, either way", () => {
+    const m = (at: number, from: string, to: string) => ({ id: `${at}`, at, from, to, text: "" });
+    expect(linksOf([m(1, "a", "b"), m(5, "a", "b"), m(6, "b", "a")], 2)).toEqual([{ a: "a", b: "b", weight: 2 }]);
   });
 });

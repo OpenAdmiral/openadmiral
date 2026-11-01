@@ -1,7 +1,7 @@
 import { PauseLinearIcon, PlayLinearIcon, StructureLinearIcon } from "@solar-icons/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { waitLinks } from "@/lib/agentLinks";
-import { activityScores, arrange, bandLayout, CARD_W, curveBetween, fleetAt, histogram, toolLabel, useTraffic, workAt, type Arrangement, type Band, type Box, type Resolved } from "@/lib/fleet";
+import { activityScores, arrange, bandLayout, CARD_W, curveBetween, fleetAt, histogram, linksOf, placeBand, toolLabel, useTraffic, workAt, type Arrangement, type Band, type Box, type Cell, type Resolved } from "@/lib/fleet";
 import { slotOf, type Node as TreeNode } from "@/lib/order";
 import type { QueueEntry } from "@/lib/queue";
 import type { Agent } from "@/lib/types";
@@ -91,16 +91,29 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
     ro.observe(wrap.current);
     return () => ro.disconnect();
   }, []);
-  const layout = bandLayout(bands.map((b) => b.agents.length), width);
+  // Each band around its busiest agent. Decided once for the period and these agents: cards
+  // that moved with every message could not be followed.
+  const placements = useRef(new Map<string, { key: string; cells: Cell[] }>());
+  const cells = bands.map((b) => {
+    const ids = b.agents.map((a) => a.id);
+    const key = `${hours}|${ids.join()}`;
+    const known = placements.current.get(b.id);
+    if (known?.key === key) return known.cells;
+    const made = placeBand(ids, linksOf(messages, from));
+    if (ready) placements.current.set(b.id, { key, cells: made });
+    return made;
+  });
+  const layout = bandLayout(cells, width);
   const boxes = useMemo(() => {
     const out: Record<string, Box> = {};
     bands.forEach((b, i) => b.agents.forEach((a, j) => {
       const c = layout.bands[i].cards[j];
-      out[a.id] = { x: c.left, y: layout.bands[i].top + c.top, w: CARD_W, h: 92 };
+      out[a.id] = { x: c.left, y: layout.bands[i].top + c.top, w: CARD_W, h: 92, band: i };
     }));
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown.map((a) => a.id).join(), width]);
+  }, [shown.map((a) => a.id).join(), JSON.stringify(cells), width]);
+  const curve = (a: Box, b: Box, lane = 0) => curveBetween(a, b, lane, Object.values(boxes));
 
   // Messages on their way. Live: what just arrived, not what was already there on opening.
   const seen = useRef<Map<string, number> | null>(null);
@@ -129,7 +142,7 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
   const pills = flying.flatMap((m) => {
     const a = boxes[m.from], b = boxes[m.to];
     if (!a || !b) return [];
-    const mid = curveBetween(a, b, lane(m.from, m.to)).at(0.5);
+    const mid = curve(a, b, lane(m.from, m.to)).at(0.5);
     let y = mid.y;
     for (let i = 0; i < 6 && placed.some((p) => Math.abs(p.x - mid.x) < 200 && Math.abs(p.y - y) < 26); i++) y = mid.y + (i % 2 ? -1 : 1) * ((i + 2) >> 1) * 28;
     placed.push({ x: mid.x, y });
@@ -187,18 +200,18 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
                 const a = boxes[p.a], b = boxes[p.b];
                 if (!a || !b) return null;
                 const fresh = Math.max(0, 1 - (at - p.last) / (15 * 60_000));
-                return <path key={`${p.a}|${p.b}`} d={curveBetween(a, b).d} fill="none" style={{ stroke: "var(--color-ink-3)" }} strokeWidth={1} opacity={hover && !(p.a === hover || p.b === hover) ? 0.05 : 0.12 + 0.3 * fresh} />;
+                return <path key={`${p.a}|${p.b}`} d={curve(a, b).d} fill="none" style={{ stroke: "var(--color-ink-3)" }} strokeWidth={1} opacity={hover && !(p.a === hover || p.b === hover) ? 0.05 : 0.12 + 0.3 * fresh} />;
               })}
               {queued.map((l) => {
                 const a = boxes[l.from], b = boxes[l.to];
                 if (!a || !b) return null;
-                return <path key={l.id} d={curveBetween(a, b, 10).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.5} strokeDasharray="0.5 5" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(l) ? 0.85 : 0.08} />;
+                return <path key={l.id} d={curve(a, b, 10).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.5} strokeDasharray="0.5 5" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(l) ? 0.85 : 0.08} />;
               })}
               {fleet.awaits.map((r) => {
                 const a = boxes[r.from], b = boxes[r.to];
                 if (!a || !b) return null;
                 return (
-                  <path key={`await:${r.from}>${r.to}`} d={curveBetween(a, b, lane(r.from, r.to)).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.6} strokeDasharray="2 6" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(r) ? 1 : 0.08}>
+                  <path key={`await:${r.from}>${r.to}`} d={curve(a, b, lane(r.from, r.to)).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.6} strokeDasharray="2 6" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(r) ? 1 : 0.08}>
                     <title>
                       {nameOf(r.from)} awaits {nameOf(r.to)}: {r.summary}
                     </title>
@@ -208,7 +221,7 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
               {fleet.worksFor.map((r) => {
                 const a = boxes[r.from], b = boxes[r.to];
                 if (!a || !b) return null;
-                const d = curveBetween(a, b, lane(r.from, r.to)).d;
+                const d = curve(a, b, lane(r.from, r.to)).d;
                 return (
                   <g key={`works:${r.from}>${r.to}`} opacity={touches(r) ? 1 : 0.08}>
                     <path d={d} fill="none" style={{ stroke: WORKS_STROKE }} strokeWidth={1.6} opacity={0.6} markerEnd="url(#fleet-works)">
@@ -223,7 +236,7 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
               {flying.map((m) => {
                 const a = boxes[m.from], b = boxes[m.to];
                 if (!a || !b) return null;
-                const d = curveBetween(a, b, lane(m.from, m.to)).d;
+                const d = curve(a, b, lane(m.from, m.to)).d;
                 return (
                   <g key={m.id}>
                     <path d={d} pathLength={100} fill="none" stroke="#5ee1ff" strokeWidth={6} opacity={0.55} filter="url(#fleet-blur)" className="fleet-beam" />
