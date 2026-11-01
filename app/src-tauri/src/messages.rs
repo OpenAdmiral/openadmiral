@@ -20,6 +20,9 @@ pub struct Message {
     to: String,
     summary: Option<String>,
     text: String,
+    /// In the order they were read, not written: what a window asks "since".
+    #[serde(skip)]
+    seq: u64,
 }
 
 /// One thing a session was doing: enough of them to replay who was working on what.
@@ -29,11 +32,15 @@ pub struct Work {
     at: u64,
     session: String,
     label: String,
+    #[serde(skip)]
+    seq: u64,
 }
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Traffic {
+    /// Pass it back next time to get only what came after.
+    seq: u64,
     messages: Vec<Message>,
     work: Vec<Work>,
 }
@@ -51,6 +58,8 @@ struct State {
     files: HashMap<PathBuf, File>,
     /// A sender's socket → its name, from the messages received.
     sockets: HashMap<String, String>,
+    /// The last number handed to something read.
+    seq: u64,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -106,7 +115,7 @@ fn calls(row: &Value) -> Vec<(String, String, Option<String>, String)> {
         .collect()
 }
 
-fn read(path: &PathBuf, session: &str, file: &mut File, sockets: &mut HashMap<String, String>) {
+fn read(path: &PathBuf, session: &str, file: &mut File, sockets: &mut HashMap<String, String>, seq: &mut u64) {
     let Ok(mut f) = std::fs::File::open(path) else { return };
     if f.seek(SeekFrom::Start(file.offset)).is_err() {
         return;
@@ -131,13 +140,15 @@ fn read(path: &PathBuf, session: &str, file: &mut File, sockets: &mut HashMap<St
                 if let Some(at) = at {
                     for (id, to, summary, text) in calls(&row) {
                         if file.seen.insert(id.clone()) {
-                            file.messages.push(Message { id, at, from: session.to_string(), to, summary, text });
+                            *seq += 1;
+                            file.messages.push(Message { id, at, from: session.to_string(), to, summary, text, seq: *seq });
                         }
                     }
                     let blocks = row.pointer("/message/content").and_then(Value::as_array);
                     for label in blocks.into_iter().flatten().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")).filter_map(work_label) {
                         if file.work.last().is_none_or(|w| at.saturating_sub(w.at) >= WORK_EVERY_MS) {
-                            file.work.push(Work { at, session: session.to_string(), label });
+                            *seq += 1;
+                            file.work.push(Work { at, session: session.to_string(), label, seq: *seq });
                         }
                     }
                 }
@@ -158,13 +169,16 @@ fn resolve(to: &str, sockets: &HashMap<String, String>) -> String {
         .unwrap_or_else(|| to.to_string())
 }
 
-/// The last week's messages between sessions and the last hours' work, oldest first.
+/// The last week's messages between sessions and the last hours' work, oldest first; with
+/// `after`, only what was read since that `seq`: the whole of it is over a megabyte, and a view
+/// asks every few seconds.
 #[tauri::command]
-pub async fn agent_traffic() -> Traffic {
-    tauri::async_runtime::spawn_blocking(collect).await.unwrap_or_default()
+pub async fn agent_traffic(after: Option<u64>) -> Traffic {
+    let after = after.unwrap_or(0);
+    tauri::async_runtime::spawn_blocking(move || collect(after)).await.unwrap_or_default()
 }
 
-fn collect() -> Traffic {
+fn collect(after: u64) -> Traffic {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     let since = now.saturating_sub(KEEP_MS);
     let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -175,10 +189,10 @@ fn collect() -> Traffic {
             continue;
         }
         let Some(path) = crate::transcript::locate(id, cwd) else { continue };
-        let State { files, sockets } = &mut *state;
-        read(&path, id, files.entry(path.clone()).or_default(), sockets);
+        let State { files, sockets, seq } = &mut *state;
+        read(&path, id, files.entry(path.clone()).or_default(), sockets, seq);
     }
-    let mut out: Vec<Message> = state.files.values().flat_map(|f| f.messages.iter().filter(|m| m.at >= since).cloned()).collect();
+    let mut out: Vec<Message> = state.files.values().flat_map(|f| f.messages.iter().filter(|m| m.seq > after && m.at >= since).cloned()).collect();
     out.sort_by_key(|m| m.at);
     if out.len() > MAX_MESSAGES {
         out.drain(..out.len() - MAX_MESSAGES);
@@ -187,9 +201,9 @@ fn collect() -> Traffic {
         m.to = resolve(&m.to, &state.sockets);
     }
     let work_since = now.saturating_sub(WORK_KEEP_MS);
-    let mut work: Vec<Work> = state.files.values().flat_map(|f| f.work.iter().filter(|w| w.at >= work_since).cloned()).collect();
+    let mut work: Vec<Work> = state.files.values().flat_map(|f| f.work.iter().filter(|w| w.seq > after && w.at >= work_since).cloned()).collect();
     work.sort_by_key(|w| w.at);
-    Traffic { messages: out, work }
+    Traffic { seq: state.seq, messages: out, work }
 }
 
 #[cfg(test)]
@@ -218,11 +232,13 @@ mod tests {
         };
         std::fs::write(&path, format!("{}\n{}\n{}\n", row(None), row(Some("2026-10-31T10:00:00Z")), row(Some("2026-10-31T10:00:01Z")))).unwrap();
         let (mut file, mut sockets) = (File::default(), HashMap::new());
-        read(&path, "s1", &mut file, &mut sockets);
+        let mut seq = file.messages.len() as u64 + file.work.len() as u64;
+        read(&path, "s1", &mut file, &mut sockets, &mut seq);
         assert_eq!(file.messages.len(), 1);
         assert_eq!((file.messages[0].to.as_str(), file.messages[0].text.as_str()), ("backend", "hello"));
         let before = file.offset;
-        read(&path, "s1", &mut file, &mut sockets);
+        let mut seq = file.messages.len() as u64 + file.work.len() as u64;
+        read(&path, "s1", &mut file, &mut sockets, &mut seq);
         assert_eq!((file.offset, file.messages.len()), (before, 1));
         assert!(file.work.is_empty(), "a message is not work");
         let _ = std::fs::remove_dir_all(&dir);

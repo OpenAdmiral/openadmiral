@@ -64,7 +64,9 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
     for (const a of agents) if (a.status === "working") out.set(a.id, a.session?.turn?.progress?.at(-1)?.step ?? (a.session?.lastTool ? withAgentNames(a.session.lastTool.summary, agents) : null));
     return out;
   }, [replay, work, at, agents]);
-  const fleet = useMemo(() => fleetAt(messages, work, working, at), [messages, work, working, at]);
+  // Live, the relationships need no more than a reading every few seconds, not one per tick.
+  const fleetClock = replay ? at : Math.floor(at / 3000) * 3000;
+  const fleet = useMemo(() => fleetAt(messages, work, working, fleetClock), [messages, work, working, fleetClock]);
 
   // Only who did something in the period, or is at it now; in place while looking.
   const bandsAll = useMemo<ProjectBand[]>(
@@ -72,7 +74,8 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
     [tree],
   );
   const order = useRef<{ hours: number; order: Arrangement } | null>(null);
-  const scores = activityScores(messages, work, from);
+  const minute = Math.floor(from / 60_000) * 60_000;
+  const scores = useMemo(() => activityScores(messages, work, minute), [messages, work, minute]);
   const score = (a: Agent) => (scores.get(a.id) ?? 0) + (a.status === "working" || a.status === "waiting" ? 1 : 0);
   // Before the first reading, activity would look like none at all and fix a wrong order.
   const ready = messages.length > 0 || work.length > 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrange, bandLayout, curveBetween, fleetAt, histogram, linksOf, placeBand, resolveMessages, toolLabel, workAt, type Band, type Resolved } from "./fleet";
+import { arrange, bandLayout, curveBetween, fleetAt, histogram, linksOf, mergeTraffic, placeBand, resolveMessages, toolLabel, workAt, type Band, type Resolved } from "./fleet";
 import type { Agent } from "./types";
 
 const MIN = 60_000;
@@ -124,5 +124,26 @@ describe("a band around its busiest agent", () => {
   it("counts what was said in the period, either way", () => {
     const m = (at: number, from: string, to: string) => ({ id: `${at}`, at, from, to, text: "" });
     expect(linksOf([m(1, "a", "b"), m(5, "a", "b"), m(6, "b", "a")], 2)).toEqual([{ a: "a", b: "b", weight: 2 }]);
+  });
+});
+
+describe("traffic read bit by bit", () => {
+  const m = (id: string, at: number) => ({ id, at, from: "a", to: "b", text: "" });
+  const NOW = 1_800_000_000_000;
+  it("keeps the same object when nothing came, so nothing redraws", () => {
+    const have = { seq: 5, messages: [m("1", NOW)], work: [] };
+    expect(mergeTraffic(have, { seq: 5, messages: [], work: [] }, NOW)).toBe(have);
+  });
+  it("adds what was read late in its place by time, once", () => {
+    const have = { seq: 5, messages: [m("1", NOW - 10), m("3", NOW)], work: [] };
+    const r = mergeTraffic(have, { seq: 7, messages: [m("2", NOW - 5), m("3", NOW)], work: [] }, NOW);
+    expect(r.messages.map((x) => x.id)).toEqual(["1", "2", "3"]);
+    expect(r.seq).toBe(7);
+  });
+  it("lets go of what is too old", () => {
+    const old = NOW - 8 * 24 * 60 * 60_000;
+    const r = mergeTraffic({ seq: 1, messages: [m("old", old)], work: [{ at: old, session: "a", label: "x" }] }, { seq: 2, messages: [m("new", NOW)], work: [{ at: NOW, session: "a", label: "y" }] }, NOW);
+    expect(r.messages.map((x) => x.id)).toEqual(["new"]);
+    expect(r.work.map((w) => w.label)).toEqual(["y"]);
   });
 });

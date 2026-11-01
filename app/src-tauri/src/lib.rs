@@ -1046,6 +1046,7 @@ fn watch_admiral(app: AppHandle) {
 }
 
 fn poll_agents(app: AppHandle) {
+    let mut last: Option<Value> = None;
     std::thread::spawn(move || loop {
         if let Some(agents) = claude_agents() {
             restart::tick(&app, &agents);
@@ -1053,13 +1054,22 @@ fn poll_agents(app: AppHandle) {
                 handoff::tick(&app, &agents);
             }
             tray::refresh(&app, &agents);
-            let _ = app.emit("openadmiral://agents", agents);
+            // Every window redraws on this: only when something changed. They still hear that
+            // the list was read (a session missing from it counts readings; see isPhantom).
+            if last.as_ref() != Some(&agents) {
+                let _ = app.emit("openadmiral://agents", &agents);
+                last = Some(agents);
+            } else {
+                let _ = app.emit("openadmiral://agents-read", ());
+            }
         }
-        // Every 2 s while someone looks (or a hand-off waits on a session to exit); with the
-        // window hidden or minimized, the menu bar's counts can wait 10 s.
+        // Every 4 s while someone looks (session files bring their changes at once), 2 s while
+        // a hand-off or a restart waits on a session; with the window hidden or minimized, the
+        // menu bar's counts can wait 10 s.
         // (A flag the window events keep: asking the window itself goes through the main thread.)
         let shown = WINDOW_SHOWN.load(std::sync::atomic::Ordering::Relaxed) || float::any();
-        std::thread::sleep(Duration::from_secs(if shown || handoff::any_pending(&app) || restart::any() { 2 } else { 10 }));
+        let waiting = handoff::any_pending(&app) || restart::any();
+        std::thread::sleep(Duration::from_secs(if waiting { 2 } else if shown { 4 } else { 10 }));
     });
 }
 

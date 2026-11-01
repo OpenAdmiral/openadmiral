@@ -33,7 +33,7 @@ pub struct Discovered {
     pub via: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Discovery {
     /// The OpenAdmiral plugin is installed and enabled for this user.
@@ -236,10 +236,26 @@ fn plugin_installed() -> bool {
     installed && !disabled
 }
 
+static SCAN: std::sync::Mutex<Option<(std::time::Instant, Discovery)>> = std::sync::Mutex::new(None);
+const SCAN_FRESH: std::time::Duration = std::time::Duration::from_secs(8);
+
 /// Sessions running without the plugin, and whether the plugin is installed at all.
 #[tauri::command]
 pub async fn discover_sessions() -> Discovery {
-    tauri::async_runtime::spawn_blocking(discover).await.unwrap_or(Discovery { plugin_installed: true, sessions: vec![] })
+    tauri::async_runtime::spawn_blocking(|| {
+        // Every window asks; one scan serves them all.
+        let mut cache = SCAN.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, found)) = cache.as_ref() {
+            if at.elapsed() < SCAN_FRESH {
+                return found.clone();
+            }
+        }
+        let found = discover();
+        *cache = Some((std::time::Instant::now(), found.clone()));
+        found
+    })
+    .await
+    .unwrap_or(Discovery { plugin_installed: true, sessions: vec![] })
 }
 
 fn discover() -> Discovery {

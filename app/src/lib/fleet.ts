@@ -9,7 +9,7 @@ import type { Agent } from "./types";
 
 export type Message = { id: string; at: number; from: string; to: string; summary?: string | null; text: string };
 export type Work = { at: number; session: string; label: string };
-export type Traffic = { messages: Message[]; work: Work[] };
+export type Traffic = { seq?: number; messages: Message[]; work: Work[] };
 
 /** A message with both ends known. `to` is the receiving agent's id. */
 export type Resolved = Message & { to: string };
@@ -339,14 +339,39 @@ export function curveBetween(a: Box, b: Box, lane = 0, obstacles: Box[] = []): C
   return { d: `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`, at: (u) => ({ x: f(u, "x"), y: f(u, "y") }) };
 }
 
-const EMPTY: Traffic = { messages: [], work: [] };
+const EMPTY: Traffic = { seq: 0, messages: [], work: [] };
+/** What the backend keeps: older than this leaves here too. */
+const KEEP_MESSAGES = 3000;
+const KEEP_MESSAGES_MS = 7 * 24 * 60 * 60_000;
+const KEEP_WORK_MS = 12 * 60 * 60_000;
+
+/** What was read since last time, added to what a view has. The same object if nothing came. */
+export function mergeTraffic(have: Traffic, fresh: Traffic, now: number): Traffic {
+  if (!fresh.messages.length && !fresh.work.length) return have.seq === fresh.seq ? have : { ...have, seq: fresh.seq };
+  const known = new Set(have.messages.map((m) => m.id));
+  const messages = fresh.messages.length ? [...have.messages, ...fresh.messages.filter((m) => !known.has(m.id))].filter((m) => m.at >= now - KEEP_MESSAGES_MS).sort((a, b) => a.at - b.at).slice(-KEEP_MESSAGES) : have.messages;
+  const work = fresh.work.length ? [...have.work, ...fresh.work].filter((w) => w.at >= now - KEEP_WORK_MS).sort((a, b) => a.at - b.at) : have.work;
+  return { seq: fresh.seq, messages, work };
+}
 const POLL_MS = 3000;
 
 /** The fleet's traffic, read only while a view shows it, and paused with the window hidden. */
 export function useTraffic(agents: Agent[]) {
   const [traffic, setTraffic] = useState<Traffic>(EMPTY);
   useEffect(() => {
-    const read = () => !document.hidden && invoke<Traffic>("agent_traffic").then(setTraffic, () => {});
+    let seq = 0;
+    let reading = false;
+    const read = () => {
+      if (document.hidden || reading) return;
+      reading = true;
+      invoke<Traffic>("agent_traffic", { after: seq })
+        .then((fresh) => {
+          seq = fresh.seq ?? 0;
+          setTraffic((have) => mergeTraffic(have, fresh, Date.now()));
+        })
+        .catch(() => {})
+        .finally(() => (reading = false));
+    };
     read();
     const t = setInterval(read, POLL_MS);
     return () => clearInterval(t);

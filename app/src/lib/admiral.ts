@@ -243,14 +243,23 @@ export function useAdmiral({ quiet = false } = {}) {
   for (const c of cli) if (c.name) names.current.set(c.sessionId, c.name);
   // How many CLI polls in a row have not listed each session file (see isPhantom).
   const misses = useRef(new Map<string, number>());
-  useEffect(() => {
+  const countMisses = useRef(() => {});
+  countMisses.current = () => {
     if (!cliReady) return;
     const listed = new Set(cli.map((c) => c.sessionId));
     const next = new Map<string, number>();
     for (const s of snapshot.sessions) if (!listed.has(s.sessionId)) next.set(s.sessionId, (misses.current.get(s.sessionId) ?? 0) + 1);
     misses.current = next;
+  };
+  useEffect(() => {
+    countMisses.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cli]);
+  // Read again, same as before: nothing to draw, but it was one more reading without them.
+  useEffect(() => {
+    const off = listen("openadmiral://agents-read", () => countMisses.current());
+    return () => void off.then((f) => f());
+  }, []);
   // The Claude Code a restart would move a session to (the backend keeps it for minutes).
   const [installed, setInstalled] = useState<string | null>(null);
   useEffect(() => {
