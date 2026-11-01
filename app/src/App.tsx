@@ -15,7 +15,7 @@ import { Sidebar, type View } from "@/components/Sidebar";
 import { useSidebarOrder } from "@/lib/order";
 import { setProjectOrder } from "@/lib/utils";
 import { takeAttention } from "@/lib/attention";
-import { activeOpenCount, staleReason } from "@/lib/delegations";
+import { activeOpenCount } from "@/lib/delegations";
 import { useUiState } from "@/lib/ui";
 import { parseFocus } from "@/lib/focus";
 import { listen } from "@tauri-apps/api/event";
@@ -627,16 +627,7 @@ export default function App() {
                 onJump={(id) => setView({ kind: "agent", id })}
               />
             ) : view?.kind === "agents" ? (
-              <AgentsMap
-                groups={order.groups}
-                agents={agents}
-                // Stale delegations (agents gone, quiet for a day) are not links anymore.
-                delegations={delegations.filter((d) => !staleReason(d, agents, now))}
-                queues={queues}
-                now={now}
-                onJump={(id) => setView({ kind: "agent", id })}
-                onOpenDelegations={() => setView({ kind: "delegations" })}
-              />
+              <AgentsMap tree={order.spaces.tree} agents={agents} queues={queues} onJump={(id) => setView({ kind: "agent", id })} />
             ) : view?.kind === "queue" ? (
               <QueueView queues={queues} agents={agents} delegations={delegations} now={now} onJump={(id) => setView({ kind: "agent", id })} onError={(m) => life.notify(m, "error")} />
             ) : view?.kind === "delegations" ? (

@@ -1,469 +1,316 @@
-import { ChatLineLinearIcon, GitForkLinearIcon, HourglassLinearIcon, StructureLinearIcon } from "@solar-icons/react";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { agentLinks, sharedCheckout, type AgentLink } from "@/lib/agentLinks";
-import { slotOf, type Group } from "@/lib/order";
+import { PauseLinearIcon, PlayLinearIcon, StructureLinearIcon } from "@solar-icons/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { waitLinks } from "@/lib/agentLinks";
+import { activityScores, arrange, bandLayout, CARD_W, curveBetween, fleetAt, histogram, toolLabel, useTraffic, workAt, type Arrangement, type Band, type Box, type Resolved } from "@/lib/fleet";
+import { slotOf, type Node as TreeNode } from "@/lib/order";
 import type { QueueEntry } from "@/lib/queue";
-import type { Agent, DelegationStatus, AdmiralDelegation } from "@/lib/types";
+import type { Agent } from "@/lib/types";
 import { ago, branchTone, cn, contextUsed, fillText, projectColor, usd } from "@/lib/utils";
-import { DELEGATION_HELP, DELEGATION_LABEL, DELEGATION_STROKE, Meter } from "./primitives";
+import { Meter } from "./primitives";
 import { StatusIcon } from "./StatusIcon";
+import { SpaceTile } from "./Sidebar";
 import { Info } from "./Info";
 import { Tip } from "./Tooltip";
 import { UnderwayPill } from "@/components/UnderwayPill";
 
 type Props = {
-  groups: Group[];
+  /** The projects the person made and the folders on their own, as the sidebar has them. */
+  tree: TreeNode[];
   agents: Agent[];
-  delegations: AdmiralDelegation[];
   queues: Record<string, QueueEntry>;
-  now: number;
   onJump: (agentId: string) => void;
-  onOpenDelegations: () => void;
 };
 
-type Box = { x: number; y: number; w: number; h: number };
+const SPEEDS = [10, 30, 90];
+const PERIODS = [1, 3, 8];
+const HOUR = 3_600_000;
+const SLICES = 120;
+const WORKS_STROKE = "var(--color-brand-500)";
+const AWAITS_STROKE = "#8b5cf6";
+/** How long a message's summary stays on its line. */
+const SHOW_MS = 7000;
 
-const MESSAGE_STROKE = "var(--color-ink-3)";
-const WAIT_STROKE = "#8b5cf6";
-
-const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+type ProjectBand = Band<Agent> & { node: TreeNode };
 
 /**
- * Every agent, clustered by project in sidebar order, with what ties them together:
- * delegations (solid, by status), recent SendMessage traffic (dashed) and queued
- * prompts that wait for another session (dotted). Layout is plain flow (wrapped
- * cluster cards); the edges are an SVG layer drawn from the measured node boxes.
+ * What the fleet is doing, as it happens: a band per project with the agents that did something
+ * in the timeline's period, messages crossing between them, and who works for or awaits whom
+ * (deduced from the order of things, see lib/fleet). Live by default; the timeline replays.
  */
-export function AgentsMap({ groups, agents, delegations, queues, now, onJump, onOpenDelegations }: Props) {
-  const [showEnded, setShowEnded] = useState(false);
-  const [hoverNode, setHoverNode] = useState<string | null>(null);
-  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+export function AgentsMap({ tree, agents, queues, onJump }: Props) {
+  const { messages, work } = useTraffic(agents);
+  const [hours, setHours] = useState(3);
+  const [replay, setReplay] = useState<{ at: number; speed: number; playing: boolean } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  // Live, the clock only says what time it is; replaying, it drives the picture.
+  useEffect(() => {
+    const t = setInterval(() => !document.hidden && setNow(Date.now()), replay?.playing ? 100 : 1000);
+    return () => clearInterval(t);
+  }, [replay?.playing]);
+  const lastTick = useRef(now);
+  useEffect(() => {
+    const dt = now - lastTick.current;
+    lastTick.current = now;
+    if (replay?.playing) setReplay((r) => (r ? (r.at + dt * r.speed >= now ? null : { ...r, at: r.at + dt * r.speed }) : r));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now]);
+  const at = replay?.at ?? now;
+  const from = now - hours * HOUR;
 
-  const clusters = useMemo(
-    () => groups.map((g) => ({ ...g, agents: g.agents.filter((a) => showEnded || a.status !== "ended") })).filter((g) => g.agents.length > 0),
-    [groups, showEnded],
+  // Live, the agents' own status says who works; replaying, their tool calls then.
+  const working = useMemo(() => {
+    if (replay) return workAt(work, at);
+    const out = new Map<string, string | null>();
+    for (const a of agents) if (a.status === "working") out.set(a.id, a.session?.turn?.progress?.at(-1)?.step ?? a.session?.lastTool?.summary ?? null);
+    return out;
+  }, [replay, work, at, agents]);
+  const fleet = useMemo(() => fleetAt(messages, work, working, at), [messages, work, working, at]);
+
+  // Only who did something in the period, or is at it now; in place while looking.
+  const bandsAll = useMemo<ProjectBand[]>(
+    () => tree.map((node) => (node.kind === "space" ? { id: `s:${node.space.id}`, agents: node.groups.flatMap((g) => g.agents), node } : { id: slotOf(node.group), agents: node.group.agents, node })),
+    [tree],
   );
-  const shown = useMemo(() => clusters.flatMap((g) => g.agents), [clusters]);
-  const links = useMemo(() => agentLinks({ agents, shown, delegations, queues, now }), [agents, shown, delegations, queues, now]);
-  const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
-  const endedCount = agents.filter((a) => a.status === "ended").length;
-  const live = shown.filter((a) => a.status !== "ended");
+  const order = useRef<{ hours: number; order: Arrangement } | null>(null);
+  const scores = activityScores(messages, work, from);
+  const score = (a: Agent) => (scores.get(a.id) ?? 0) + (a.status === "working" || a.status === "waiting" ? 1 : 0);
+  // Before the first reading, activity would look like none at all and fix a wrong order.
+  const ready = messages.length > 0 || work.length > 0;
+  const arranged = arrange(bandsAll, (a) => a.id, score, order.current?.hours === hours ? order.current.order : null);
+  if (ready) order.current = { hours, order: arranged.order };
+  const bands = arranged.bands as ProjectBand[];
+  const shown = bands.flatMap((b) => b.agents);
+  const quiet = agents.filter((a) => a.status !== "ended").length - shown.filter((a) => a.status !== "ended").length;
 
-  // Node boxes, relative to the map, re-measured after every render and on resize.
+  // Width of the stage, and the cards as they really are, for the lines.
   const wrap = useRef<HTMLDivElement>(null);
-  const nodeEls = useRef(new Map<string, HTMLElement>());
-  const [boxes, setBoxes] = useState<Record<string, Box>>({});
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const measure = useCallback(() => {
-    const el = wrap.current;
-    if (!el) return;
-    const o = el.getBoundingClientRect();
-    const next: Record<string, Box> = {};
-    for (const [id, n] of nodeEls.current) {
-      if (!n.isConnected) continue;
-      const r = n.getBoundingClientRect();
-      // Relative to the padding box, where the SVG layer's origin is.
-      next[id] = { x: Math.round(r.left - o.left - el.clientLeft), y: Math.round(r.top - o.top - el.clientTop), w: Math.round(r.width), h: Math.round(r.height) };
-    }
-    setBoxes((prev) => (sameBoxes(prev, next) ? prev : next));
-    setSize((prev) => (prev.w === el.scrollWidth && prev.h === el.scrollHeight ? prev : { w: el.scrollWidth, h: el.scrollHeight }));
-  }, []);
-  useLayoutEffect(() => measure());
-  const shownKey = shown.map((a) => a.id).join(",");
+  const [width, setWidth] = useState(1000);
   useLayoutEffect(() => {
     if (!wrap.current) return;
-    const ro = new ResizeObserver(() => measure());
+    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
     ro.observe(wrap.current);
-    nodeEls.current.forEach((n) => ro.observe(n));
     return () => ro.disconnect();
-  }, [measure, shownKey]);
-
-  const nodeRef = (id: string) => (el: HTMLElement | null) => {
-    if (el) nodeEls.current.set(id, el);
-    else nodeEls.current.delete(id);
-  };
-
-  // Several links between the same two agents fan out into lanes.
-  const lanes = useMemo(() => {
-    const byPair = new Map<string, AgentLink[]>();
-    for (const l of links) {
-      const k = [l.from, l.to].sort().join("|");
-      byPair.set(k, [...(byPair.get(k) ?? []), l]);
-    }
-    const out = new Map<string, { i: number; n: number }>();
-    for (const list of byPair.values()) list.forEach((l, i) => out.set(l.id, { i, n: list.length }));
+  }, []);
+  const layout = bandLayout(bands.map((b) => b.agents.length), width);
+  const boxes = useMemo(() => {
+    const out: Record<string, Box> = {};
+    bands.forEach((b, i) => b.agents.forEach((a, j) => {
+      const c = layout.bands[i].cards[j];
+      out[a.id] = { x: c.left, y: layout.bands[i].top + c.top, w: CARD_W, h: 92 };
+    }));
     return out;
-  }, [links]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown.map((a) => a.id).join(), width]);
 
-  const touches = (l: AgentLink, id: string) => l.from === id || l.to === id;
-  const neighbours = useMemo(() => {
-    if (!hoverNode) return null;
-    const s = new Set([hoverNode]);
-    for (const l of links) if (touches(l, hoverNode)) s.add(l.from).add(l.to);
+  // Messages on their way. Live: what just arrived, not what was already there on opening.
+  const seen = useRef<Map<string, number> | null>(null);
+  const known = seen.current;
+  if (ready && !known) seen.current = new Map(messages.map((m) => [m.id, 0]));
+  else if (known) for (const m of messages) if (!known.has(m.id)) known.set(m.id, Date.now());
+  const flying: Resolved[] = replay
+    ? messages.filter((m) => m.at <= at && at - m.at < SHOW_MS * Math.max(replay.speed, 1)).slice(-3)
+    : messages.filter((m) => now - (seen.current?.get(m.id) ?? 0) < SHOW_MS).slice(-3);
+
+  const [hover, setHover] = useState<string | null>(null);
+  const touches = (r: { from: string; to: string }) => !hover || r.from === hover || r.to === hover;
+  const near = useMemo(() => {
+    if (!hover) return null;
+    const s = new Set([hover]);
+    for (const r of [...fleet.worksFor, ...fleet.awaits]) if (r.from === hover || r.to === hover) s.add(r.from).add(r.to);
+    for (const p of fleet.pairs) if (p.a === hover || p.b === hover) s.add(p.a).add(p.b);
     return s;
-  }, [hoverNode, links]);
-  const edgeDim = (l: AgentLink) => (hoverNode ? !touches(l, hoverNode) : hoverEdge ? hoverEdge !== l.id : false);
-  const nodeDim = (id: string) => {
-    if (neighbours) return !neighbours.has(id);
-    if (hoverEdge) {
-      const l = links.find((x) => x.id === hoverEdge);
-      return !!l && !touches(l, id);
-    }
-    return false;
-  };
+  }, [hover, fleet]);
+  const queued = waitLinks(queues, shown);
+  const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id.slice(0, 8);
+  const lane = (from: string, to: string) => (from < to ? 5 : -5);
 
-  const tipId = (l: AgentLink) => `map-edge-${l.id}`;
-  const showTip = (l: AgentLink) => {
-    setHoverEdge(l.id);
-    window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: tipId(l) }));
-  };
-  const hideTip = () => {
-    setHoverEdge(null);
-    window.dispatchEvent(new Event("openadmiral:tip-hide"));
-  };
-  const clickEdge = (l: AgentLink) => {
-    if (l.kind === "delegation") onOpenDelegations();
-    else onJump(l.from);
-  };
-
-  const drawn = links
-    .map((l) => {
-      const a = boxes[l.from], b = boxes[l.to];
-      if (!a || !b) return null;
-      return { link: l, geo: geometry(a, b, lanes.get(l.id) ?? { i: 0, n: 1 }) };
-    })
-    .filter((x): x is { link: AgentLink; geo: Geo } => !!x);
-
-  const counts = { delegation: 0, message: 0, wait: 0 };
-  for (const l of links) counts[l.kind]++;
+  // Summaries sit on their line, moved aside when they would land on one another.
+  const placed: { x: number; y: number }[] = [];
+  const pills = flying.flatMap((m) => {
+    const a = boxes[m.from], b = boxes[m.to];
+    if (!a || !b) return [];
+    const mid = curveBetween(a, b, lane(m.from, m.to)).at(0.5);
+    let y = mid.y;
+    for (let i = 0; i < 6 && placed.some((p) => Math.abs(p.x - mid.x) < 200 && Math.abs(p.y - y) < 26); i++) y = mid.y + (i % 2 ? -1 : 1) * ((i + 2) >> 1) * 28;
+    placed.push({ x: mid.x, y });
+    return [{ m, x: mid.x, y }];
+  });
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <header data-tauri-drag-region className="flex shrink-0 items-center gap-3 px-6 pt-3.5 pb-4">
+      <header data-tauri-drag-region className="flex shrink-0 items-center gap-3 px-6 pt-3.5 pb-2">
         <StructureLinearIcon size={20} className="text-brand-600 dark:text-brand-400" />
         <h1 className="text-xl font-semibold tracking-tight text-ink">Agents</h1>
         <Info
-          tip="Every agent by project, and what ties them together: delegations, recent messages (SendMessage) and queued prompts that wait for another agent. Hover an agent to see only its links; click it to open it."
+          tip="Who is doing what, as it happens: the agents active in the timeline's period, by project, and the messages between them. “Working for” and “awaiting” are deduced from who wrote to whom and who has answered. Hover an agent to see only its lines; click it to open it."
           align="left"
         />
         <span className="text-sm text-ink-3 tabular">
-          {live.length} running or idle
-          {links.length > 0 && ` · ${links.length} link${links.length > 1 ? "s" : ""}`}
+          {shown.length} active in the last {hours} h · {working.size} working now
+          {quiet > 0 && ` · ${quiet} quiet, hidden`}
         </span>
         <span className="flex-1" />
-        <label className={cn("flex cursor-pointer items-center gap-2 text-xs text-ink-2 select-none", !endedCount && "opacity-60")}>
-          <input type="checkbox" checked={showEnded} onChange={(e) => setShowEnded(e.target.checked)} className="size-3.5 accent-brand-600" />
-          Show ended
-          {endedCount > 0 && <span className="text-ink-3 tabular">{endedCount}</span>}
-        </label>
         <UnderwayPill />
       </header>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-6 pb-3 text-[11px] text-ink-3">
+        <LegendLine stroke={WORKS_STROKE} label="Working for" />
+        <LegendLine stroke={AWAITS_STROKE} dash="2 4" label="Awaiting reply" />
+        <LegendLine stroke="var(--color-line-strong)" label="Spoke in the last 15 min" />
+        {queued.length > 0 && <LegendLine stroke={AWAITS_STROKE} dash="0.5 5" label="Queued until it finishes" />}
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 pb-6">
-        <Legend counts={counts} />
-        {shown.length === 0 ? (
+      <div className="min-h-0 flex-1 overflow-auto px-6 pb-3">
+        {bands.length === 0 ? (
           <div className="mt-16 flex flex-col items-center text-center">
             <StructureLinearIcon size={32} className="mb-3 text-ink-3" />
-            <p className="text-sm font-semibold text-ink">No agents running</p>
-            <p className="mt-1 max-w-sm text-xs leading-relaxed text-ink-3">
-              Agents show up here, grouped by project, as soon as a Claude Code session with the OpenAdmiral plugin starts.
-              {endedCount > 0 && " Turn on Show ended to see the ones that finished."}
-            </p>
+            <p className="text-sm font-semibold text-ink">{ready ? `Nothing in the last ${hours} h` : "Reading what the agents did…"}</p>
+            <p className="mt-1 max-w-sm text-xs leading-relaxed text-ink-3">Agents show up here, by project, as soon as they do something.</p>
           </div>
         ) : (
-          <>
-            {links.length === 0 && (
-              <p className="mb-3 rounded-xl border border-dashed border-line-strong px-4 py-2.5 text-xs text-ink-3">
-                No links between agents right now. Delegations, messages and queued prompts that wait for another agent show up here as lines.
-              </p>
-            )}
-            <div
-              ref={wrap}
-              className="relative rounded-2xl border border-line bg-canvas p-5 shadow-sm"
-              onPointerLeave={() => setHoverNode(null)}
-            >
-              <div
-                className="pointer-events-none absolute inset-0 rounded-2xl opacity-60"
-                style={{ backgroundImage: "radial-gradient(var(--color-line-strong) 1px, transparent 1px)", backgroundSize: "18px 18px" }}
-              />
-              <div className="relative flex flex-wrap items-start gap-x-12 gap-y-6">
-                {clusters.map((g) => (
-                  <Cluster key={slotOf(g)} group={g}>
-                    {g.agents.map((a) => (
-                      <Node
-                        key={a.id}
-                        agent={a}
-                        nodeRef={nodeRef(a.id)}
-                        dim={nodeDim(a.id)}
-                        hot={hoverNode === a.id}
-                        onEnter={() => setHoverNode(a.id)}
-                        onLeave={() => setHoverNode(null)}
-                        onClick={() => onJump(a.id)}
-                      />
-                    ))}
-                  </Cluster>
-                ))}
+          <div ref={wrap} className="relative" style={{ height: layout.height, minWidth: Math.max(...layout.bands.flatMap((b) => b.cards.map((c) => c.left + CARD_W + 16))) }} onPointerLeave={() => setHover(null)}>
+            {bands.map((b, i) => (
+              <BandBackground key={b.id} band={b} top={layout.bands[i].top} height={layout.bands[i].height} />
+            ))}
+            <svg className="pointer-events-none absolute top-0 left-0 z-10 overflow-visible" width="100%" height={layout.height}>
+              <defs>
+                <marker id="fleet-works" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 1 1 L 9 5 L 1 9" fill="none" style={{ stroke: WORKS_STROKE }} strokeWidth={2} />
+                </marker>
+                <marker id="fleet-awaits" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke={AWAITS_STROKE} strokeWidth={2} />
+                </marker>
+                <filter id="fleet-blur" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="3" />
+                </filter>
+              </defs>
+              {fleet.pairs.map((p) => {
+                const a = boxes[p.a], b = boxes[p.b];
+                if (!a || !b) return null;
+                const fresh = Math.max(0, 1 - (at - p.last) / (15 * 60_000));
+                return <path key={`${p.a}|${p.b}`} d={curveBetween(a, b).d} fill="none" style={{ stroke: "var(--color-ink-3)" }} strokeWidth={1} opacity={hover && !(p.a === hover || p.b === hover) ? 0.05 : 0.12 + 0.3 * fresh} />;
+              })}
+              {queued.map((l) => {
+                const a = boxes[l.from], b = boxes[l.to];
+                if (!a || !b) return null;
+                return <path key={l.id} d={curveBetween(a, b, 10).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.5} strokeDasharray="0.5 5" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(l) ? 0.85 : 0.08} />;
+              })}
+              {fleet.awaits.map((r) => {
+                const a = boxes[r.from], b = boxes[r.to];
+                if (!a || !b) return null;
+                return (
+                  <path key={`await:${r.from}>${r.to}`} d={curveBetween(a, b, lane(r.from, r.to)).d} fill="none" stroke={AWAITS_STROKE} strokeWidth={1.6} strokeDasharray="2 6" strokeLinecap="round" markerEnd="url(#fleet-awaits)" opacity={touches(r) ? 1 : 0.08}>
+                    <title>
+                      {nameOf(r.from)} awaits {nameOf(r.to)}: {r.summary}
+                    </title>
+                  </path>
+                );
+              })}
+              {fleet.worksFor.map((r) => {
+                const a = boxes[r.from], b = boxes[r.to];
+                if (!a || !b) return null;
+                const d = curveBetween(a, b, lane(r.from, r.to)).d;
+                return (
+                  <g key={`works:${r.from}>${r.to}`} opacity={touches(r) ? 1 : 0.08}>
+                    <path d={d} fill="none" style={{ stroke: WORKS_STROKE }} strokeWidth={1.6} opacity={0.6} markerEnd="url(#fleet-works)">
+                      <title>
+                        {nameOf(r.to)} works for {nameOf(r.from)}: {r.summary}
+                      </title>
+                    </path>
+                    <path d={d} pathLength={100} fill="none" stroke="#a9c0f5" strokeWidth={2} strokeLinecap="round" className="fleet-pulse" />
+                  </g>
+                );
+              })}
+              {flying.map((m) => {
+                const a = boxes[m.from], b = boxes[m.to];
+                if (!a || !b) return null;
+                const d = curveBetween(a, b, lane(m.from, m.to)).d;
+                return (
+                  <g key={m.id}>
+                    <path d={d} pathLength={100} fill="none" stroke="#5ee1ff" strokeWidth={6} opacity={0.55} filter="url(#fleet-blur)" className="fleet-beam" />
+                    <path d={d} pathLength={100} fill="none" stroke="#d6f6ff" strokeWidth={2} strokeLinecap="round" className="fleet-beam" />
+                  </g>
+                );
+              })}
+            </svg>
+            {pills.map(({ m, x, y }) => (
+              <div key={m.id} className="pointer-events-none absolute z-30 max-w-[300px] -translate-x-1/2 -translate-y-1/2 truncate rounded-full bg-ink px-2.5 py-1 text-[11px] font-medium text-canvas shadow-lg" style={{ left: x, top: y }}>
+                {m.summary || m.text.slice(0, 60)}
               </div>
-
-              {/* Edges above the cluster cards, below the nodes; only the hit paths take the pointer. */}
-              <svg className="pointer-events-none absolute top-0 left-0 z-10 overflow-visible" width={size.w} height={size.h}>
-                <defs>
-                  {[...Object.entries(DELEGATION_STROKE), ["message", MESSAGE_STROKE], ["wait", WAIT_STROKE]].map(([k, c]) => (
-                    <marker key={k} id={`map-arrow-${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                      <path d="M 0 0 L 10 5 L 0 10 z" style={{ fill: c }} />
-                    </marker>
-                  ))}
-                </defs>
-                {drawn.map(({ link: l, geo }) => (
-                  <Edge key={l.id} link={l} d={geo.d} dim={edgeDim(l)} hot={hoverEdge === l.id || (!!hoverNode && touches(l, hoverNode))} />
-                ))}
-                {drawn.map(({ link: l, geo }) => (
-                  <path
-                    key={`hit-${l.id}`}
-                    d={geo.d}
-                    fill="none"
-                    stroke="transparent"
-                    strokeWidth={12}
-                    className="cursor-pointer"
-                    style={{ pointerEvents: "stroke" }}
-                    onPointerEnter={() => showTip(l)}
-                    onPointerLeave={hideTip}
-                    onClick={() => clickEdge(l)}
-                  />
-                ))}
-              </svg>
-
-              {/* Edge labels: the anchor of each edge's tooltip. */}
-              {drawn.map(({ link: l, geo }) => (
-                <Tip key={`label-${l.id}`} id={tipId(l)} side="bottom" content={<EdgeTip link={l} byId={byId} now={now} />}>
-                  <button
-                    onClick={() => clickEdge(l)}
-                    onPointerEnter={() => setHoverEdge(l.id)}
-                    onPointerLeave={() => setHoverEdge(null)}
-                    className={cn(
-                      "absolute z-30 -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150",
-                      edgeDim(l) && "opacity-15",
-                    )}
-                    style={{ left: geo.mid.x, top: geo.mid.y }}
-                  >
-                    <EdgeLabel link={l} />
-                  </button>
-                </Tip>
-              ))}
-            </div>
-          </>
+            ))}
+            {bands.map((b, i) =>
+              b.agents.map((a, j) => {
+                const c = layout.bands[i].cards[j];
+                return (
+                  <div key={a.id} className={cn("absolute z-20 transition-opacity duration-150", near && !near.has(a.id) && "opacity-35")} style={{ left: c.left, top: layout.bands[i].top + c.top, width: CARD_W }}>
+                    <AgentCard agent={a} isWorking={working.has(a.id)} doing={working.get(a.id) ?? null} replaying={!!replay} onEnter={() => setHover(a.id)} onLeave={() => setHover(null)} onClick={() => onJump(a.id)} />
+                  </div>
+                );
+              }),
+            )}
+          </div>
         )}
       </div>
+
+      <Timeline messages={messages} work={work} from={from} to={now} at={at} hours={hours} setHours={setHours} replay={replay} setReplay={setReplay} />
     </div>
   );
 }
 
-function sameBoxes(a: Record<string, Box>, b: Record<string, Box>) {
-  const ka = Object.keys(a), kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  return ka.every((k) => {
-    const x = a[k], y = b[k];
-    return y && x.x === y.x && x.y === y.y && x.w === y.w && x.h === y.h;
-  });
-}
-
-type Geo = { d: string; mid: { x: number; y: number } };
-
-/**
- * A cubic curve between two node boxes. Side by side: from the facing edges. In one
- * column: out of the right edges and back, bulging further the further apart they are.
- * Several links between the same pair take separate lanes.
- */
-function geometry(a: Box, b: Box, lane: { i: number; n: number }): Geo {
-  const offset = (lane.i - (lane.n - 1) / 2) * 10;
-  const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
-  let p0, p1, p2, p3;
-  if (Math.abs(bc.x - ac.x) < Math.min(a.w, b.w) / 2) {
-    const bulge = 28 + Math.min(80, Math.abs(bc.y - ac.y) * 0.18) + lane.i * 16;
-    const x = Math.max(a.x + a.w, b.x + b.w);
-    p0 = { x: a.x + a.w, y: ac.y + offset * 0.4 };
-    p3 = { x: b.x + b.w + 2, y: bc.y + offset * 0.4 };
-    p1 = { x: x + bulge, y: p0.y };
-    p2 = { x: x + bulge, y: p3.y };
-  } else {
-    const fwd = bc.x > ac.x;
-    p0 = { x: fwd ? a.x + a.w : a.x, y: ac.y + offset };
-    p3 = { x: fwd ? b.x - 2 : b.x + b.w + 2, y: bc.y + offset };
-    const c = Math.max(40, Math.abs(p3.x - p0.x) / 2) * (fwd ? 1 : -1);
-    p1 = { x: p0.x + c, y: p0.y };
-    p2 = { x: p3.x - c, y: p3.y };
-  }
-  const mid = { x: (p0.x + 3 * p1.x + 3 * p2.x + p3.x) / 8, y: (p0.y + 3 * p1.y + 3 * p2.y + p3.y) / 8 };
-  return { d: `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`, mid };
-}
-
-function strokeOf(l: AgentLink) {
-  return l.kind === "delegation" ? DELEGATION_STROKE[l.status] : l.kind === "message" ? MESSAGE_STROKE : WAIT_STROKE;
-}
-
-const DASH: Partial<Record<DelegationStatus, string>> = { draft: "2 6", sent: "5 5" };
-
-function Edge({ link: l, d, dim, hot }: { link: AgentLink; d: string; dim: boolean; hot: boolean }) {
-  const color = strokeOf(l);
-  const marker = `url(#map-arrow-${l.kind === "delegation" ? l.status : l.kind})`;
-  const base = l.kind === "delegation" ? (l.settled || l.status === "draft" ? 0.45 : 0.9) : l.kind === "message" ? 0.7 : 0.85;
-  const opacity = dim ? 0.08 : hot ? 1 : base;
-  const live = l.kind === "delegation" && l.status === "in_progress";
+function LegendLine({ stroke, dash, label }: { stroke: string; dash?: string; label: string }) {
   return (
-    <g style={{ transition: "opacity 150ms" }} opacity={opacity}>
-      {l.kind === "delegation" ? (
-        <path d={d} fill="none" stroke={color} strokeWidth={hot ? 2.5 : 2} strokeLinecap="round" strokeDasharray={DASH[l.status]} markerEnd={marker} />
-      ) : l.kind === "message" ? (
-        <path d={d} fill="none" style={{ stroke: color }} strokeWidth={hot ? 1.75 : 1.25} strokeDasharray="5 4" strokeLinecap="round" markerEnd={marker} />
-      ) : (
-        <path d={d} fill="none" stroke={color} strokeWidth={hot ? 2.25 : 1.75} strokeDasharray="0.5 5" strokeLinecap="round" markerEnd={marker} />
-      )}
-      {live && (
-        <path d={d} fill="none" stroke={color} strokeWidth={2.5} strokeDasharray="2 16" strokeLinecap="round" className="motion-reduce:hidden">
-          <animate attributeName="stroke-dashoffset" from="0" to="-36" dur="1.2s" repeatCount="indefinite" />
-        </path>
-      )}
-    </g>
-  );
-}
-
-function EdgeLabel({ link: l }: { link: AgentLink }) {
-  if (l.kind === "delegation") {
-    return (
-      <span
-        className={cn(
-          "flex max-w-[150px] items-center gap-1 rounded-full border border-line-strong bg-canvas px-1.5 py-px text-[10.5px] whitespace-nowrap text-ink-2 shadow-sm",
-          l.settled && "text-ink-3",
-          l.conditions.length > 0 && "pr-1",
-        )}
-      >
-        <span className="size-1.5 shrink-0 rounded-full" style={{ background: DELEGATION_STROKE[l.status] }} />
-        <span className={cn("truncate", l.status === "cancelled" && "line-through")}>{short(l.title, 28)}</span>
-        {l.conditions.length > 0 && <HourglassLinearIcon size={10} className="shrink-0 text-violet-500" />}
-      </span>
-    );
-  }
-  const Icon = l.kind === "message" ? ChatLineLinearIcon : HourglassLinearIcon;
-  return (
-    <span
-      className={cn(
-        "flex size-[18px] items-center justify-center rounded-full border bg-canvas shadow-sm",
-        l.kind === "message" ? "border-line-strong text-ink-3" : "border-violet-500/40 text-violet-600 dark:text-violet-400",
-      )}
-    >
-      <Icon size={10} />
+    <span className="flex items-center gap-1.5">
+      <svg width={22} height={6} className="shrink-0">
+        <line x1={1} y1={3} x2={21} y2={3} style={{ stroke }} strokeWidth={2} strokeDasharray={dash} strokeLinecap="round" />
+      </svg>
+      {label}
     </span>
   );
 }
 
-function EdgeTip({ link: l, byId, now }: { link: AgentLink; byId: Map<string, Agent>; now: number }) {
-  const from = byId.get(l.from)?.name ?? l.from.slice(0, 8);
-  const to = byId.get(l.to)?.name ?? l.to.slice(0, 8);
-  if (l.kind === "delegation") {
-    return (
-      <div className="w-64 space-y-1">
-        <div className="font-semibold">{l.title}</div>
-        <div className="text-[11px] text-ink-2">
-          {from} → {to}
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="size-1.5 rounded-full" style={{ background: DELEGATION_STROKE[l.status] }} />
-          <span className="font-semibold">{DELEGATION_LABEL[l.status]}</span>
-          <span className="text-ink-3">· updated {ago(l.at, now)} ago</span>
-        </div>
-        <div className="text-[11px] text-ink-3">{DELEGATION_HELP[l.status]}</div>
-        {l.conditions.map((c, i) => (
-          <div key={i} className="border-t border-line pt-1 text-[11px] text-ink-2">
-            <span className="font-semibold text-violet-600 dark:text-violet-400">Then</span> {byId.get(c.agentId)?.name ?? "an agent"} runs “{short(c.text, 80)}” when{" "}
-            {c.statuses.join(" or ")}
-          </div>
-        ))}
-        <div className="pt-0.5 text-[10.5px] text-ink-3">Click to open Delegations</div>
-      </div>
-    );
-  }
-  if (l.kind === "message") {
-    return (
-      <div className="w-64 space-y-1">
-        <div className="text-[11px] text-ink-2">
-          <span className="font-semibold text-ink">{from}</span> messaged <span className="font-semibold text-ink">{to}</span> · {ago(l.at, now)} ago
-          {l.count > 1 && <span className="text-ink-3"> · {l.count} messages</span>}
-        </div>
-        <div className="line-clamp-4 text-[11px] text-ink-2">{l.text || "(no summary)"}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="w-64 space-y-1">
-      <div className="text-[11px] text-ink-2">
-        <span className="font-semibold text-ink">{from}</span> waits for <span className="font-semibold text-ink">{to}</span> to finish its turn
-      </div>
-      <div className="line-clamp-3 text-[11px] text-ink-2">Then runs “{l.text}”</div>
-      {l.count > 1 && <div className="text-[11px] text-ink-3">{l.count} queued prompts wait for it</div>}
-    </div>
-  );
-}
-
-function Cluster({ group, children }: { group: Group; children: React.ReactNode }) {
-  const color = projectColor(group.label);
-  const shared = sharedCheckout(group.agents);
+/** A project's band, tinted as its card in the sidebar, with its name in the left gutter. */
+function BandBackground({ band, top, height }: { band: ProjectBand; top: number; height: number }) {
+  const n = band.node;
+  const color = n.kind === "space" ? n.space.color : projectColor(n.group.label);
+  const name = n.kind === "space" ? n.space.name : n.group.label;
   return (
     <section
-      className="w-[248px] rounded-2xl border p-2.5"
+      className="absolute inset-x-0 rounded-2xl"
       style={{
-        borderColor: `color-mix(in srgb, ${color} 35%, transparent)`,
-        background: `color-mix(in srgb, ${color} 6%, transparent)`,
+        top,
+        height,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${color} 10%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${color} 24%, transparent)`,
       }}
     >
-      <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
-        <h3 className="truncate text-xs font-semibold text-ink">{group.label}</h3>
-        <span className="ml-auto text-[11px] text-ink-3 tabular">{group.agents.length}</span>
+      <div className="absolute top-1/2 left-4 flex w-[112px] -translate-y-1/2 flex-col items-start gap-1.5">
+        {n.kind === "space" ? <SpaceTile space={n.space} /> : <span className="size-2.5 rounded-full" style={{ background: color }} />}
+        <h3 className="text-[13.5px] leading-tight font-semibold tracking-[-0.01em] break-words text-ink">{name}</h3>
+        <span className="text-[11px] text-ink-3 tabular">{band.agents.length}</span>
       </div>
-      <div className="space-y-2">{children}</div>
-      {shared && (
-        <Tip
-          side="bottom"
-          content={
-            <div className="w-56 text-[11px] text-ink-2">
-              {shared.agents} agents work in this repo from different checkouts
-              {shared.worktrees > 0 && ` (${shared.worktrees} in linked worktree${shared.worktrees > 1 ? "s" : ""})`}. Branches: {shared.branches.join(", ") || "unknown"}.
-            </div>
-          }
-        >
-          <div className="mt-2 flex items-center gap-1.5 px-1 text-[10.5px] text-ink-3">
-            <GitForkLinearIcon size={11} className="shrink-0" />
-            <span className="truncate">
-              Same repo · {shared.branches.length > 1 ? `${shared.branches.length} branches` : "separate checkouts"}
-              {shared.worktrees > 0 && ` · ${shared.worktrees} worktree${shared.worktrees > 1 ? "s" : ""}`}
-            </span>
-          </div>
-        </Tip>
-      )}
     </section>
   );
 }
 
-function Node({ agent: a, nodeRef, dim, hot, onEnter, onLeave, onClick }: { agent: Agent; nodeRef: (el: HTMLElement | null) => void; dim: boolean; hot: boolean; onEnter: () => void; onLeave: () => void; onClick: () => void }) {
+function AgentCard({ agent: a, isWorking, doing, replaying, onEnter, onLeave, onClick }: { agent: Agent; isWorking: boolean; doing: string | null; replaying: boolean; onEnter: () => void; onLeave: () => void; onClick: () => void }) {
   const s = a.session;
   const ctx = contextUsed(s?.context);
-  const waiting = a.status === "waiting";
+  const waiting = !replaying && a.status === "waiting";
   const running = (s?.subagents ?? []).filter((x) => x.status === "running");
+  // Replaying, its state then, not its state now.
+  const status = waiting ? "waiting" : replaying ? (isWorking ? "working" : "idle") : a.status;
   return (
-    <div className={cn("relative z-20 transition-opacity duration-150", dim && "opacity-35", a.status === "ended" && !dim && "opacity-70 dark:opacity-55")}>
+    <div className={cn(a.status === "ended" && !isWorking && "opacity-70 dark:opacity-55")}>
       <button
-        ref={nodeRef}
         onClick={onClick}
         onPointerEnter={onEnter}
         onPointerLeave={onLeave}
         className={cn(
-          "flex w-full flex-col gap-1.5 rounded-xl border bg-canvas px-2.5 py-2 text-left shadow-sm outline-none transition-all duration-200 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500",
-          waiting ? "border-amber-500/50 ring-2 ring-amber-500/20 dark:border-amber-400/40" : "border-line-strong",
-          hot && !waiting && "border-brand-500/50 shadow-md",
+          "flex h-[92px] w-full flex-col gap-1 rounded-xl border bg-canvas px-2.5 py-2 text-left shadow-sm outline-none transition-[border-color,box-shadow] duration-200 hover:shadow-md focus-visible:ring-2 focus-visible:ring-brand-500",
+          waiting ? "border-amber-500/60 ring-2 ring-amber-500/20" : isWorking ? "border-brand-500/60 shadow-[0_8px_26px_-8px_rgb(59_110_240/0.65)] ring-2 ring-brand-500/15" : "border-line-strong",
         )}
       >
         <span className="flex items-center gap-2">
-          <StatusIcon status={a.status} />
+          <StatusIcon status={status} tip={false} />
           <span className="flex-1 truncate text-[13px] font-semibold text-ink">{a.name}</span>
           {waiting ? (
             <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold leading-4 text-amber-700 dark:text-amber-300">needs you</span>
@@ -471,12 +318,13 @@ function Node({ agent: a, nodeRef, dim, hot, onEnter, onLeave, onClick }: { agen
             s?.costUsd !== undefined && <span className="text-[11px] text-ink-3 tabular">{usd(s.costUsd)}</span>
           )}
         </span>
-        {waiting && s?.waiting?.detail && <span className="truncate pl-[22px] text-[10.5px] text-amber-700 dark:text-amber-300">{s.waiting.detail}</span>}
-        <span className="flex items-center gap-2 pl-[22px] text-xs text-ink-3">
-          <span className={cn("truncate font-mono text-[11px]", branchTone(s?.branch))}>{s?.branch ?? (a.cli ? "—" : "ended")}</span>
+        <span className={cn("truncate pl-[22px] text-[11px]", waiting ? "text-amber-700 dark:text-amber-300" : isWorking ? "text-brand-700 dark:text-brand-300" : "text-ink-3")}>
+          {waiting ? (s?.waiting?.detail ?? "Waiting for you") : isWorking ? toolLabel(doing ?? "Working") : status === "ended" ? "ended" : "idle"}
+        </span>
+        <span className="mt-auto flex items-center gap-2 pl-[22px] text-xs text-ink-3">
+          <span className={cn("truncate font-mono text-[11px]", branchTone(s?.branch))}>{s?.branch ?? "—"}</span>
           {s?.worktree && <span className="shrink-0 rounded bg-brand-500/10 px-1 text-[10px] text-brand-700 dark:text-brand-300">worktree</span>}
           <span className="flex-1" />
-          {waiting && s?.costUsd !== undefined && <span className="text-[11px] tabular">{usd(s.costUsd)}</span>}
           {ctx !== undefined && (
             <span className="flex w-14 shrink-0 items-center gap-1.5">
               <Meter value={ctx} className="flex-1" />
@@ -485,51 +333,94 @@ function Node({ agent: a, nodeRef, dim, hot, onEnter, onLeave, onClick }: { agen
           )}
         </span>
       </button>
-      {running.length > 0 && (
+      {running.length > 0 && !replaying && (
         // Running subagents hang off their parent like satellites.
         <div className="relative mt-1 ml-[19px] flex flex-wrap gap-1 border-l border-dashed border-line-strong pt-0.5 pl-2.5">
-          {running.map((x) => (
+          {running.slice(0, 2).map((x) => (
             <Tip key={x.id} side="bottom" content={<span className="block max-w-60 text-[11px]"><span className="font-semibold">{x.type ?? "Subagent"}</span>{x.description ? ` · ${x.description}` : ""}</span>}>
-              <span className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-line bg-canvas px-1.5 py-px text-[10px] text-ink-2 shadow-sm">
+              <span className="inline-flex max-w-[180px] items-center gap-1 rounded-full border border-line bg-canvas px-1.5 py-px text-[10px] text-ink-2 shadow-sm">
                 <span className="size-1.5 shrink-0 rounded-full bg-brand-500 motion-safe:animate-pulse" />
                 <span className="truncate">{x.description ?? x.type ?? "subagent"}</span>
               </span>
             </Tip>
           ))}
+          {running.length > 2 && <span className="text-[10px] text-ink-3">+{running.length - 2}</span>}
         </div>
       )}
     </div>
   );
 }
 
-function Legend({ counts }: { counts: Record<AgentLink["kind"], number> }) {
-  const item = (svg: React.ReactNode, label: string, n?: number) => (
-    <span className="flex items-center gap-1.5">
-      <svg width={26} height={8} className="shrink-0">
-        {svg}
-      </svg>
-      <span>{label}</span>
-      {!!n && <span className="text-ink-3/80 tabular">{n}</span>}
-    </span>
-  );
-  const line = (stroke: string, dash?: string, width = 2) => <line x1={1} y1={4} x2={25} y2={4} style={{ stroke }} strokeWidth={width} strokeDasharray={dash} strokeLinecap="round" />;
+type Replay = { at: number; speed: number; playing: boolean } | null;
+
+/** The period, the replay, and LIVE. Blue bars are messages, grey ones work. */
+function Timeline({ messages, work, from, to, at, hours, setHours, replay, setReplay }: { messages: Resolved[]; work: { at: number }[]; from: number; to: number; at: number; hours: number; setHours: (h: number) => void; replay: Replay; setReplay: (f: Replay | ((r: Replay) => Replay)) => void }) {
+  const bars = useMemo(() => histogram({ messages, work }, from, to, SLICES), [messages, work, Math.floor(from / 60_000)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const top = Math.max(1, ...bars.map((b) => b.work));
+  const topM = Math.max(1, ...bars.map((b) => b.messages));
+  const area = useRef<HTMLDivElement>(null);
+  const seek = (x: number) => {
+    const r = area.current?.getBoundingClientRect();
+    if (!r) return;
+    setReplay((p) => ({ at: from + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (to - from), speed: p?.speed ?? 30, playing: p?.playing ?? false }));
+  };
+  const button = (on: boolean) => cn("rounded-md px-2 py-1 font-medium transition-colors", on ? "bg-canvas text-ink shadow-sm dark:bg-white/10" : "text-ink-3 hover:text-ink-2");
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-ink-3">
-      {item(line(DELEGATION_STROKE.in_progress), "Delegation", counts.delegation)}
-      <span className="flex items-center gap-2">
-        {(["draft", "sent", "accepted", "in_progress", "blocked", "done"] as DelegationStatus[]).map((s) => (
-          <span key={s} className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full" style={{ background: DELEGATION_STROKE[s] }} />
-            {DELEGATION_LABEL[s].split(" ·")[0]}
+    <div className="mx-6 mb-3 flex h-14 shrink-0 items-center gap-3 rounded-2xl border border-line bg-canvas px-3 shadow-sm">
+      <button
+        aria-label={replay?.playing ? "Pause" : "Play from here"}
+        onClick={() => setReplay((r) => (r ? { ...r, playing: !r.playing } : { at: from, speed: 30, playing: true }))}
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-line text-ink transition-colors hover:bg-line-strong"
+      >
+        {replay?.playing ? <PauseLinearIcon size={15} /> : <PlayLinearIcon size={15} />}
+      </button>
+      <div className="flex shrink-0 rounded-lg bg-line p-0.5 text-[11px]" role="radiogroup" aria-label="Replay speed">
+        {SPEEDS.map((s) => (
+          <button key={s} role="radio" aria-checked={replay?.speed === s} className={button(replay?.speed === s)} onClick={() => setReplay((r) => ({ at: r?.at ?? from, speed: s, playing: true }))}>
+            {s}×
+          </button>
+        ))}
+      </div>
+      <div className="flex shrink-0 rounded-lg bg-line p-0.5 text-[11px]" role="radiogroup" aria-label="Period">
+        {PERIODS.map((h) => (
+          <button key={h} role="radio" aria-checked={hours === h} className={button(hours === h)} onClick={() => setHours(h)}>
+            {h} h
+          </button>
+        ))}
+      </div>
+      <div
+        ref={area}
+        role="slider"
+        aria-label="Timeline"
+        aria-valuemin={from}
+        aria-valuemax={to}
+        aria-valuenow={at}
+        tabIndex={0}
+        className="relative flex h-10 min-w-0 flex-1 cursor-ew-resize touch-none items-end gap-px"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          seek(e.clientX);
+        }}
+        onPointerMove={(e) => e.buttons === 1 && seek(e.clientX)}
+      >
+        {bars.map((b, i) => (
+          <span key={i} className="relative h-full min-w-0 flex-1">
+            <span className="absolute inset-x-0 bottom-0 rounded-[1px] bg-line-strong" style={{ height: `${(b.work / top) * 100}%` }} />
+            <span className="absolute inset-x-0 bottom-0 rounded-[1px] bg-brand-500" style={{ height: `${(b.messages / topM) * 100}%` }} />
           </span>
         ))}
-      </span>
-      {item(line(MESSAGE_STROKE, "5 4", 1.25), "Message, last 3 h", counts.message)}
-      {item(line(WAIT_STROKE, "0.5 5", 1.75), "Waits for", counts.wait)}
-      <span className="flex items-center gap-1.5">
-        <GitForkLinearIcon size={12} />
-        Same repo, other checkout
-      </span>
+        <span className="pointer-events-none absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-ink shadow-[0_0_8px_rgb(255_255_255/0.5)]" style={{ left: `${Math.max(0, Math.min(100, ((at - from) / (to - from)) * 100))}%` }} />
+      </div>
+      <span className="w-[52px] shrink-0 text-right text-xs text-ink-2 tabular">{replay ? `-${ago(at, to)}` : new Date(at).toTimeString().slice(0, 5)}</span>
+      <button
+        onClick={() => setReplay(null)}
+        aria-pressed={!replay}
+        title={replay ? "Back to what is happening now" : "Showing what is happening now"}
+        className={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold tracking-wider transition-colors", replay ? "bg-line text-ink-3 hover:text-ink" : "bg-red-500/15 text-red-500 dark:text-red-400")}
+      >
+        <span className={cn("size-1.5 rounded-full", replay ? "bg-ink-3" : "bg-red-500 motion-safe:animate-pulse")} />
+        LIVE
+      </button>
     </div>
   );
 }

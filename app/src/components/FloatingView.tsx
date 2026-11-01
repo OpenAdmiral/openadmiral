@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
 import { useSeen } from "@/lib/artifacts";
 import { useCostReport, useCosts, type RangeDays } from "@/lib/costs";
-import { staleReason } from "@/lib/delegations";
 import { useSidebarOrder } from "@/lib/order";
-import type { Agent, AdmiralDelegation, AdmiralSession } from "@/lib/types";
+import type { Agent, AdmiralSession } from "@/lib/types";
 import { useUnderway, UnderwayContext } from "@/lib/underway";
 import { setProjectOrder } from "@/lib/utils";
 import { AgentsMap } from "./AgentsMap";
@@ -44,7 +43,6 @@ export function FloatingView({ view }: { view: FloatableView }) {
   const seen = useSeen(artifacts, loaded);
   const order = useSidebarOrder(agents, cliReady, { readOnly: true });
   setProjectOrder(order.groups.map((g) => g.label));
-  const fresh: AdmiralDelegation[] = delegations.filter((d) => !staleReason(d, agents, now));
   useEffect(() => {
     invoke("frontend_log", { level: "float", message: `floating window showing ${view}` }).catch(() => {});
     const onKey = (e: KeyboardEvent) => {
@@ -75,7 +73,7 @@ export function FloatingView({ view }: { view: FloatableView }) {
             ) : view === "costs" ? (
               <Costs agents={agents} rateLimits={rateLimits} now={now} />
             ) : view === "agents" ? (
-              <AgentsMap groups={order.groups} agents={agents} delegations={fresh} queues={queues} now={now} onJump={jump} onOpenDelegations={() => void invoke("float_open", { sessionId: viewFloatId("delegations"), title: VIEW_TITLE.delegations })} />
+              <AgentsMap tree={order.spaces.tree} agents={agents} queues={queues} onJump={jump} />
             ) : view === "queue" ? (
               <QueueView queues={queues} agents={agents} delegations={delegations} now={now} onJump={jump} onError={onError} />
             ) : (

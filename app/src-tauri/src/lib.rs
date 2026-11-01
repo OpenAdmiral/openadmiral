@@ -6,6 +6,7 @@ mod handoff;
 mod jobs;
 mod lifecycle;
 mod measure;
+mod messages;
 mod migrate;
 mod netwatch;
 mod plugin_files;
@@ -1296,6 +1297,7 @@ pub fn run() {
             float::float_close,
             float::float_recall,
             float::float_jump,
+            messages::agent_traffic,
             restart::agent_restart,
             restart::agent_restart_cancel,
             restart::agent_restarts,
