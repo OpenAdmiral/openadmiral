@@ -2,6 +2,7 @@ mod artifacts;
 mod discover;
 mod favicon;
 mod float;
+mod windows;
 mod handoff;
 mod jobs;
 mod lifecycle;
@@ -1339,6 +1340,7 @@ pub fn run() {
                     .build()?;
             }
             app.set_menu(app_menu(app)?)?;
+            windows::restore(app.handle());
             updater::start(handle.clone());
             telemetry::start(handle.clone());
             // Underway: the lid, the network, auto-resume (a preview shows a canned state).
@@ -1382,6 +1384,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                windows::changed(window.app_handle());
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 float::closed(window.app_handle(), window.label());
             }
@@ -1398,6 +1403,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building OpenAdmiral")
         .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                windows::quitting();
+            }
             // The Dock icon, Spotlight or Finder opening it again: bring the closed window back.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {

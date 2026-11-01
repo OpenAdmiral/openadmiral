@@ -36,6 +36,7 @@ pub fn any() -> bool {
 pub fn closed(app: &AppHandle, label: &str) {
     if with(|m| m.remove(label)).is_some() {
         tell(app);
+        crate::windows::changed(app);
     }
 }
 
@@ -45,18 +46,28 @@ pub fn floats() -> Vec<String> {
     with(|m| m.values().cloned().collect())
 }
 
+/// Window label and session of every floating window.
+pub fn open_windows() -> Vec<(String, String)> {
+    with(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+}
+
 /// Opens the agent's window, or brings it forward (to its desktop) if it has one.
 #[tauri::command]
 pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(), String> {
-    if let Some(label) = with(|m| m.iter().find(|(_, v)| **v == session_id).map(|(k, _)| k.clone())) {
+    open(&app, &session_id, &title, None)
+}
+
+/// `frame`: where it was, when it comes back at start.
+pub fn open(app: &AppHandle, session_id: &str, title: &str, frame: Option<&crate::windows::Frame>) -> Result<(), String> {
+    if let Some(label) = with(|m| m.iter().find(|(_, v)| v.as_str() == session_id).map(|(k, _)| k.clone())) {
         if let Some(w) = app.get_webview_window(&label) {
             let _ = w.show();
             let _ = w.unminimize();
             return w.set_focus().map_err(|e| e.to_string());
         }
     }
-    let label = label_of(&session_id)?;
-    let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+    let label = label_of(session_id)?;
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         // Checked by label_of: only letters, digits and dashes.
         .initialization_script(format!("window.__OPENADMIRAL_FLOAT__ = '{session_id}';"))
         .title(title)
@@ -68,9 +79,13 @@ pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(
     {
         builder = builder.title_bar_style(TitleBarStyle::Overlay).hidden_title(true).traffic_light_position(tauri::LogicalPosition::new(14.0, 19.0));
     }
-    builder.build().map_err(|e| e.to_string())?;
-    with(|m| m.insert(label, session_id));
-    tell(&app);
+    let window = builder.build().map_err(|e| e.to_string())?;
+    if let Some(f) = frame {
+        crate::windows::apply(&window, f);
+    }
+    with(|m| m.insert(label, session_id.to_string()));
+    tell(app);
+    crate::windows::changed(app);
     Ok(())
 }
 
@@ -79,6 +94,7 @@ pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(
 pub fn float_track(window: Window, session_id: String) {
     with(|m| m.insert(window.label().to_string(), session_id));
     tell(window.app_handle());
+    crate::windows::changed(window.app_handle());
 }
 
 /// Back to the main window: this one closes, and the main one shows the agent.
