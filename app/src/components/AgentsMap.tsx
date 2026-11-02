@@ -234,7 +234,6 @@ export function AgentsMap({ tree, agents, queues, onJump }: Props) {
                         {nameOf(r.to)} works for {nameOf(r.from)}: {r.summary}
                       </title>
                     </path>
-                    <path d={d} pathLength={100} fill="none" stroke="#a9c0f5" strokeWidth={2} strokeLinecap="round" className="fleet-pulse" />
                   </g>
                 );
               })}

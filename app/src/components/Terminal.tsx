@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
 import { RefreshLinearIcon } from "@solar-icons/react";
@@ -45,7 +46,28 @@ type Live = {
   onLeft?: () => void;
   /** Its agent is in a floating window: that window's terminal answers the pty, this one must not. */
   away?: boolean;
+  /** Drawn by the GPU (see drawOnGpu). */
+  gpu?: boolean;
 };
+
+/**
+ * Text on the GPU: as HTML, every change in a working agent's screen has the browser shape and
+ * paint text again, and that was most of what the windows spent. Once the terminal is on
+ * screen, since the addon measures its cells. Without WebGL, or if the context is lost (a
+ * window has a limited number), xterm goes back to HTML by itself once the addon is gone.
+ */
+function drawOnGpu(t: Live) {
+  if (t.gpu) return;
+  t.gpu = true;
+  try {
+    const gpu = new WebglAddon();
+    gpu.onContextLoss(() => gpu.dispose());
+    t.term.loadAddon(gpu);
+  } catch {
+    /* HTML it stays */
+  }
+}
+
 const live = new Map<string, Live>();
 
 // One listener for every terminal: output keeps flowing into hidden ones too.
@@ -272,6 +294,7 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, 
     // Fit after layout so the PTY starts at the size it is shown at.
     const frame = requestAnimationFrame(() => {
       try { t.fit.fit(); } catch { /* host not laid out yet */ }
+      if (visible(t)) drawOnGpu(t);
       if (!t.spawned) spawn(agentKey, t, argv, cwd, instance).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
       t.term.focus();
     });

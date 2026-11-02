@@ -202,12 +202,6 @@ main[data-rail] > div > div > header:first-child { padding-left: 64px; }
   to { stroke-dashoffset: -100; }
 }
 .fleet-beam { stroke-dasharray: 16 200; animation: fleet-beam 1.3s ease-in-out forwards; }
-/* Work under way along a line: a slow pulse, in CSS so it costs nothing to keep running. */
-@keyframes fleet-pulse {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -112; }
-}
-.fleet-pulse { stroke-dasharray: 12 100; animation: fleet-pulse 2.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .fleet-beam, .fleet-pulse { animation: none; }
+  .fleet-beam { animation: none; }
 }
