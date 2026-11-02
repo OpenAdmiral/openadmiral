@@ -491,6 +491,92 @@ pub fn resume_session(session_id: &str, name: &str, cwd: &str) -> Result<String,
     }
 }
 
+/// Flags a session's job was saved with, to carry to a new job: the name and the model and such.
+/// Not a worktree, which belongs to the folder being left.
+fn carried_flags(saved: &[String], name: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut it = saved.iter().peekable();
+    while let Some(flag) = it.next() {
+        if flag == "-w" || flag == "--worktree" {
+            if it.peek().is_some_and(|v| !v.starts_with('-')) {
+                it.next();
+            }
+            continue;
+        }
+        if flag.starts_with("--worktree=") {
+            continue;
+        }
+        out.push(flag.clone());
+    }
+    if !out.iter().any(|f| f == "-n" || f == "--name") && !name.trim().is_empty() {
+        out.extend(["-n".to_string(), name.trim().to_string()]);
+    }
+    out
+}
+
+/// Claude Code keeps a project's memory by folder: without this it stays behind. What the
+/// destination already has stays as it is.
+fn copy_memory(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let Ok(entries) = std::fs::read_dir(from) else { return Ok(()) };
+    std::fs::create_dir_all(to)?;
+    for entry in entries.flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_memory(&entry.path(), &target)?;
+        } else if !target.exists() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Flags of jobs already removed, while their session has not come back: a refused folder
+/// must not cost a session its model when it is retried.
+static LEFT_FLAGS: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+/// Continues a closed session in another folder, same conversation. A job wakes in its own
+/// folder whatever folder it is asked from, so its record goes first, and with it the options
+/// it wakes with: they are passed again. (All measured on throwaway sessions.)
+pub fn resume_elsewhere(session_id: &str, name: &str, from: &str, to: &str) -> Result<String, String> {
+    let dir = std::fs::canonicalize(to).map_err(|_| format!("The folder {to} does not exist."))?;
+    let to = dir.to_string_lossy().to_string();
+    let agents = claude_agents().ok_or("could not ask claude which sessions are running")?;
+    if jobs::is_running(&agents, session_id) && jobs::is_awake(&agents, session_id) {
+        return Err("Close the session first.".into());
+    }
+    let job = claude_agents_all().and_then(|all| jobs::job_of(&all, session_id));
+    let target = job.as_ref().map_or(session_id, |j| j.session_id.as_str()).to_string();
+    if transcript::locate(&target, from).is_none() {
+        return Err("This session has no conversation to continue yet.".into());
+    }
+    let projects = claude_home().join("projects");
+    copy_memory(&projects.join(transcript::escape(from)).join("memory"), &projects.join(transcript::escape(&to)).join("memory")).map_err(|e| format!("Could not copy its memory: {e}"))?;
+
+    let mut left = LEFT_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+    let left = left.get_or_insert_with(HashMap::new);
+    if let Some(j) = &job {
+        let saved = scheduler::read_json(&claude_home().join("jobs").join(&j.id).join("state.json"))
+            .and_then(|s| s.get("respawnFlags").and_then(Value::as_array).map(|f| f.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect::<Vec<_>>()))
+            .unwrap_or_default();
+        left.insert(target.clone(), saved);
+        let mut rm = claude_cmd();
+        rm.args(["rm", &j.id]);
+        run_cli_within(rm, Duration::from_secs(30))?;
+    }
+    let flags = carried_flags(left.get(&target).map_or(&[][..], |f| &f[..]), name);
+    let mut cmd = claude_cmd();
+    cmd.current_dir(&dir).args(["--bg", "--resume", &target]).args(&flags);
+    let out = run_cli_within(cmd, Duration::from_secs(30))?;
+    left.remove(&target);
+    let short = backgrounded_id(&out).ok_or("claude did not say which session it started.")?;
+    listed_full_id(&short)
+}
+
+#[tauri::command]
+async fn agent_resume_elsewhere(session_id: String, name: String, from: String, to: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || resume_elsewhere(&session_id, &name, &from, &to)).await.map_err(|e| e.to_string())?
+}
+
 /// The full id of a session claude just started as `short` (it registers within seconds).
 fn listed_full_id(short: &str) -> Result<String, String> {
     let start = std::time::Instant::now();
@@ -1269,6 +1355,7 @@ pub fn run() {
             order_load,
             order_save,
             favicon::fetch_favicon,
+            agent_resume_elsewhere,
             float::floats,
             float::float_open,
             float::float_track,
@@ -1439,6 +1526,30 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_job_keeps_the_options_but_not_the_worktree() {
+        let saved: Vec<String> = ["-n", "back", "--model", "opus[1m]", "-w", "tree", "--permission-mode", "auto"].map(String::from).to_vec();
+        assert_eq!(super::carried_flags(&saved, "ignored"), ["-n", "back", "--model", "opus[1m]", "--permission-mode", "auto"]);
+        assert_eq!(super::carried_flags(&["--worktree".to_string(), "--model".to_string(), "x".to_string()], "back"), ["--model", "x", "-n", "back"]);
+        assert_eq!(super::carried_flags(&[], " "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn memory_comes_along_without_overwriting() {
+        let root = std::env::temp_dir().join(format!("oa-mem-{}", std::process::id()));
+        let (from, to) = (root.join("a"), root.join("b"));
+        std::fs::create_dir_all(from.join("sub")).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(from.join("MEMORY.md"), "old").unwrap();
+        std::fs::write(from.join("sub/x.md"), "x").unwrap();
+        std::fs::write(to.join("MEMORY.md"), "kept").unwrap();
+        super::copy_memory(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(to.join("MEMORY.md")).unwrap(), "kept");
+        assert_eq!(std::fs::read_to_string(to.join("sub/x.md")).unwrap(), "x");
+        assert!(super::copy_memory(&root.join("none"), &root.join("c")).is_ok());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn query_escape_keeps_unreserved_and_encodes_the_rest() {
         assert_eq!(super::query_escape("0.1.1"), "0.1.1");

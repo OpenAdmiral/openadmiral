@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { debugTrace, popupMenu, setMenuErrorHandler, trace, type MenuEntry } from "./menu";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -14,6 +15,7 @@ export type AgentActions = {
   remove: (a: Agent) => void;
   closeAndRemove: (a: Agent) => void;
   resume: (a: Agent) => void;
+  resumeElsewhere: (a: Agent) => void; // asks where
   rename: (a: Agent) => void;
   restart: (a: Agent) => void; // asks first
   float: (a: Agent) => void;
@@ -26,6 +28,7 @@ export const ACTION_HELP = {
   close: "Ends the session after the current turn. Nothing is lost; resume it later.",
   force: "Stops it immediately, even mid-turn. Use when it's stuck; the current turn is cut short.",
   resume: "Reopens a closed session here, same conversation.",
+  resumeElsewhere: "Reopens a closed session in a folder you choose, same conversation. Its memory goes with it.",
   rename: "Gives the session a new name (runs /rename in it).",
   remove: "Hides it from OpenAdmiral. The conversation stays available with claude --resume.",
   closeRemove: "Closes the session after the current turn, then hides it from OpenAdmiral.",
@@ -45,6 +48,7 @@ export function agentActionItems(a: Agent, actions: AgentActions) {
       ? [{ id: "rename", label: "Rename…", description: ACTION_HELP.rename, disabledReason: canRename(a) ? undefined : "Run /reload-plugins in this session first.", run: () => actions.rename(a) }]
       : []),
     { id: "resume", label: "Resume in OpenAdmiral", description: ACTION_HELP.resume, disabledReason: on ? "It is already running." : undefined, run: () => actions.resume(a) },
+    { id: "resume-elsewhere", label: "Resume in Another Folder…", description: ACTION_HELP.resumeElsewhere, disabledReason: on ? "Close it first." : undefined, run: () => actions.resumeElsewhere(a) },
     on
       ? { id: "close-remove", label: "Close and Remove", description: ACTION_HELP.closeRemove, run: () => actions.closeAndRemove(a) }
       : { id: "remove", label: "Remove from List", description: ACTION_HELP.remove, run: () => actions.remove(a) },
@@ -63,6 +67,7 @@ export function agentMenuEntries(a: Agent, actions: AgentActions, extra: { text:
     ...(canRename(a) ? [{ id: `agent:rename:${a.id}`, text: "Rename…", action: () => actions.rename(a) }] : []),
     ...(renameNeedsReload(a) ? [{ id: `agent:rename:${a.id}`, text: "Rename… — /reload-plugins in it first", enabled: false, action: () => {} }] : []),
     { id: `agent:resume:${a.id}`, text: "Resume in OpenAdmiral", enabled: !running(a), action: () => actions.resume(a) },
+    { id: `agent:resume-elsewhere:${a.id}`, text: "Resume in Another Folder…", enabled: !running(a), action: () => actions.resumeElsewhere(a) },
     running(a)
       ? { id: `agent:remove:${a.id}`, text: "Remove from List — close it first", enabled: false, action: () => {} }
       : { id: `agent:remove:${a.id}`, text: "Remove from List", action: () => actions.remove(a) },
@@ -184,7 +189,11 @@ export function useLifecycle(agents: Agent[]) {
   // Accepted once for a folder: every session waiting on that folder goes again.
   const trustRetry = () => {
     if (!trustAsk) return;
-    for (const t of trustAsks) if (t.folder === trustAsk.folder) void invoke("agent_restart", { sessionId: t.sessionId }).catch((e) => notify(String(e), "error"));
+    for (const t of trustAsks) {
+      if (t.folder !== trustAsk.folder) continue;
+      if (t.retry) t.retry();
+      else void invoke("agent_restart", { sessionId: t.sessionId }).catch((e) => notify(String(e), "error"));
+    }
     setTrustAsks((l) => l.filter((t) => t.folder !== trustAsk.folder));
   };
   const trustCancel = () => setTrustAsks((l) => l.slice(1));
@@ -241,6 +250,20 @@ export function useLifecycle(agents: Agent[]) {
       } catch (e) {
         notify(String(e), "error");
       }
+    },
+    resumeElsewhere: async (a) => {
+      const to = await open({ directory: true, defaultPath: a.cwd, title: `Resume ${a.name} in…` });
+      if (typeof to !== "string" || to === a.cwd) return;
+      const name = a.cli?.name ?? a.session?.name ?? a.name;
+      const go = () =>
+        invoke("agent_resume_elsewhere", { sessionId: a.id, name, from: a.cwd, to })
+          .then(() => notify(`${a.name} goes on in ${to}.`))
+          .catch((e) => {
+            const folder = untrustedFolder(String(e), to);
+            if (folder) setTrustAsks((l) => [...l.filter((t) => t.sessionId !== a.id), { sessionId: a.id, name: a.name, folder, retry: () => void go() }]);
+            else notify(`${a.name} did not reopen: ${e}`, "error");
+          });
+      void go();
     },
     resume: (a) => {
       startHandoff(a.id, a.cli?.name ?? a.session?.name ?? a.name, a.cwd).catch((e) => notify(String(e), "error"));

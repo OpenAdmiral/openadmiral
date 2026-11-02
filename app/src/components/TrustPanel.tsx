@@ -52,8 +52,8 @@ export function RestartTrustDialog({ ask, onRetry, onCancel }: { ask: TrustAsk |
       {ask && (
         <motion.div className="fixed inset-0 z-50 flex items-start justify-center bg-black/25 pt-[12vh] backdrop-blur-[2px]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <div className="w-[640px] max-w-[calc(100vw-32px)] rounded-2xl border border-line-strong bg-canvas p-5 shadow-xl">
-            <h2 className="text-base font-semibold text-ink">{ask.name} can't restart yet</h2>
-            <p className="mt-1 mb-3 text-sm leading-relaxed text-ink-2">It is still running, nothing was lost. It stays on its current version until the folder is trusted.</p>
+            <h2 className="text-base font-semibold text-ink">{ask.retry ? `${ask.name} can't open here yet` : `${ask.name} can't restart yet`}</h2>
+            <p className="mt-1 mb-3 text-sm leading-relaxed text-ink-2">{ask.retry ? "Nothing was lost: its conversation is saved and goes on once the folder is trusted." : "It is still running, nothing was lost. It stays on its current version until the folder is trusted."}</p>
             <TrustPanel key={ask.folder} cwd={ask.folder} onRetry={onRetry} onCancel={onCancel} />
           </div>
         </motion.div>
