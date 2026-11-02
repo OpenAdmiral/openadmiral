@@ -72,7 +72,7 @@ export function Notices({ notices }: { notices: Notice[] }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4 }}
             className={cn(
-              "selectable pointer-events-auto rounded-xl border px-4 py-2.5 text-sm shadow-lg backdrop-blur",
+              "selectable pointer-events-auto rounded-xl border px-4 py-2.5 text-sm shadow-lg backdrop-blur [overflow-wrap:anywhere]",
               n.tone === "error" ? "border-red-500/30 bg-red-50/95 text-red-800 dark:bg-red-950/90 dark:text-red-200" : "border-line-strong bg-canvas/95 text-ink-2",
             )}
           >

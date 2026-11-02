@@ -514,6 +514,10 @@ fn carried_flags(saved: &[String], name: &str) -> Vec<String> {
     out
 }
 
+fn owned_worktree(job_state: &Value) -> Option<String> {
+    job_state.get("worktreePath").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_owned)
+}
+
 /// Claude Code keeps a project's memory by folder: without this it stays behind. What the
 /// destination already has stays as it is.
 fn copy_memory(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
@@ -548,6 +552,12 @@ pub fn resume_elsewhere(session_id: &str, name: &str, from: &str, to: &str) -> R
     let target = job.as_ref().map_or(session_id, |j| j.session_id.as_str()).to_string();
     if transcript::locate(&target, from).is_none() {
         return Err("This session has no conversation to continue yet.".into());
+    }
+    // Its job owns a worktree: taking the job away (below) would delete the worktree, or be
+    // refused with commits on no remote. Nothing has been touched yet.
+    let state = job.as_ref().and_then(|j| scheduler::read_json(&claude_home().join("jobs").join(&j.id).join("state.json")));
+    if let Some(tree) = state.as_ref().and_then(owned_worktree) {
+        return Err(format!("It works in a worktree of its own ({tree}), which belongs to this session: moving it would remove the worktree. Nothing was changed. Merge or push that work and start a new session in the other folder, or use Resume in OpenAdmiral."));
     }
     let projects = claude_home().join("projects");
     copy_memory(&projects.join(transcript::escape(from)).join("memory"), &projects.join(transcript::escape(&to)).join("memory")).map_err(|e| format!("Could not copy its memory: {e}"))?;
@@ -1532,6 +1542,12 @@ mod tests {
         assert_eq!(super::carried_flags(&saved, "ignored"), ["-n", "back", "--model", "opus[1m]", "--permission-mode", "auto"]);
         assert_eq!(super::carried_flags(&["--worktree".to_string(), "--model".to_string(), "x".to_string()], "back"), ["--model", "x", "-n", "back"]);
         assert_eq!(super::carried_flags(&[], " "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_job_with_its_own_worktree_is_not_moved() {
+        assert_eq!(super::owned_worktree(&serde_json::json!({ "worktreePath": "/r/.claude/worktrees/x" })).as_deref(), Some("/r/.claude/worktrees/x"));
+        assert_eq!(super::owned_worktree(&serde_json::json!({ "cwd": "/r" })), None);
     }
 
     #[test]
