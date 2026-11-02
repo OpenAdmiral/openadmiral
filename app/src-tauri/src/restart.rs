@@ -46,9 +46,20 @@ pub fn agent_restarts() -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn agent_restart(app: AppHandle, session_id: String) {
+pub fn agent_restart(app: AppHandle, session_id: String) -> Result<(), String> {
+    if let Some(gone) = crate::claude_agents().and_then(|a| crate::agent_row(&a, &session_id)).and_then(|r| folder_gone(&r)) {
+        return Err(format!("It can't restart: its folder {gone} no longer exists there. It keeps running on its current version; moving the folder back would let it restart."));
+    }
     with(|w| w.insert(session_id));
     tell(&app);
+    Ok(())
+}
+
+/// A restart starts over in the folder the session was opened in. Claude Code then says it is
+/// not trusted, which no prompt can fix: the folder was moved or deleted under the session.
+fn folder_gone(row: &Value) -> Option<String> {
+    let cwd = row.get("cwd").and_then(Value::as_str)?;
+    (!std::path::Path::new(cwd).is_dir()).then(|| cwd.to_string())
 }
 
 #[tauri::command]
@@ -136,6 +147,13 @@ mod tests {
         assert!(!turn_over(&row, Some(&json!({ "status": "waiting" }))));
         assert!(!turn_over(&row, Some(&json!({ "status": "idle", "subagents": [{ "status": "running" }] }))));
         assert!(turn_over(&row, Some(&json!({ "status": "idle", "subagents": [{ "status": "done" }] }))));
+    }
+
+    #[test]
+    fn notices_a_folder_that_is_gone() {
+        assert_eq!(folder_gone(&json!({ "cwd": "/no/such/folder" })).as_deref(), Some("/no/such/folder"));
+        assert_eq!(folder_gone(&json!({ "cwd": "/tmp" })), None);
+        assert_eq!(folder_gone(&json!({})), None);
     }
 
     #[test]

@@ -90,6 +90,10 @@ pub fn pty_open(
         "claude" => crate::claude_bin().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| program.clone()),
         _ => program.clone(),
     };
+    // Without this check a missing folder silently becomes the home folder.
+    if !std::path::Path::new(&cwd).is_dir() {
+        return Err(format!("The folder {cwd} no longer exists."));
+    }
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);
     cmd.cwd(&cwd);
