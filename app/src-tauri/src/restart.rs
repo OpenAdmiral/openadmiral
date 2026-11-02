@@ -27,7 +27,10 @@ pub fn any() -> bool {
 /// Nothing to cut short: the turn is over (a shell left running does not count), nobody is
 /// waiting on an answer, and no subagent still works. `session` is its file, if it has one.
 fn turn_over(row: &Value, session: Option<&Value>) -> bool {
-    if row.get("state").and_then(Value::as_str) == Some("working") {
+    // `state` alone can stay on "working" long after the turn ended (it is the last thing the
+    // session reported): only a busy session is really at it.
+    let field = |k: &str| row.get(k).and_then(Value::as_str);
+    if field("status") == Some("busy") && field("state") == Some("working") {
         return false;
     }
     let Some(s) = session else { return row.get("status").and_then(Value::as_str) != Some("busy") || row.get("state").and_then(Value::as_str) == Some("done") };
@@ -117,6 +120,13 @@ mod tests {
         let done = json!({ "status": "busy", "state": "done" });
         assert!(turn_over(&done, Some(&json!({ "status": "idle" }))));
         assert!(turn_over(&done, None));
+    }
+
+    #[test]
+    fn a_stale_working_label_does_not_hold_it_back() {
+        let idle = json!({ "status": "idle", "state": "working" });
+        assert!(turn_over(&idle, Some(&json!({ "status": "idle" }))));
+        assert!(turn_over(&idle, None));
     }
 
     #[test]
