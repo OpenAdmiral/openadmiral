@@ -9,6 +9,26 @@ import { canRename, renameNeedsReload, requestRename } from "./rename";
 import { untrustedFolder, type TrustAsk } from "./trust";
 import type { Agent } from "./types";
 
+const CLOSED_KEY = "openadmiral.closedByHand";
+const readClosed = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const writeClosed = (ids: string[]) => {
+  try {
+    localStorage.setItem(CLOSED_KEY, JSON.stringify(ids.slice(-200)));
+  } catch {
+    /* it would only reopen by itself when looked at */
+  }
+};
+/** Closed on purpose: looking at it does not reopen it, in any window or after a restart of the app, until it is resumed. */
+export const closedByHand = (id: string) => readClosed().includes(id);
+const markClosed = (id: string) => writeClosed([...readClosed().filter((x) => x !== id), id]);
+const clearClosed = (id: string) => writeClosed(readClosed().filter((x) => x !== id));
+
 export type AgentActions = {
   close: (a: Agent) => void;
   forceQuit: (a: Agent) => void; // asks first
@@ -214,6 +234,7 @@ export function useLifecycle(agents: Agent[]) {
     },
     rename: requestRename,
     close: async (a) => {
+      markClosed(a.id);
       try {
         const how = await invoke<string>("agent_close", { sessionId: a.id });
         if (how === "requested") {
@@ -230,6 +251,7 @@ export function useLifecycle(agents: Agent[]) {
         body: `${ACTION_HELP.force} The conversation is kept up to the last saved message and can be resumed.`,
         action: "Force Quit",
         run: async () => {
+          markClosed(a.id);
           try {
             const how = await invoke<string>("agent_force_quit", { sessionId: a.id });
             notify(how === "killed" ? `${a.name} did not stop on its own and was killed.` : `${a.name} was stopped.`);
@@ -255,6 +277,7 @@ export function useLifecycle(agents: Agent[]) {
       const to = await open({ directory: true, defaultPath: a.cwd, title: `Resume ${a.name} in…` });
       if (typeof to !== "string" || to === a.cwd) return;
       const name = a.cli?.name ?? a.session?.name ?? a.name;
+      clearClosed(a.id);
       const go = () =>
         invoke("agent_resume_elsewhere", { sessionId: a.id, name, from: a.cwd, to })
           .then(() => notify(`${a.name} goes on in ${to}.`))
@@ -266,6 +289,7 @@ export function useLifecycle(agents: Agent[]) {
       void go();
     },
     resume: (a) => {
+      clearClosed(a.id);
       startHandoff(a.id, a.cli?.name ?? a.session?.name ?? a.name, a.cwd).catch((e) => notify(String(e), "error"));
     },
   };

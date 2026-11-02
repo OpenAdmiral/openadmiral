@@ -26,7 +26,7 @@ import { ArtifactsPane } from "./ArtifactsPane";
 import { HandoffSheet } from "./HandoffSheet";
 import { NameEditor } from "./NameEditor";
 import { startHandoff, type Handoff } from "@/lib/handoffs";
-import { agentActionItems, type AgentActions } from "@/lib/lifecycle";
+import { agentActionItems, closedByHand, type AgentActions } from "@/lib/lifecycle";
 import { ActionMenu, type ActionItem } from "./ActionMenu";
 import { costCommand, offers, remoteState } from "@/lib/commands";
 import { Tip, TipLabel } from "./Tooltip";
@@ -377,7 +377,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
             agent.unplugged ? (
               <Unplugged agent={agent} installed={pluginInstalled} />
             ) : (
-              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} autoResume={openedClosed.current} />
+              <ReadOnly agent={agent} now={now} handoff={handoff} request={request} autoResume={openedClosed.current} onElsewhere={() => actions.resumeElsewhere(agent)} />
             )
           )}
         </div>
@@ -871,7 +871,7 @@ const autoResumed = new Set<string>();
 /** Opened, not passed over: ⌥↓ through the list moves on before this. */
 const AUTO_RESUME_MS = 1000;
 
-function ReadOnly({ agent, now, handoff: pending, request, autoResume }: { agent: Agent; now: number; handoff?: Handoff; request?: AdmiralRequest; autoResume: boolean }) {
+function ReadOnly({ agent, now, handoff: pending, request, autoResume, onElsewhere }: { agent: Agent; now: number; handoff?: Handoff; request?: AdmiralRequest; autoResume: boolean; onElsewhere: () => void }) {
   const s = agent.session;
   const [handoff, setHandoff] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -883,7 +883,7 @@ function ReadOnly({ agent, now, handoff: pending, request, autoResume }: { agent
   // Not one with no conversation to continue: resuming that would start a new session.
   const stopped = !inTerminal && !panel && !agent.cli && !agent.unplugged && !pending && agent.session?.hasTranscript !== false;
   useEffect(() => {
-    if (!autoResume || !stopped || autoResumed.has(agent.id)) return;
+    if (!autoResume || !stopped || autoResumed.has(agent.id) || closedByHand(agent.id)) return;
     const t = setTimeout(() => {
       autoResumed.add(agent.id);
       startHandoff(agent.id, agent.cli?.name ?? agent.session?.name ?? agent.name, agent.cwd).catch((e) => setStartError(String(e)));
@@ -938,6 +938,11 @@ function ReadOnly({ agent, now, handoff: pending, request, autoResume }: { agent
               className="rounded-lg px-3 py-2 text-xs font-semibold text-ink-2 transition-all duration-200 hover:bg-line focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               Open folder in Terminal
+            </button>
+          )}
+          {stopped && (
+            <button onClick={onElsewhere} className="rounded-lg px-3.5 py-2 text-sm text-ink-2 transition-all duration-200 hover:bg-line">
+              Resume in Another Folder…
             </button>
           )}
           {!panel && (
