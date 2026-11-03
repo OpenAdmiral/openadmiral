@@ -12,7 +12,7 @@ without taking away anything the terminal does best.
 
 <br>
 
-![Every agent on one map: who is working, who needs you, and the work they hand each other](docs/screenshots/agents-dark.png)
+![Every agent by project, live: who is working, who needs you, and who works for whom](docs/screenshots/agents-dark.png)
 
 <sub>macOS · free and open source · early alpha</sub>
 
