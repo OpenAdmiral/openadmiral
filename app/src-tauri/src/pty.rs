@@ -90,8 +90,9 @@ pub fn pty_open(
         "claude" => crate::claude_bin().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| program.clone()),
         _ => program.clone(),
     };
-    // Without this check a missing folder silently becomes the home folder.
-    if !std::path::Path::new(&cwd).is_dir() {
+    // Without this check a missing folder silently becomes the home folder. A preview's
+    // made-up sessions live in folders that do not exist; their stand-in claude needs none.
+    if !std::path::Path::new(&cwd).is_dir() && !crate::preview() {
         return Err(format!("The folder {cwd} no longer exists."));
     }
     let mut cmd = CommandBuilder::new(program);
