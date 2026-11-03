@@ -96,7 +96,7 @@ export function layout(groups: Group[], order: SidebarOrder | null): Node[] {
 /** Groups on screen, in the order drawn. */
 export const flatten = (tree: Node[]) => tree.flatMap((n) => (n.kind === "group" ? [n.group] : n.groups));
 
-/** A name for folders that share a prefix: "applivery-" → "Applivery". */
+/** A name for folders that share a prefix: "acme-" → "Acme". */
 export const prefixName = (prefix: string) => {
   const word = prefix.replace(/[-_.]+$/, "");
   return word.charAt(0).toUpperCase() + word.slice(1);

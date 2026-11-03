@@ -1077,7 +1077,7 @@ function SpaceAppearance({ space, onStyle, onClose }: { space: Space; onStyle: (
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="applivery.com"
+          placeholder="example.com"
           spellCheck={false}
           autoCapitalize="off"
           className="min-w-0 flex-1 rounded-md border border-line-strong bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-3 focus:border-brand-500 focus:outline-none"
