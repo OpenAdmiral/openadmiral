@@ -31,7 +31,7 @@ import { ActionMenu, type ActionItem } from "./ActionMenu";
 import { costCommand, offers, remoteState } from "@/lib/commands";
 import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
-import { AgentTerminal, focusTerminal, repaintTerminal, screenOf } from "./Terminal";
+import { AgentTerminal, focusTerminal, repaintTerminal, screenOf, typeIntoTerminal } from "./Terminal";
 import { ConversationView } from "./ConversationView";
 
 type Tab = "main" | "conversation" | "artifacts";
@@ -197,6 +197,13 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   // The header chips: commands go to the session's prompt box through the mod (never submitted).
   const cmd: HeaderCommands = {
     fill: async (text) => {
+      // Its plugin is not running (a folder never trusted runs no plugins, for one): nobody
+      // would pick the request up. Type it into the attached terminal instead, never submitted.
+      const silent = !!agent.cli && (!s || s.status === "ended" || Date.now() - s.updatedAt > PLUGIN_SILENT_MS);
+      if (silent && attached && typeIntoTerminal(agent.id, text)) {
+        setTab("main");
+        return;
+      }
       try {
         await invoke("fill_session", { sessionId: agent.id, text });
       } catch (e) {
@@ -868,6 +875,8 @@ function Unplugged({ agent, installed }: { agent: Agent; installed: boolean }) {
 
 /** Agents this run of the app already resumed on its own: once each, so a failure does not loop. */
 const autoResumed = new Set<string>();
+/** A live session whose plugin has not written for this long is taken as having none running. */
+const PLUGIN_SILENT_MS = 3 * 60_000;
 /** Opened, not passed over: ⌥↓ through the list moves on before this. */
 const AUTO_RESUME_MS = 1000;
 
