@@ -1,13 +1,13 @@
 //! Mission Control and App Exposé: while either is open, the Dock puts a window of
 //! its own, the size of the screen, at window layer 20 (macOS posts no notice an app
 //! can hear; `com.apple.expose.awake` is in the Dock but never reaches apps). A thread
-//! looks for that window a few times a second and tells every window when it comes and
+//! looks for that window eight times a second and tells every window when it comes and
 //! goes, so each agent view shows its name large exactly while Mission Control is up.
 
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
-const EVERY: Duration = Duration::from_millis(250);
+const EVERY: Duration = Duration::from_millis(120);
 /// The Dock's own layer for Mission Control's backdrop (the Dock bar itself sits higher).
 const MISSION_LAYER: i64 = 20;
 
@@ -56,11 +56,33 @@ pub fn watch(app: &AppHandle) {
             let now = is_open(&dock_windows());
             if now != was {
                 was = now;
+                // Mission Control counts a window it shows as hidden, and WebKit stops
+                // drawing a hidden webview: keep every window drawing while it is up.
+                for (_, w) in app.webview_windows() {
+                    let _ = w.with_webview(move |webview| occlusion_detection(webview.inner(), !now));
+                }
                 let _ = app.emit("openadmiral://mission-control", now);
             }
             std::thread::sleep(EVERY);
         }
     });
+}
+
+/// WebKit's own switch (as for screenshots, shot.rs): off, the webview draws even when
+/// macOS says its window is covered.
+#[cfg(target_os = "macos")]
+fn occlusion_detection(view: *mut std::ffi::c_void, enabled: bool) {
+    // SAFETY: `view` is the live WKWebView, on the main thread; the private selector
+    // exists since macOS 10.13 and is checked before it is sent.
+    unsafe {
+        use objc2::runtime::{AnyObject, Bool, Sel};
+        let view = &*(view as *const AnyObject);
+        let sel = Sel::register(c"_setWindowOcclusionDetectionEnabled:");
+        let responds: bool = objc2::msg_send![view, respondsToSelector: sel];
+        if responds {
+            let _: () = objc2::msg_send![view, _setWindowOcclusionDetectionEnabled: Bool::new(enabled)];
+        }
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -311,7 +311,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   );
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col">
+    <div className={cn("relative flex h-full min-w-0 flex-col", mission && "[&>:not([data-name-card])]:opacity-60 [&>:not([data-name-card])]:blur-[3px]")}>
       {mission && <NameCard agent={agent} />}
       <Header
         agent={agent}
@@ -1064,36 +1064,37 @@ function shellQuote(p: string) {
   return /^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The agent's name, large, while Mission Control is open (lib/mission.ts): sized to its own pane, on one line. */
+/**
+ * While Mission Control is open (lib/mission.ts): the view blurred under a small card
+ * with the agent's name, its project and what it is doing, so each thumbnail says who
+ * it is. Sized to its own pane (container units), one card per pane.
+ */
 function NameCard({ agent }: { agent: Agent }) {
   const color = projectColor(agent.project);
-  // Container units: a pane's own width and height, not the window's. A long name shrinks to fit.
-  const fit = (chars: number, max: string, share: number, tall: number) => `min(${max}, ${(share / Math.max(chars, 3) / 0.58).toFixed(1)}cqw, ${tall}cqh)`;
-  // A narrow pane breaks the name at its dashes and spaces: each piece can be larger.
-  const longest = Math.max(...agent.name.split(/(?<=[-_ /.])/).map((p) => p.length));
-  const narrow = longest < agent.name.length;
+  const busy = agent.status === "working" || agent.status === "waiting";
   return (
-    <div
-      className="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center gap-[3cqh] overflow-hidden bg-canvas/88 p-[4cqmin] text-center backdrop-blur-md"
-      style={{ containerType: "size", boxShadow: `inset 0 0 0 6px ${color}` }}
-    >
-      <span className="max-w-full truncate rounded-full px-[0.6em] py-[0.15em] font-semibold whitespace-nowrap text-white" style={{ background: color, fontSize: fit(agent.project.length, "28px", 40, 6) }}>
-        {agent.project}
-      </span>
-      <span
-        className="max-w-full leading-[0.95] font-bold tracking-tight text-ink [overflow-wrap:normal]"
-        style={{ fontSize: `max(${fit(agent.name.length, "150px", 90, 30)}, ${narrow ? fit(longest, "150px", 90, 22) : "0px"})` }}
+    <div data-name-card className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center p-3" style={{ containerType: "size" }}>
+      <div
+        className="flex max-w-[86cqw] flex-col items-center rounded-2xl border border-line-strong bg-canvas/92 px-[1.1em] py-[0.75em] text-center shadow-2xl"
+        style={{ fontSize: "clamp(12px, 3.4cqw, 18px)" }}
       >
-        {agent.name}
-      </span>
-      {agent.status !== "idle" && agent.status !== "ended" && (
-        <span
-          className={cn("font-semibold whitespace-nowrap", agent.status === "waiting" ? "text-amber-600 dark:text-amber-400" : "text-brand-600 dark:text-brand-400")}
-          style={{ fontSize: fit(9, "30px", 50, 7) }}
-        >
-          {agent.status === "waiting" ? "Needs you" : "Working"}
+        <span className="flex max-w-full items-center gap-[0.45em] text-[0.72em] font-semibold tracking-[0.08em] text-ink-3 uppercase">
+          <span className="size-[0.7em] shrink-0 rounded-full" style={{ background: color }} />
+          <span className="truncate">{agent.project}</span>
         </span>
-      )}
+        <span className="mt-[0.15em] max-w-full truncate text-[1.6em] leading-tight font-semibold tracking-tight text-ink">{agent.name}</span>
+        {busy && (
+          <span
+            className={cn(
+              "mt-[0.45em] flex items-center gap-[0.4em] rounded-full px-[0.65em] py-[0.15em] text-[0.75em] font-semibold",
+              agent.status === "waiting" ? "bg-amber-400/15 text-amber-700 dark:text-amber-300" : "bg-brand-500/12 text-brand-700 dark:text-brand-300",
+            )}
+          >
+            <StatusIcon status={agent.status} tip={false} />
+            {agent.status === "waiting" ? "Needs you" : "Working"}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
