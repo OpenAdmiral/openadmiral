@@ -2720,6 +2720,8 @@ version = "0.1.13"
 dependencies = [
  "block2",
  "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
  "dirs 6.0.0",
  "libc",
  "notify",
