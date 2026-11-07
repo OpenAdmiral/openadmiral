@@ -21,10 +21,11 @@ import {
 } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Agent, AdmiralSession } from "@/lib/types";
-import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, modelLabel, usd } from "@/lib/utils";
+import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, modelLabel, projectColor, usd } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
 import { ChangesView } from "@/components/ChangesView";
+import { useMissionControl } from "@/lib/mission";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { HandoffSheet } from "./HandoffSheet";
 import { NameEditor } from "./NameEditor";
@@ -131,6 +132,8 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
     return () => window.removeEventListener("openadmiral:tip", on);
   }, []);
   const hasRepo = !!(agent.session?.repo || agent.session?.branch) && !agent.unplugged;
+  // Mission Control: the name large over the whole view, so its thumbnail says who it is.
+  const mission = useMissionControl();
   // Index → Conversation: the turn to bring to the top, and the one being read.
   const [jump, setJump] = useState<{ index: number; at: number } | undefined>();
   const [reading, setReading] = useState<number | null>(null);
@@ -308,7 +311,8 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   );
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
+    <div className="relative flex h-full min-w-0 flex-col">
+      {mission && <NameCard agent={agent} />}
       <Header
         agent={agent}
         now={now}
@@ -1058,4 +1062,38 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
 /** A path for a shell command line, quoted when it needs it. */
 function shellQuote(p: string) {
   return /^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The agent's name, large, while Mission Control is open (lib/mission.ts): sized to its own pane, on one line. */
+function NameCard({ agent }: { agent: Agent }) {
+  const color = projectColor(agent.project);
+  // Container units: a pane's own width and height, not the window's. A long name shrinks to fit.
+  const fit = (chars: number, max: string, share: number, tall: number) => `min(${max}, ${(share / Math.max(chars, 3) / 0.58).toFixed(1)}cqw, ${tall}cqh)`;
+  // A narrow pane breaks the name at its dashes and spaces: each piece can be larger.
+  const longest = Math.max(...agent.name.split(/(?<=[-_ /.])/).map((p) => p.length));
+  const narrow = longest < agent.name.length;
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-40 flex flex-col items-center justify-center gap-[3cqh] overflow-hidden bg-canvas/88 p-[4cqmin] text-center backdrop-blur-md"
+      style={{ containerType: "size", boxShadow: `inset 0 0 0 6px ${color}` }}
+    >
+      <span className="max-w-full truncate rounded-full px-[0.6em] py-[0.15em] font-semibold whitespace-nowrap text-white" style={{ background: color, fontSize: fit(agent.project.length, "28px", 40, 6) }}>
+        {agent.project}
+      </span>
+      <span
+        className="max-w-full leading-[0.95] font-bold tracking-tight text-ink [overflow-wrap:normal]"
+        style={{ fontSize: `max(${fit(agent.name.length, "150px", 90, 30)}, ${narrow ? fit(longest, "150px", 90, 22) : "0px"})` }}
+      >
+        {agent.name}
+      </span>
+      {agent.status !== "idle" && agent.status !== "ended" && (
+        <span
+          className={cn("font-semibold whitespace-nowrap", agent.status === "waiting" ? "text-amber-600 dark:text-amber-400" : "text-brand-600 dark:text-brand-400")}
+          style={{ fontSize: fit(9, "30px", 50, 7) }}
+        >
+          {agent.status === "waiting" ? "Needs you" : "Working"}
+        </span>
+      )}
+    </div>
+  );
 }

@@ -10,6 +10,7 @@ mod lifecycle;
 mod measure;
 mod messages;
 mod migrate;
+mod mission;
 mod netwatch;
 mod plugin_files;
 mod power;
@@ -1489,6 +1490,7 @@ pub fn run() {
             discover::discover_sessions,
         ])
         .setup(|app| {
+            mission::watch(app.handle());
             let handle = app.handle().clone();
             // The main window is built here rather than by the config alone, to give it a
             // download handler: without one WebKit drops downloads (an image's Download Image).
