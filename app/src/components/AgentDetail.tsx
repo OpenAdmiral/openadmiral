@@ -964,12 +964,13 @@ function ReadOnly({ agent, now, handoff: pending, request, autoResume, onElsewhe
     }
   }, [pending]);
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
-      <div className="mb-5 flex items-center gap-4 rounded-xl border border-line bg-panel p-4">
+    <div className="@container flex h-full flex-col overflow-y-auto p-6 @max-[480px]:p-3">
+      {/* A narrow pane: the buttons drop below the text instead of squeezing it into a column of words. */}
+      <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-line bg-panel p-4">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-400">
           <RecordCircleLinearIcon size={20} />
         </span>
-        <div className="flex-1 text-sm text-ink-2">
+        <div className="min-w-[min(13rem,100%)] flex-1 basis-[16rem] text-sm text-ink-2">
           {panel ? (
             <>
               <p className="font-semibold text-ink">Running in {where}</p>
@@ -993,7 +994,7 @@ function ReadOnly({ agent, now, handoff: pending, request, autoResume, onElsewhe
             </>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {inTerminal && !agent.session?.host && (
             <button
               onClick={() => invoke("open_in_terminal", { cwd: agent.cwd }).catch(() => {})}
