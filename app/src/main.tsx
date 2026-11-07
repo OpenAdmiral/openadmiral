@@ -5,6 +5,7 @@ import "./index.css";
 import { invoke } from "@tauri-apps/api/core";
 import { FloatingAgent } from "./components/FloatingAgent";
 import { FloatingView, type FloatableView } from "./components/FloatingView";
+import { FloatingGrid } from "./components/FloatingGrid";
 import { devEnv } from "./lib/dev";
 
 // Errors the UI did not handle reach the app's stderr, beside Rust panics.
@@ -25,7 +26,9 @@ markHidden();
 // own window for a screenshot (OPENADMIRAL_VIEW=float:<id>).
 const render = (float?: string) =>
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>{float?.startsWith("view-") ? <FloatingView view={float.slice(5) as FloatableView} /> : float ? <FloatingAgent id={float} /> : <App />}</React.StrictMode>,
+    <React.StrictMode>
+      {float?.startsWith("view-") ? <FloatingView view={float.slice(5) as FloatableView} /> : float?.startsWith("grid-") ? <FloatingGrid id={float} /> : float ? <FloatingAgent id={float} /> : <App />}
+    </React.StrictMode>,
   );
 const told = (window as { __OPENADMIRAL_FLOAT__?: string }).__OPENADMIRAL_FLOAT__;
 if (told) render(told);

@@ -171,7 +171,24 @@ export function LayoutGlyph({ layout, className }: { layout: SplitLayout; classN
 }
 
 /** The header's layout button: the six layouts and the text size. */
-export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: { layout: SplitLayout; onLayout: (l: SplitLayout) => void; scale: number; onScale: (dir: 1 | -1 | 0) => void; dense: boolean; onDense: () => void }) {
+export function ViewMenu({
+  layout,
+  onLayout,
+  scale,
+  onScale,
+  dense,
+  onDense,
+  onToWindow,
+}: {
+  layout: SplitLayout;
+  onLayout: (l: SplitLayout) => void;
+  scale: number;
+  onScale: (dir: 1 | -1 | 0) => void;
+  dense: boolean;
+  onDense: () => void;
+  /** The main window's: its panes' agents go to a new window with a grid of its own. */
+  onToWindow?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   // Preview screenshots open it with OPENADMIRAL_TIP=view-menu.
@@ -252,6 +269,20 @@ export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: {
                 <span className={cn("absolute top-[2px] size-[14px] rounded-full bg-white shadow transition-[left] duration-150", dense ? "left-[16px]" : "left-[2px]")} />
               </span>
             </button>
+            {onToWindow && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onToWindow();
+                }}
+                className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left text-xs text-ink-2 transition-colors hover:text-ink"
+              >
+                <span className="flex-1">
+                  <span className="block font-medium text-ink">Move these panes to a new window</span>
+                  <span className="block text-[10.5px] text-ink-3">A window with a grid of its own</span>
+                </span>
+              </button>
+            )}
             <div className="mt-3.5 mb-2 flex items-center text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
               Text size
               <span className="ml-auto flex items-center gap-1 font-normal normal-case tracking-normal">
@@ -277,7 +308,7 @@ export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: {
 }
 
 /** An empty pane: the agents not on screen, to pick one (or pick in the sidebar). */
-export function PanePicker({ agents, active, onPick, onFocus }: { agents: Agent[]; active: boolean; onPick: (id: string) => void; onFocus: () => void }) {
+export function PanePicker({ agents, active, onPick, onFocus, sidebar = true }: { agents: Agent[]; active: boolean; onPick: (id: string) => void; onFocus: () => void; sidebar?: boolean }) {
   return (
     <div className="flex h-full min-w-0 overflow-hidden p-1.5" onPointerDown={onFocus}>
       <div
@@ -288,7 +319,9 @@ export function PanePicker({ agents, active, onPick, onFocus }: { agents: Agent[
         )}
       >
         <p className="text-sm font-semibold text-ink">Pick an agent for this pane</p>
-        <p className="mt-0.5 mb-3 text-xs text-ink-3">{active ? "Or click one in the sidebar." : "Click here, then pick one in the sidebar."}</p>
+        <p className="mt-0.5 mb-3 text-xs text-ink-3">
+          {!sidebar ? "It moves here from the window it is in." : active ? "Or click one in the sidebar." : "Click here, then pick one in the sidebar."}
+        </p>
         <div className="flex min-h-0 w-full max-w-xs flex-col gap-0.5 overflow-y-auto text-left">
           {agents.map((a) => (
             <button key={a.id} onClick={() => onPick(a.id)} className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-line">

@@ -12,7 +12,8 @@ export type Target =
   | { kind: "new-agent"; cwd?: string }
   | { kind: "artifact"; sessionId: string; artifactId: string }
   | { kind: "shortcuts" }
-  | { kind: "window"; label: string };
+  | { kind: "window"; label: string }
+  | { kind: "new-window" };
 
 export type Section = "Windows" | "Actions" | "Agents" | "Prompts" | "Artifacts" | "Up next";
 
@@ -22,7 +23,7 @@ export type Hit = { key: string; section: Section; title: string; detail?: strin
 export type WindowCard = { project?: string; status?: Agent["status"]; here: boolean; main: boolean };
 
 /** An open window (src-tauri float.rs window_list). */
-export type OpenWindow = { label: string; id: string | null; focused: boolean };
+export type OpenWindow = { label: string; id: string | null; focused: boolean; title?: string | null };
 
 const VIEW_TITLES: Record<string, string> = { agents: "Agents map", queue: "Up next", costs: "Costs", artifacts: "Artifacts" };
 
@@ -31,8 +32,9 @@ export function windowHits(windows: OpenWindow[], agents: Agent[], here: string)
   if (windows.length < 2) return [];
   return windows.map((w) => {
     const agent = w.id && !w.id.startsWith("view-") ? agents.find((a) => a.id === w.id) : undefined;
-    const title = !w.id ? "Main window" : agent ? agent.name : (VIEW_TITLES[w.id.slice(5)] ?? "Window");
-    const detail = !w.id ? "OpenAdmiral" : agent ? agent.project : "View";
+    const grid = !!w.id?.startsWith("grid-");
+    const title = !w.id ? "Main window" : agent ? agent.name : grid ? w.title || "Empty grid" : (VIEW_TITLES[w.id.slice(5)] ?? "Window");
+    const detail = !w.id ? "OpenAdmiral" : agent ? agent.project : grid ? "Grid window" : "View";
     return {
       key: `window:${w.label}`,
       section: "Windows" as const,
@@ -64,6 +66,7 @@ export function collect(agents: Agent[], artifacts: Artifact[], queues: Record<s
   add({ key: "new", section: "Actions", title: "New agent", detail: "⌘N", target: { kind: "new-agent" } }, "start create session");
   for (const p of projects) add({ key: `new:${p.key}`, section: "Actions", title: `New agent in ${p.label}`, target: { kind: "new-agent", cwd: p.key } }, "start create session", basename(p.key));
   for (const [target, title, kbd] of VIEWS) add({ key: `view:${target.view}`, section: "Actions", title, detail: kbd, target }, "go to view open");
+  add({ key: "new-window", section: "Actions", title: "New window with a grid", detail: "⌥⌘N", target: { kind: "new-window" } }, "window grid split layout ventana cuadricula");
   add({ key: "shortcuts", section: "Actions", title: "Keyboard shortcuts", detail: "⌘/", target: { kind: "shortcuts" } }, "keys help");
 
   for (const a of agents) {

@@ -1267,6 +1267,8 @@ fn handle_menu(app: &AppHandle, id: &str) {
         let _ = app.emit("openadmiral://shortcuts", ());
     } else if let Some(kind) = id.strip_prefix("help:").filter(|k| *k == "bug" || *k == "feedback") {
         let _ = open_issue(app.clone(), kind.to_string());
+    } else if id == "window:new-grid" {
+        let _ = float::grid_new(app.clone(), vec![]);
     } else if id == "help:welcome" {
         show_main(app);
         let _ = app.emit("openadmiral://welcome", ());
@@ -1356,6 +1358,8 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
         &PredefinedMenuItem::select_all(app, None)?,
     ])?;
     let window = Submenu::with_items(app, "Window", true, &[
+        &MenuItem::with_id(app, "window:new-grid", "New Window", true, Some("CmdOrCtrl+Alt+N"))?,
+        &PredefinedMenuItem::separator(app)?,
         &PredefinedMenuItem::minimize(app, None)?,
         &PredefinedMenuItem::maximize(app, None)?,
         &PredefinedMenuItem::fullscreen(app, None)?,
@@ -1473,6 +1477,10 @@ pub fn run() {
             git_root,
             changes::agent_changes,
             float::window_list,
+            float::grid_new,
+            float::grid_track,
+            float::grid_state_load,
+            float::grid_state_save,
             mission::mission_dismiss,
             mission::mission_log,
             float::window_focus,

@@ -14,6 +14,20 @@ fn with<T>(f: impl FnOnce(&mut HashMap<String, String>) -> T) -> T {
     f(guard.get_or_insert_with(HashMap::new))
 }
 
+/// Grid window label → the sessions its panes show.
+static GRIDS: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+fn with_grids<T>(f: impl FnOnce(&mut HashMap<String, Vec<String>>) -> T) -> T {
+    let mut guard = GRIDS.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(HashMap::new))
+}
+
+/// The window showing a session: its own floating window, or a grid window with it in a pane.
+fn holder(session_id: &str) -> Option<String> {
+    with(|m| m.iter().find(|(_, v)| v.as_str() == session_id).map(|(k, _)| k.clone()))
+        .or_else(|| with_grids(|g| g.iter().find(|(_, v)| v.iter().any(|s| s == session_id)).map(|(k, _)| k.clone())))
+}
+
 pub const PREFIX: &str = "float-";
 
 /// Labels take letters, digits and dashes; session ids are UUIDs.
@@ -34,16 +48,19 @@ pub fn any() -> bool {
 
 /// A floating window closed.
 pub fn closed(app: &AppHandle, label: &str) {
+    with_grids(|g| g.remove(label));
     if with(|m| m.remove(label)).is_some() {
         tell(app);
         crate::windows::changed(app);
     }
 }
 
-/// The sessions in floating windows.
+/// The sessions in floating windows, their own or a grid window's panes.
 #[tauri::command]
 pub fn floats() -> Vec<String> {
-    with(|m| m.values().cloned().collect())
+    let mut out: Vec<String> = with(|m| m.values().filter(|v| !v.starts_with("grid-")).cloned().collect());
+    with_grids(|g| out.extend(g.values().flatten().cloned()));
+    out
 }
 
 /// Window label and session of every floating window.
@@ -59,15 +76,17 @@ pub struct WindowInfo {
     /// The agent's session, or "view-<name>" for a floating view; none for the main window.
     pub id: Option<String>,
     pub focused: bool,
+    pub title: Option<String>,
 }
 
 #[tauri::command]
 pub fn window_list(app: AppHandle) -> Vec<WindowInfo> {
     let focused = |label: &str| app.get_webview_window(label).and_then(|w| w.is_focused().ok()).unwrap_or(false);
-    let mut out = vec![WindowInfo { label: "main".into(), id: None, focused: focused("main") }];
+    let title = |label: &str| app.get_webview_window(label).and_then(|w| w.title().ok());
+    let mut out = vec![WindowInfo { label: "main".into(), id: None, focused: focused("main"), title: None }];
     let mut floats = open_windows();
     floats.sort();
-    out.extend(floats.into_iter().map(|(label, id)| WindowInfo { focused: focused(&label), label, id: Some(id) }));
+    out.extend(floats.into_iter().map(|(label, id)| WindowInfo { focused: focused(&label), title: title(&label), label, id: Some(id) }));
     out
 }
 
@@ -99,7 +118,7 @@ pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(
 
 /// `frame`: where it was, when it comes back at start.
 pub fn open(app: &AppHandle, session_id: &str, title: &str, frame: Option<&crate::windows::Frame>) -> Result<(), String> {
-    if let Some(label) = with(|m| m.iter().find(|(_, v)| v.as_str() == session_id).map(|(k, _)| k.clone())) {
+    if let Some(label) = holder(session_id) {
         if let Some(w) = app.get_webview_window(&label) {
             let _ = w.show();
             let _ = w.unminimize();
@@ -158,7 +177,7 @@ pub fn float_close(window: Window) -> Result<(), String> {
 /// Brings forward the floating window showing this session and hands it `focus` (an artifact
 /// to open). False when no window shows it: the main window is the one to ask.
 pub fn focus(app: &AppHandle, session_id: &str, focus: &serde_json::Value) -> bool {
-    let label = with(|m| m.iter().find(|(_, v)| *v == session_id).map(|(k, _)| k.clone()));
+    let label = holder(session_id);
     let Some(w) = label.as_ref().and_then(|l| app.get_webview_window(l)) else { return false };
     let _ = w.show();
     let _ = w.unminimize();
@@ -182,10 +201,86 @@ pub fn float_jump(app: AppHandle, session_id: String) {
 /// From the main window: closes the agent's floating window.
 #[tauri::command]
 pub fn float_recall(app: AppHandle, session_id: String) -> Result<(), String> {
-    let label = with(|m| m.iter().find(|(_, v)| **v == session_id).map(|(k, _)| k.clone()));
+    let label = holder(&session_id);
+    // In a grid window: only its pane lets it go; the window stays.
+    if let Some(l) = label.as_ref().filter(|l| with_grids(|g| g.contains_key(*l))) {
+        let _ = app.emit_to(l.as_str(), "openadmiral://grid-release", &session_id);
+        return Ok(());
+    }
     match label.and_then(|l| app.get_webview_window(&l)) {
         Some(w) => w.close().map_err(|e| e.to_string()),
         None => Ok(()),
+    }
+}
+
+/// A window with a grid of its own (components/FloatingGrid.tsx): `sessions` start in its
+/// panes, laid out to fit them. Answers its id.
+#[tauri::command]
+pub fn grid_new(app: AppHandle, sessions: Vec<String>) -> Result<String, String> {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let id = format!("grid-{n:x}");
+    let layout = match sessions.len() {
+        0..=2 => "2v",
+        3 => "3v",
+        4 => "4",
+        5 => "c122",
+        _ => "c222",
+    };
+    let panes: Vec<serde_json::Value> = sessions.iter().take(6).map(|s| serde_json::Value::String(s.clone())).collect();
+    grid_state_save(app.clone(), id.clone(), serde_json::json!({ "layout": layout, "panes": panes, "active": 0 }));
+    open(&app, &id, "OpenAdmiral", None)?;
+    Ok(id)
+}
+
+/// A grid window's panes changed: it now shows these sessions. Any other window showing
+/// one of them lets it go (an agent's terminal lives in one window at a time).
+#[tauri::command]
+pub fn grid_track(window: Window, sessions: Vec<String>) {
+    let app = window.app_handle();
+    let me = window.label().to_string();
+    for s in &sessions {
+        match holder(s) {
+            Some(other) if other != me => {
+                if with_grids(|g| g.contains_key(&other)) {
+                    let _ = app.emit_to(other.as_str(), "openadmiral://grid-release", s);
+                    with_grids(|g| g.get_mut(&other).map(|v| v.retain(|x| x != s)));
+                } else if let Some(w) = app.get_webview_window(&other) {
+                    let _ = w.close();
+                }
+            }
+            _ => {}
+        }
+    }
+    with_grids(|g| g.insert(me, sessions));
+    tell(app);
+}
+
+fn grids_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    crate::app_data_dir(app).map(|d| d.join("grids.json"))
+}
+
+fn grids_read(app: &AppHandle) -> serde_json::Map<String, serde_json::Value> {
+    grids_path(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// A grid window's layout, panes and dividers, as it left them.
+#[tauri::command]
+pub fn grid_state_load(app: AppHandle, id: String) -> serde_json::Value {
+    grids_read(&app).remove(&id).unwrap_or(serde_json::Value::Null)
+}
+
+#[tauri::command]
+pub fn grid_state_save(app: AppHandle, id: String, state: serde_json::Value) {
+    if crate::preview() {
+        return;
+    }
+    let Some(path) = grids_path(&app) else { return };
+    let mut all = grids_read(&app);
+    all.insert(id, state);
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, serde_json::Value::Object(all).to_string()).is_ok() {
+        let _ = std::fs::rename(tmp, path);
     }
 }
 

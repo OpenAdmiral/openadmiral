@@ -156,6 +156,7 @@ export default function App() {
     else if (t.kind === "new-agent") setSheet({ cwd: t.cwd });
     else if (t.kind === "shortcuts") setShortcuts(true);
     else if (t.kind === "window") void invoke("window_focus", { label: t.label });
+    else if (t.kind === "new-window") void invoke("grid_new", { sessions: [] });
     else showArtifact(t.sessionId, t.artifactId);
   };
   // ⌘K in a floating window picked something this window shows (float.rs palette_pick).
@@ -541,7 +542,21 @@ export default function App() {
   }, [shown, view, agents, life.actions, ui, seen.unseen, split]);
 
   const selected = view?.kind === "agent" ? agents.find((a) => a.id === view.id) : undefined;
-  const viewMenu = <ViewMenu layout={split.layout} onLayout={setLayout} scale={textScale} onScale={ui.stepText} dense={!!ui.densePanes} onDense={ui.toggleDensePanes} />;
+  const viewMenu = (
+    <ViewMenu
+      layout={split.layout}
+      onLayout={setLayout}
+      scale={textScale}
+      onScale={ui.stepText}
+      dense={!!ui.densePanes}
+      onDense={ui.toggleDensePanes}
+      onToWindow={
+        split.panes.filter(Boolean).length
+          ? () => void invoke("grid_new", { sessions: split.panes.filter(Boolean) }).catch((e) => life.notify(`Could not open the window: ${String(e)}`, "error"))
+          : undefined
+      }
+    />
+  );
   /** An agent's view: on its own, as one pane of the split, or just its inspector beside them. */
   const detail = (a: Agent, extra: { key?: string; part?: "all" | "main" | "inspector"; pane?: { active: boolean; onClose?: () => void }; dense?: boolean }) => (
     <AgentDetail

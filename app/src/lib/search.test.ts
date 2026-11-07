@@ -67,3 +67,10 @@ describe("windowHits", () => {
     expect(search(hits, "orders").map((x) => x.key)).toEqual(["window:float-a1"]);
   });
 });
+
+describe("a grid window in the Windows row", () => {
+  it("is named after the agents its title lists", () => {
+    const h = windowHits([{ label: "main", id: null, focused: false }, { label: "float-grid-1", id: "grid-1", focused: false, title: "api · docs" }], [], "main");
+    expect(h[1]).toMatchObject({ title: "api · docs", detail: "Grid window" });
+  });
+});

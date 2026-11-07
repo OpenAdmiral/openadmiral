@@ -63,3 +63,12 @@ export function relayout(s: SplitState, layout: SplitLayout, candidates: string[
 /** Panes whose agent is gone show the empty picker. */
 export const prune = (s: SplitState, alive: Set<string>): SplitState =>
   s.panes.some((p) => p && !alive.has(p)) ? { ...s, panes: s.panes.map((p) => (p && alive.has(p) ? p : null)) } : s;
+
+/** A saved grid, made whole: as many panes as its layout has. */
+export function gridState(saved: unknown): SplitState {
+  const s = (saved && typeof saved === "object" ? saved : {}) as Partial<SplitState>;
+  const layout = (s.layout && s.layout in PANES ? s.layout : "2v") as SplitLayout;
+  const n = PANES[layout];
+  const panes = Array.from({ length: n }, (_, i) => (typeof s.panes?.[i] === "string" ? (s.panes[i] as string) : null));
+  return { layout, panes, active: Math.min(Math.max(0, s.active ?? 0), n - 1), ratios: Array.isArray(s.ratios) ? s.ratios : undefined };
+}

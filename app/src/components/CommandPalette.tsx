@@ -69,6 +69,7 @@ export function CommandPalette({ open, initialQuery = "", hits, agents, here, on
     // An agent with a window of its own: that window comes forward.
     const own = t.kind === "agent" ? windows.find((w) => w.id === t.id) : undefined;
     if (t.kind === "window") void invoke("window_focus", { label: t.label });
+    else if (t.kind === "new-window") void invoke("grid_new", { sessions: [] });
     else if (own) {
       if (own.label !== here) void invoke("window_focus", { label: own.label });
     } else if (here === "main") onPick(t);
