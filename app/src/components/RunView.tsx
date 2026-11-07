@@ -46,7 +46,7 @@ export function RunView({ agent, active, onError, onNotice, onConfirm, onArchive
   }, [info, shown]);
 
   if (error) return <p className="p-6 text-center text-sm text-ink-3">{error}</p>;
-  if (!info) return <p className="p-6 text-center text-sm text-ink-3">Reading the workspace…</p>;
+  if (!info) return <p className="p-6 text-center text-sm text-ink-3">Reading the worktree…</p>;
   const { scripts } = info;
   const conductor = scripts.source !== "OpenAdmiral";
 
@@ -67,7 +67,7 @@ export function RunView({ agent, active, onError, onNotice, onConfirm, onArchive
 
   const archive = () =>
     onConfirm({
-      title: `Archive ${agent.name}'s workspace?`,
+      title: `Archive ${agent.name}'s worktree?`,
       body: `Runs the archive script if there is one, keeps any uncommitted changes in a git ref, and removes the worktree at ${info.path}. Its branch stays. The agent leaves the list.`,
       action: "Archive",
       run: async () => {
@@ -135,7 +135,7 @@ export function RunView({ agent, active, onError, onNotice, onConfirm, onArchive
           <button
             onClick={archive}
             disabled={live}
-            title={live ? "Close the agent first" : "Archive this workspace"}
+            title={live ? "Close the agent first" : "Archive this worktree"}
             className="flex items-center gap-1 rounded-md px-2 py-1 text-ink-2 hover:bg-line hover:text-ink disabled:opacity-40"
           >
             <ArchiveLinearIcon size={14} /> Archive
@@ -163,7 +163,7 @@ export function RunView({ agent, active, onError, onNotice, onConfirm, onArchive
                 Press ▶ to run it here.
               </span>
             ) : (
-              "Add a run script to start this workspace's app with a click."
+              "Add a run script to start this worktree's app with a click."
             )}
           </div>
         )}
@@ -184,9 +184,9 @@ function ScriptsEditor({ cwd, scripts, onSaved, onError }: { cwd: string; script
   );
   return (
     <div className="shrink-0 space-y-2 border-b border-line bg-panel px-4 py-3">
-      {field("Setup (when a workspace is made)", setup, setSetup, "pnpm install && cp $CONDUCTOR_ROOT_PATH/.env .")}
+      {field("Setup (when a worktree is made)", setup, setSetup, "pnpm install && cp $CONDUCTOR_ROOT_PATH/.env .")}
       {field("Run", run, setRun, "pnpm dev --port $CONDUCTOR_PORT")}
-      {field("Archive (before a workspace is archived)", archive, setArchive, "docker compose down")}
+      {field("Archive (before a worktree is archived)", archive, setArchive, "docker compose down")}
       <div className="flex justify-end">
         <button
           onClick={() => invoke("workspace_scripts_save", { cwd, setup, run, archive }).then(onSaved, (e) => onError(String(e)))}

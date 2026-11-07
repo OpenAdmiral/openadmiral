@@ -294,7 +294,7 @@ pub async fn workspace_archive(app: AppHandle, cwd: String) -> Result<String, St
     tauri::async_runtime::spawn_blocking(move || {
         let (top, main) = roots(Path::new(&cwd)).ok_or("Not a git repository.")?;
         if top == main {
-            return Err("This is the repo's main checkout, not a workspace of its own.".into());
+            return Err("This is the repo's main checkout, not a worktree of its own.".into());
         }
         if let Some(archive) = scripts_for(&app, &main).archive.filter(|s| !s.trim().is_empty()) {
             run_blocking(&app, "archive", &archive, &top)?;
