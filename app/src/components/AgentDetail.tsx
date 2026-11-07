@@ -16,6 +16,7 @@ import {
   MonitorLinearIcon,
   RecordCircleLinearIcon,
   RefreshLinearIcon,
+  DangerTriangleLinearIcon,
 } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Agent, AdmiralSession } from "@/lib/types";
@@ -471,6 +472,12 @@ function Header({
   const s = agent.session;
   const ctx = s?.context;
   const used = contextUsed(ctx);
+  // A plugin that did not load: often a folder Claude Code doesn't trust, which /reload-plugins can't fix.
+  const [untrusted, setUntrusted] = useState(false);
+  useEffect(() => {
+    if (!agent.pluginDown) return setUntrusted(false);
+    invoke<boolean | null>("folder_trusted", { cwd: agent.cwd }).then((t) => setUntrusted(t === false), () => {});
+  }, [agent.pluginDown, agent.cwd]);
   const costCmd = costCommand(s);
   const remote = remoteState(s);
   const contextItems: ActionItem[] = [
@@ -595,7 +602,12 @@ function Header({
           </Tip>
         )}
       </div>
-      <div data-tauri-drag-region className={cn("flex items-center gap-1.5", dense && "hidden", compact ? "flex-nowrap overflow-x-clip whitespace-nowrap [&>*]:shrink-0" : "flex-wrap")}>
+      <div
+        data-tauri-drag-region
+        // In a narrow pane the chips stay on one line and scroll sideways (trackpad, or the wheel).
+        onWheel={compact ? (e) => e.deltaY && !e.deltaX && (e.currentTarget.scrollLeft += e.deltaY) : undefined}
+        className={cn("flex items-center gap-1.5", dense && "hidden", compact ? "flex-nowrap overflow-x-auto overscroll-x-contain whitespace-nowrap [scrollbar-width:none] [&>*]:shrink-0" : "flex-wrap")}
+      >
         <Tip side="bottom" content={<TipLabel label="Reveal in Finder" />}>
           <Chip icon={<FolderLinearIcon size={13} />} onClick={() => cmd.reveal(agent.cwd)}>
             {agent.project}
@@ -701,7 +713,21 @@ function Header({
             </Chip>
           </Tip>
         )}
-        {agent.pluginDown && (
+        {agent.pluginDown && untrusted && (
+          <Tip
+            side="bottom"
+            content={
+              <TipLabel
+                label={`Claude Code doesn't trust ${agent.cwd}, so it runs no plugins there and this session's status is out of date. Click to copy the fix: run it in a terminal, accept the trust prompt (its default is “No, exit”), quit, then restart this agent.`}
+              />
+            }
+          >
+            <Chip icon={<DangerTriangleLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={() => cmd.copy(`cd ${shellQuote(agent.cwd)} && claude`)}>
+              Folder not trusted · Fix
+            </Chip>
+          </Tip>
+        )}
+        {agent.pluginDown && !untrusted && (
           <Tip side="bottom" content={<TipLabel label="OpenAdmiral's plugin did not load when this session last started, so its context and status here are out of date. Reload types /reload-plugins in its terminal: press Return to run it." />}>
             <Chip icon={<RefreshLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={() => void cmd.fill("/reload-plugins")}>
               Plugin not running · Reload
@@ -1011,4 +1037,9 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+/** A path for a shell command line, quoted when it needs it. */
+function shellQuote(p: string) {
+  return /^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`;
 }

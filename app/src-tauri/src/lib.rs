@@ -1002,6 +1002,31 @@ fn set_attention(app: AppHandle, count: usize) {
     }
 }
 
+/// Whether Claude Code trusts a folder (it runs no plugins in one it doesn't): a
+/// trusted folder or parent, but inside a git repo only up to the repo's root, which
+/// needs its own trust. `None` when Claude Code's settings can't be read.
+#[tauri::command]
+fn folder_trusted(cwd: String) -> Option<bool> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let config = std::env::var_os("CLAUDE_CONFIG_DIR").map(|d| PathBuf::from(d).join(".claude.json")).unwrap_or_else(|| home.join(".claude.json"));
+    let settings: Value = serde_json::from_str(&std::fs::read_to_string(config).ok()?).ok()?;
+    let root = Command::new("git").env("PATH", login_path()).args(["-C", &cwd, "rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+    Some(trusted(settings.get("projects")?, Path::new(&cwd), root.as_deref()))
+}
+
+fn trusted(projects: &Value, cwd: &Path, git_root: Option<&Path>) -> bool {
+    let accepted = |p: &Path| projects.get(p.to_string_lossy().as_ref()).and_then(|v| v.get("hasTrustDialogAccepted")).and_then(Value::as_bool) == Some(true);
+    for dir in cwd.ancestors() {
+        if accepted(dir) {
+            return true;
+        }
+        if git_root == Some(dir) {
+            return false;
+        }
+    }
+    false
+}
+
 /// Opens a new GitHub issue from the repo's form ("bug" or "feedback"), its type
 /// preset by the form, with this app's version and macOS already filled in.
 #[tauri::command]
@@ -1417,6 +1442,7 @@ pub fn run() {
             transcript::transcript_open,
             transcript::transcript_close,
             open_issue,
+            folder_trusted,
             star::star_event,
             star::star_now,
             star::star_dismiss,
@@ -1551,6 +1577,16 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_git_repo_needs_its_own_trust() {
+        use std::path::Path;
+        let projects = serde_json::json!({ "/dev": { "hasTrustDialogAccepted": true }, "/dev/repo/sub": { "hasTrustDialogAccepted": false }, "/dev/other": { "hasTrustDialogAccepted": true } });
+        assert!(!super::trusted(&projects, Path::new("/dev/repo"), Some(Path::new("/dev/repo"))));
+        assert!(!super::trusted(&projects, Path::new("/dev/repo/sub"), Some(Path::new("/dev/repo"))));
+        assert!(super::trusted(&projects, Path::new("/dev/plain/x"), None));
+        assert!(super::trusted(&projects, Path::new("/dev/other/x"), Some(Path::new("/dev/other"))));
+    }
+
     #[test]
     fn a_new_job_keeps_the_options_but_not_the_worktree() {
         let saved: Vec<String> = ["-n", "back", "--model", "opus[1m]", "-w", "tree", "--permission-mode", "auto"].map(String::from).to_vec();

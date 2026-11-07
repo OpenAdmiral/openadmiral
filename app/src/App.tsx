@@ -142,8 +142,16 @@ export default function App() {
     setView({ kind: "agent", id: sessionId });
     setArtifactFocus({ sessionId, key: `${sessionId}/${artifactId}`, at: Date.now() });
   };
+  /** Picking an agent that lives in a floating window brings that window forward instead. */
+  const selectView = (v: View | null) => {
+    if (v?.kind === "agent" && floats.includes(v.id)) {
+      void invoke("float_open", { sessionId: v.id, title: agents.find((a) => a.id === v.id)?.name ?? "" });
+      return;
+    }
+    setView(v);
+  };
   const openTarget = (t: Target) => {
-    if (t.kind === "agent") setView({ kind: "agent", id: t.id });
+    if (t.kind === "agent") selectView({ kind: "agent", id: t.id });
     else if (t.kind === "view") setView({ kind: t.view });
     else if (t.kind === "new-agent") setSheet({ cwd: t.cwd });
     else if (t.kind === "shortcuts") setShortcuts(true);
@@ -592,7 +600,7 @@ export default function App() {
             tree={sortMode === "recent" ? undefined : order.spaces.tree}
             onFloatView={floatView}
             view={view}
-            onSelect={setView}
+            onSelect={selectView}
             onExpand={ui.toggleLeft}
             scheduledCount={scheduledCount}
             actions={life.actions}
@@ -626,7 +634,7 @@ export default function App() {
         actions={life.actions}
         onClearEnded={() => life.clearEnded(agents)}
         todayCost={costs?.today}
-        onSelect={setView}
+        onSelect={selectView}
         onNew={(cwd) => setSheet({ cwd })}
         renaming={rename.editing ? { id: rename.editing, save: rename.commit, cancel: rename.cancel } : undefined}
       />

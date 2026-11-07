@@ -279,21 +279,22 @@ export function ViewMenu({ layout, onLayout, scale, onScale, dense, onDense }: {
 /** An empty pane: the agents not on screen, to pick one (or pick in the sidebar). */
 export function PanePicker({ agents, active, onPick, onFocus }: { agents: Agent[]; active: boolean; onPick: (id: string) => void; onFocus: () => void }) {
   return (
-    <div className="flex h-full p-1.5" onPointerDown={onFocus}>
+    <div className="flex h-full min-w-0 overflow-hidden p-1.5" onPointerDown={onFocus}>
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed p-4 transition-colors",
+          // Safe centering: in a small pane the list scrolls instead of spilling over its neighbours.
+          "flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center-safe overflow-hidden rounded-2xl border border-dashed p-4 text-center transition-colors",
           active ? "border-brand-500/60 bg-brand-500/[0.04]" : "border-line-strong",
         )}
       >
         <p className="text-sm font-semibold text-ink">Pick an agent for this pane</p>
         <p className="mt-0.5 mb-3 text-xs text-ink-3">{active ? "Or click one in the sidebar." : "Click here, then pick one in the sidebar."}</p>
-        <div className="flex max-h-[60%] w-full max-w-xs flex-col gap-0.5 overflow-y-auto">
+        <div className="flex min-h-0 w-full max-w-xs flex-col gap-0.5 overflow-y-auto text-left">
           {agents.map((a) => (
-            <button key={a.id} onClick={() => onPick(a.id)} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-line">
+            <button key={a.id} onClick={() => onPick(a.id)} className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-line">
               <StatusIcon status={a.status} tip={false} />
-              <span className="flex-1 truncate text-sm font-medium text-ink">{a.name}</span>
-              <span className="truncate text-[11px] text-ink-3">{a.project}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{a.name}</span>
+              {a.project !== a.name && <span className="min-w-0 max-w-[45%] truncate text-[11px] text-ink-3">{a.project}</span>}
             </button>
           ))}
           {agents.length === 0 && <p className="text-center text-xs text-ink-3">Every agent is already on screen.</p>}
