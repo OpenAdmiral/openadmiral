@@ -49,6 +49,18 @@ function statusOf(session: AdmiralSession | undefined, cli: CliAgent | undefined
   return "idle";
 }
 
+/** How long a process may run before its plugin's first write. */
+const PLUGIN_GRACE_MS = 90_000;
+
+/**
+ * A running process whose plugin never wrote: the session file is older than the
+ * process (a restart or resume where the plugin did not load), so it shows the
+ * previous run's context and status.
+ */
+export function pluginDown(s: AdmiralSession, c: CliAgent, now = Date.now()) {
+  return now - c.startedAt > PLUGIN_GRACE_MS && s.updatedAt < c.startedAt;
+}
+
 /**
  * Session files that are not real sessions: a `claude` process the CLI never
  * registered (Claude's agent view after /exit in an attach loads the mod too).
@@ -101,6 +113,7 @@ export function mergeAgents(
     if (superseded.has(s.sessionId)) continue;
     const c = cliById.get(s.sessionId);
     if (isPhantom(s, !!c, misses.get(s.sessionId) ?? 0, now)) continue;
+    const down = !!c && pluginDown(s, c, now);
     byId.set(s.sessionId, {
       id: s.sessionId,
       // A session the CLI no longer lists keeps the name it was last seen with.
@@ -109,9 +122,11 @@ export function mergeAgents(
       cwd: s.cwd,
       attachable: c ? c.kind !== "interactive" : false,
       live: !!c || now - s.updatedAt < STALE_MS,
-      status: statusOf(s, c, now),
-      session: s,
+      status: statusOf(down ? undefined : s, c, now),
+      // Its last readings belong to the process before: no context, turn or wait to show.
+      session: down ? { ...s, status: "idle", context: undefined, turn: undefined, waiting: undefined } : s,
       cli: c,
+      ...(down ? { pluginDown: true } : {}),
     });
   }
   for (const c of cli) {

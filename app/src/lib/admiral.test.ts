@@ -101,3 +101,22 @@ describe("an older Claude Code", () => {
     expect(c.update).toBeUndefined();
   });
 });
+
+describe("a running session whose plugin did not load", () => {
+  const cli = { pid: 1, cwd: "/r", kind: "background", startedAt: now - 3_600_000, sessionId: "s", id: "s", name: "s", status: "busy", state: "blocked" };
+  const stale = session({ status: "ended", updatedAt: now - 7_200_000, context: { window: 1_000_000, percent: 79, usablePercent: 95 } });
+  it("drops the previous run's context and status", () => {
+    const [a] = mergeAgents([stale], [cli], now, new Map(), new Map(), []);
+    expect(a.pluginDown).toBe(true);
+    expect(a.session?.context).toBeUndefined();
+    expect(a.status).toBe("working");
+  });
+  it("gives a process that just started time to load it", () => {
+    const [a] = mergeAgents([stale], [{ ...cli, startedAt: now - 30_000 }], now, new Map(), new Map(), []);
+    expect(a.pluginDown).toBeUndefined();
+  });
+  it("leaves a session its plugin keeps writing alone", () => {
+    const [a] = mergeAgents([session({ updatedAt: now - 7_200_000 })], [{ ...cli, startedAt: now - 9_000_000 }], now, new Map(), new Map(), []);
+    expect(a.pluginDown).toBeUndefined();
+  });
+});

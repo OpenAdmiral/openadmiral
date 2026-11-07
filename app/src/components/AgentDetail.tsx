@@ -701,6 +701,13 @@ function Header({
             </Chip>
           </Tip>
         )}
+        {agent.pluginDown && (
+          <Tip side="bottom" content={<TipLabel label="OpenAdmiral's plugin did not load when this session last started, so its context and status here are out of date. Reload types /reload-plugins in its terminal: press Return to run it." />}>
+            <Chip icon={<RefreshLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={() => void cmd.fill("/reload-plugins")}>
+              Plugin not running · Reload
+            </Chip>
+          </Tip>
+        )}
         {pluginBehind && (
           <Tip side="bottom" content={<TipLabel label="This session runs an older OpenAdmiral plugin. Reload runs /reload-plugins in it as soon as it is idle." />}>
             <Chip icon={<RefreshLinearIcon size={13} />} className="text-amber-700 dark:text-amber-300" onClick={pluginBehind.reload}>

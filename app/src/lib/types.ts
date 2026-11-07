@@ -80,6 +80,8 @@ export type Agent = {
   cli?: CliAgent;
   /** Found running without the OpenAdmiral plugin (src-tauri/src/discover.rs): read-only, from its transcript. */
   unplugged?: { via: string };
+  /** Running, but its OpenAdmiral plugin has not written since the process started (it did not load): what the file says is stale. */
+  pluginDown?: boolean;
   /** It runs an older Claude Code than the one installed; restarting moves it over. */
   update?: { from: string; to: string };
 };
