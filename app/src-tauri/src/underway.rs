@@ -22,6 +22,7 @@ use crate::resume::Resumer;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -400,6 +401,12 @@ fn helper_socket() -> String {
 }
 
 /// One request to the helper, one answer.
+#[cfg(not(unix))]
+fn helper_call(_req: Value) -> Result<Value, String> {
+    Err("Underway needs macOS.".into())
+}
+
+#[cfg(unix)]
 fn helper_call(req: Value) -> Result<Value, String> {
     let mut s = UnixStream::connect(helper_socket()).map_err(|e| e.to_string())?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(3)));

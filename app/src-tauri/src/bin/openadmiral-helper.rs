@@ -18,6 +18,19 @@
 #[allow(dead_code)]
 mod power;
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("openadmiral-helper runs only on macOS.");
+}
+
+#[cfg(unix)]
+fn main() {
+    helper::main()
+}
+
+#[cfg(unix)]
+mod helper {
+use super::power;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -205,7 +218,7 @@ fn serve(paths: &Paths, lease: &mut Lease, mut stream: UnixStream) -> bool {
     exit
 }
 
-fn main() {
+pub fn main() {
     let paths = Paths::get();
     unsafe {
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
@@ -307,4 +320,5 @@ mod tests {
         assert_eq!(l.seconds_left(t0), 600);
         assert_eq!(l.floor, 5);
     }
+}
 }

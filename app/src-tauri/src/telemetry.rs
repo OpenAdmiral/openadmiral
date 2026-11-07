@@ -63,6 +63,14 @@ fn install_id(app: &AppHandle) -> Option<String> {
 }
 
 pub fn os_version() -> String {
+    #[cfg(windows)]
+    return Command::new("cmd")
+        .args(["/C", "ver"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    #[cfg(not(windows))]
     Command::new("sw_vers")
         .arg("-productVersion")
         .output()

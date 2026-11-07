@@ -11,7 +11,9 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 const EVERY: Duration = Duration::from_millis(120);
 /// The Dock's own layer for Mission Control's backdrop (the Dock bar itself sits higher).
@@ -80,6 +82,7 @@ fn tell(app: &AppHandle, on: bool) {
     }
     // Mission Control counts a window it shows as hidden, and WebKit stops drawing a
     // hidden webview: keep every window drawing while it is up.
+    #[cfg(target_os = "macos")]
     for (_, w) in app.webview_windows() {
         let _ = w.with_webview(move |webview| occlusion_detection(webview.inner(), !on));
     }
@@ -102,8 +105,8 @@ pub fn mission_log(message: String) {
 }
 
 fn log(message: &str) {
-    let Some(home) = std::env::var_os("HOME") else { return };
-    let dir = std::path::Path::new(&home).join("Library/Logs/OpenAdmiral");
+    let Some(home) = dirs::home_dir() else { return };
+    let dir = home.join("Library/Logs/OpenAdmiral");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("mission.log");
     // Kept small: a fresh file past 200 KB.

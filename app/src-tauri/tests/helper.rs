@@ -1,6 +1,7 @@
 //! The privileged helper end to end, unprivileged: a debug build takes its socket,
 //! marker and `pmset` from the environment, so this runs it against a fake pmset
 //! that records what it was asked and reports a battery level from a file.
+#![cfg(unix)]
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;

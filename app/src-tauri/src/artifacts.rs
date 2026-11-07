@@ -71,8 +71,8 @@ pub fn artifact_action(session_id: String, id: String, file: Option<String>, act
         "open" | "reveal" | "copy" => {
             let p = version_file(&session_id, &id, file.as_deref().ok_or("which version?")?)?;
             let status = match action.as_str() {
-                "open" => Command::new("open").arg(&p).status(),
-                "reveal" => Command::new("open").arg("-R").arg(&p).status(),
+                "open" => crate::open_external(&p.to_string_lossy()).map(|_| std::process::ExitStatus::default()),
+                "reveal" => crate::reveal_external(&p.to_string_lossy()).map(|_| std::process::ExitStatus::default()),
                 _ => copy(&p),
             };
             status.map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err(format!("{action} failed")) })
@@ -98,9 +98,7 @@ fn copy(p: &Path) -> std::io::Result<std::process::ExitStatus> {
             .status(),
         None => {
             let text = std::fs::read(p)?;
-            let mut child = Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn()?;
-            std::io::Write::write_all(child.stdin.as_mut().unwrap(), &text)?;
-            child.wait()
+            crate::clipboard_text(&text).map(|_| std::process::ExitStatus::default())
         }
     }
 }

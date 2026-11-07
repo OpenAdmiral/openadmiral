@@ -48,6 +48,15 @@ use tauri::{AppHandle, Emitter, Manager};
 /// PATH, without the folders where `claude`, `git` and node live.
 pub fn login_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
+    #[cfg(windows)]
+    return PATH.get_or_init(|| {
+        // Windows apps get the user's full PATH; add where Claude Code's installer puts it.
+        let home = dirs::home_dir().unwrap_or_default();
+        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+        dirs.push(home.join(".local").join("bin"));
+        std::env::join_paths(dirs).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+    });
+    #[cfg(not(windows))]
     PATH.get_or_init(|| {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
         let out = Command::new(shell)
@@ -67,6 +76,28 @@ pub fn login_path() -> &'static str {
     })
 }
 
+/// Opens a URL or file with the system's default handler (`open` on macOS, `start` on Windows).
+pub fn open_external(target: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(target).status();
+    #[cfg(windows)]
+    let status = Command::new("cmd").args(["/C", "start", "", target]).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(target).status();
+    status.map(|_| ())
+}
+
+/// Shows a file or folder selected in Finder (Explorer on Windows).
+pub fn reveal_external(path: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg("-R").arg(path).status();
+    #[cfg(windows)]
+    let status = Command::new("explorer").arg(format!("/select,{path}")).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(Path::new(path).parent().unwrap_or(Path::new(path))).status();
+    status.map(|_| ())
+}
+
 /// Variables a Claude Code session sets for its own children. A `claude` started
 /// with them (OpenAdmiral launched from inside a session, as `pnpm tauri dev` is) runs as
 /// that session's child: not registered with `claude agents`, transcript off.
@@ -82,7 +113,8 @@ pub fn inherited_claude_vars() -> Vec<String> {
 /// Code extension bundles (people who only use the VS Code extension have no CLI).
 /// `None` when there is neither.
 pub fn claude_bin() -> Option<PathBuf> {
-    let on_path = login_path().split(':').map(|d| Path::new(d).join("claude")).find(|p| p.is_file());
+    let names: &[&str] = if cfg!(windows) { &["claude.exe", "claude.cmd"] } else { &["claude"] };
+    let on_path = std::env::split_paths(login_path()).flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| p.is_file());
     on_path.or_else(|| {
         let home = dirs::home_dir()?;
         let mut found: Vec<(std::time::SystemTime, PathBuf)> = [".vscode", ".vscode-insiders", ".cursor", ".windsurf"]
@@ -91,7 +123,7 @@ pub fn claude_bin() -> Option<PathBuf> {
             .flatten()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with("anthropic.claude-code-"))
-            .map(|e| e.path().join("resources/native-binary/claude"))
+            .map(|e| e.path().join("resources").join("native-binary").join(if cfg!(windows) { "claude.exe" } else { "claude" }))
             .filter(|p| p.is_file())
             .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
             .collect();
@@ -122,6 +154,21 @@ pub fn claude_cmd() -> Command {
 /// everything but writes nothing shared and attaches no terminals.
 pub fn preview() -> bool {
     std::env::var_os("OPENADMIRAL_PREVIEW").is_some()
+}
+
+/// Whether a process is running: kill(pid, 0) on Unix, the process list on Windows.
+pub fn process_alive(pid: i64) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
+    }
 }
 
 /// The app's own data folder (costs cache, sidebar order, UI state, hand-offs).
@@ -993,10 +1040,20 @@ fn fill_session(session_id: String, text: String) -> Result<(), String> {
 /// Plain text to the clipboard.
 #[tauri::command]
 fn copy_text(text: String) -> Result<(), String> {
-    let mut child = Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn().map_err(|e| e.to_string())?;
-    std::io::Write::write_all(child.stdin.as_mut().unwrap(), text.as_bytes()).map_err(|e| e.to_string())?;
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    clipboard_text(text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Text (UTF-8) to the clipboard: pbcopy on macOS, PowerShell's Set-Clipboard on Windows.
+pub fn clipboard_text(text: &[u8]) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let mut child = Command::new("powershell")
+        .args(["-NoProfile", "-Command", "[Console]::InputEncoding=[Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    #[cfg(not(windows))]
+    let mut child = Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn()?;
+    std::io::Write::write_all(child.stdin.as_mut().unwrap(), text)?;
+    child.wait().map(|_| ())
 }
 
 /// Shows a folder in Finder, selected in its parent.
@@ -1005,7 +1062,7 @@ fn reveal_path(path: String) -> Result<(), String> {
     if !Path::new(&path).exists() {
         return Err(format!("{path} no longer exists."));
     }
-    Command::new("open").arg("-R").arg(&path).status().map_err(|e| e.to_string())?;
+    reveal_external(&path).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1051,7 +1108,7 @@ fn set_attention(app: AppHandle, count: usize) {
 /// needs its own trust. `None` when Claude Code's settings can't be read.
 #[tauri::command]
 fn folder_trusted(cwd: String) -> Option<bool> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let home = dirs::home_dir()?;
     let config = std::env::var_os("CLAUDE_CONFIG_DIR").map(|d| PathBuf::from(d).join(".claude.json")).unwrap_or_else(|| home.join(".claude.json"));
     let settings: Value = serde_json::from_str(&std::fs::read_to_string(config).ok()?).ok()?;
     let root = Command::new("git").env("PATH", login_path()).args(["-C", &cwd, "rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
@@ -1086,7 +1143,7 @@ fn open_issue(app: AppHandle, kind: String) -> Result<(), String> {
         query_escape(&app.package_info().version.to_string()),
         query_escape(&macos),
     );
-    Command::new("open").arg(url).status().map(|_| ()).map_err(|e| e.to_string())
+    open_external(&url).map_err(|e| e.to_string())
 }
 
 /// Percent-encodes everything but unreserved URL characters.
@@ -1125,20 +1182,18 @@ async fn install_plugin() -> Result<(), String> {
 /// OpenAdmiral and installs nothing until the person picks a scope.
 #[tauri::command]
 fn open_vscode_plugin_install() -> Result<(), String> {
-    Command::new("open")
-        .arg("vscode://anthropic.claude-code/install-plugin?plugin=openadmiral&marketplace=OpenAdmiral/openadmiral")
-        .status()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    open_external("vscode://anthropic.claude-code/install-plugin?plugin=openadmiral&marketplace=OpenAdmiral/openadmiral").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn open_in_terminal(cwd: String) -> Result<(), String> {
-    Command::new("open")
-        .args(["-a", "Terminal", &cwd])
-        .status()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").args(["-a", "Terminal", &cwd]).status();
+    #[cfg(windows)]
+    let status = Command::new("cmd").args(["/C", "start", "", "cmd", "/K", "cd", "/d", &cwd]).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("x-terminal-emulator").current_dir(&cwd).status();
+    status.map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn watch_admiral(app: AppHandle) {

@@ -150,7 +150,7 @@ pub fn session_running(session_id: &str) -> bool {
     crate::read_dir_json(&crate::claude_home().join("sessions")).iter().any(|s| {
         s.get("sessionId").and_then(Value::as_str) == Some(session_id)
             // kill(pid, 0) only asks whether the process exists.
-            && s.get("pid").and_then(Value::as_i64).is_some_and(|pid| unsafe { libc::kill(pid as libc::pid_t, 0) } == 0)
+            && s.get("pid").and_then(Value::as_i64).is_some_and(crate::process_alive)
     })
 }
 

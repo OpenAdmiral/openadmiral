@@ -179,7 +179,7 @@ pub async fn star_now(app: AppHandle) -> Result<&'static str, String> {
     let how = if starred {
         "starred"
     } else {
-        Command::new("open").arg(REPO_URL).status().map_err(|e| e.to_string())?;
+        crate::open_external(REPO_URL).map_err(|e| e.to_string())?;
         "opened"
     };
     // Every window drops its star links.
