@@ -213,6 +213,22 @@ pub fn float_recall(app: AppHandle, session_id: String) -> Result<(), String> {
     }
 }
 
+/// An agent's own window takes a grid layout: it becomes a grid window in place, its
+/// agent in the first pane. Answers the grid's id.
+#[tauri::command]
+pub fn float_to_grid(app: AppHandle, window: Window, layout: String) -> Result<String, String> {
+    let label = window.label().to_string();
+    let session = with(|m| m.get(&label).cloned()).ok_or("Not an agent's window.")?;
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let id = format!("grid-{n:x}");
+    grid_state_save(app.clone(), id.clone(), serde_json::json!({ "layout": layout, "panes": [session.clone()], "active": 0 }));
+    with(|m| m.insert(label.clone(), id.clone()));
+    with_grids(|g| g.insert(label, vec![session]));
+    tell(&app);
+    crate::windows::changed(&app);
+    Ok(id)
+}
+
 /// A window with a grid of its own (components/FloatingGrid.tsx): `sessions` start in its
 /// panes, laid out to fit them. Answers its id.
 #[tauri::command]

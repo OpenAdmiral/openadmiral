@@ -99,6 +99,8 @@ type Props = {
   part?: "all" | "main" | "inspector";
   /** The layout and text size control, in the header. */
   viewMenu?: React.ReactNode;
+  /** Show `viewMenu` even in a pane's compact header (an agent's own window has no bar above it). */
+  viewMenuInPane?: boolean;
   /** Text size of the conversation and artifacts (the terminal's is set on the terminals). */
   textScale?: number;
   /** A pane in compact mode: one header line, the tabs as icons, no chips. */
@@ -116,7 +118,7 @@ type Props = {
 /** Focus requests already acted on, by agent; outlives the view, which remounts per agent. */
 const HANDLED_FOCUS = new Set<string>();
 
-export function AgentDetail({ agent, now, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, textScale = 1, dense: denseOption, floatAction, floating, inset, restarting }: Props) {
+export function AgentDetail({ agent, now, handoff, request, actions, closing, preview, previewAttach, probe, agents, queue, onError, onNotice, onConfirm, artifacts, artifactFocus, turnFocus, seen, onClaudeLink, inspectorHidden, onToggleInspector, layout, renaming, pluginBehind, pluginInstalled = true, pane, part = "all", viewMenu, viewMenuInPane, textScale = 1, dense: denseOption, floatAction, floating, inset, restarting }: Props) {
   const active = pane?.active ?? true;
   const s = agent.session;
   const transcript = useTranscript(agent.id, agent.cwd);
@@ -332,6 +334,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
         restarting={restarting}
         active={active}
         viewMenu={viewMenu}
+        viewMenuInPane={viewMenuInPane}
         onClosePane={pane?.onClose}
       />
       {agent.status === "waiting" && s?.waiting && (
@@ -467,6 +470,7 @@ function Header({
   restarting,
   active = true,
   viewMenu,
+  viewMenuInPane,
   onClosePane,
 }: {
   agent: Agent;
@@ -487,6 +491,7 @@ function Header({
   restarting?: boolean;
   active?: boolean;
   viewMenu?: React.ReactNode;
+  viewMenuInPane?: boolean;
   onClosePane?: () => void;
 }) {
   const s = agent.session;
@@ -561,7 +566,7 @@ function Header({
         {tabs}
         {/* Panes share these in the bar above them; a floating window has its own inspector. */}
         {!compact && <UnderwayPill />}
-        {!compact && viewMenu}
+        {(!compact || viewMenuInPane) && viewMenu}
         {(!compact || inset) && (
         <Tip side="bottom" content={<TipLabel label={inspector.hidden ? "Show the inspector" : "Hide the inspector"} kbd="⌘⌥0" />}>
           <button

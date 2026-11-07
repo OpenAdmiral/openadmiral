@@ -1478,6 +1478,7 @@ pub fn run() {
             changes::agent_changes,
             float::window_list,
             float::grid_new,
+            float::float_to_grid,
             float::grid_track,
             float::grid_state_load,
             float::grid_state_save,

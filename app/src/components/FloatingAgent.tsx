@@ -14,13 +14,14 @@ import { ConfirmDialog, Notices } from "./Overlays";
 import { RestartTrustDialog } from "./TrustPanel";
 import { setTerminalScale } from "./Terminal";
 import { TooltipProvider } from "./Tooltip";
+import { ViewMenu } from "./Split";
 import { WindowPalette } from "./CommandPalette";
 
 /** How long an agent may be missing before its window closes (a list can blink while it refreshes). */
 const GONE_AFTER_MS = 5000;
 
 /** The whole of a floating window: one agent, with the inspector a shortcut away. */
-export function FloatingAgent({ id }: { id: string }) {
+export function FloatingAgent({ id, onGrid }: { id: string; /** It took a grid layout: this window shows that grid from now on. */ onGrid?: (gridId: string) => void }) {
   const { agents, now, queues, artifacts, requests, loaded, cliReady, superseded, pluginInstalled } = useAdmiral({ quiet: true });
   const [current, setCurrent] = useState(id);
   const [inspectorHidden, setInspectorHidden] = useState(true);
@@ -108,6 +109,24 @@ export function FloatingAgent({ id }: { id: string }) {
             inset
             restarting={life.restarting.includes(agent.id)}
             floatAction={{ kind: "dock", run: () => void invoke("float_dock") }}
+            viewMenuInPane
+            viewMenu={
+              <ViewMenu
+                layout="1"
+                onLayout={(l) => {
+                  if (l === "1") return;
+                  // More panes: this window becomes a grid, its agent in the first one.
+                  invoke<string>("float_to_grid", { layout: l }).then(
+                    (g) => onGrid?.(g),
+                    (e) => life.notify(String(e), "error"),
+                  );
+                }}
+                scale={textScale}
+                onScale={(d) => ui.stepText(d)}
+                dense={!!ui.densePanes}
+                onDense={() => {}}
+              />
+            }
           />
         ) : (
           <div data-tauri-drag-region className="flex h-full items-center justify-center text-sm text-ink-3">
