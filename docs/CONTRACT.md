@@ -15,6 +15,9 @@ in epoch milliseconds.
   artifacts/<sessionId>/<artifactId>/manifest.json + v<N>.<ext>   mod → app: things an agent shows (the `show` tool)
   focus.json                     mod → app: "show this now" (the transcript card's Open in OpenAdmiral button)
   fill/<sessionId>.json          app → mod: { text, at } — put this command in the session's prompt box (not submitted)
+  bin/codex-hook                 app: the hook script Codex agents run (written by the app)
+  codex/<agentId>.json           codex-hook → app: a Codex agent's latest hook event
+  codex/<agentId>.session        app: the Codex session id to resume
 ```
 
 ## sessions/<sessionId>.json
@@ -143,6 +146,20 @@ every heartbeat. The app writes it whole (tmp + rename), keeping keys it does no
 embedded terminal, rewritten every ~10 s while the app runs. A custom statusline
 can print nothing for those sessions while the file is under 30 s old, so the
 embedded terminal is not cluttered twice.
+
+## Codex agents (app ↔ Codex, no plugin)
+
+A Codex agent runs in the app's embedded terminal (Codex has no background jobs). The
+app keeps the list in its own data folder (`codex.json`: `{ id, name, cwd, createdAt,
+prompt }`, ids `codex-<hex>`), not here. The terminal runs `codex` with, for that session
+only, `-c hooks.<Event>=[{hooks=[{type="command",command="'<bin/codex-hook>' <id> <Event>"}]}]`
+for SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Stop and
+SessionEnd. `bin/codex-hook` writes `codex/<id>.json`:
+`{ event, at (epoch seconds), payload (the hook's stdin JSON) }`. The app reads it:
+UserPromptSubmit/PreToolUse/PostToolUse → working, PermissionRequest → waiting (detail from
+`tool_input.description` or `tool_name`), Stop → idle with `last_assistant_message` as the
+last reply. It saves `payload.session_id` to `codex/<id>.session`; reopening the terminal
+runs `codex … resume <session>`.
 
 ## Spawning `claude`
 
