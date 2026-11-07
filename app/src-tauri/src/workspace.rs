@@ -57,6 +57,16 @@ fn free_path(root: &Path, slug: &str) -> PathBuf {
     path
 }
 
+/// A fresh worktree on a new branch `oa/<name>`, for an agent that has no `-w` of its own (Codex).
+pub fn new_worktree(cwd: &str, name: &str) -> Result<PathBuf, String> {
+    let root = PathBuf::from(run(Path::new(cwd), "git", &["rev-parse", "--show-toplevel"]).map_err(|_| "A worktree needs a folder in a git repository.")?);
+    let slug = crate::worktree_slug(name);
+    let path = free_path(&root, &slug);
+    let leaf = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(slug);
+    run(&root, "git", &["worktree", "add", "-b", &format!("oa/{leaf}"), &path.to_string_lossy()])?;
+    Ok(path)
+}
+
 pub fn prepare(cwd: &str, from: &StartFrom) -> Result<Prepared, String> {
     let dir = Path::new(cwd);
     let root = PathBuf::from(run(dir, "git", &["rev-parse", "--show-toplevel"]).map_err(|_| "Start from needs a folder in a git repository.")?);

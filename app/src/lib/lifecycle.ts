@@ -56,9 +56,20 @@ export const ACTION_HELP = {
   restart: "Restarts it on the installed Claude Code after the current turn. Same conversation; background shells keep running.",
 } as const;
 
+/** A Codex agent lives in the app's terminal: it can move to a window, stop and leave the list. */
+function codexItems(a: Agent, actions: AgentActions) {
+  const on = !!a.codex?.running;
+  return [
+    { id: "float", label: "Open in New Window", description: ACTION_HELP.float, run: () => actions.float(a) },
+    { id: "close", label: "Stop", description: "Ends Codex in its terminal. Its conversation stays: opening the terminal again resumes it.", disabledReason: on ? undefined : "Not running.", run: () => actions.close(a) },
+    { id: "remove", label: "Remove from List", description: "Stops it and hides it from OpenAdmiral. The conversation stays in Codex (codex resume).", run: () => actions.remove(a) },
+  ];
+}
+
 /** The header's popover: every action explains itself, a disabled one says why. */
 export function agentActionItems(a: Agent, actions: AgentActions) {
   const on = running(a);
+  if (a.codex) return codexItems(a, actions);
   return [
     ...(a.update ? [{ id: "restart", label: `Restart to Update (${a.update.to})`, description: ACTION_HELP.restart, run: () => actions.restart(a) }] : []),
     { id: "float", label: "Open in New Window", description: ACTION_HELP.float, run: () => actions.float(a) },
@@ -77,6 +88,11 @@ export function agentActionItems(a: Agent, actions: AgentActions) {
 
 /** The agent's menu entries; ids carry the session, so a late click still acts on the right agent. */
 export function agentMenuEntries(a: Agent, actions: AgentActions, extra: { text: string; action: () => void }[] = []): MenuEntry[] {
+  if (a.codex) {
+    const items: MenuEntry[] = codexItems(a, actions).map((x) => ({ id: `agent:${x.id}:${a.id}`, text: x.label, enabled: !x.disabledReason, action: x.run }));
+    if (extra.length) items.push({ separator: true }, ...extra.map((x, i) => ({ id: `extra:${i}`, text: x.text, action: x.action })));
+    return items;
+  }
   const entries: MenuEntry[] = [
     ...(a.update ? [{ id: `agent:restart:${a.id}`, text: `Restart to Update (${a.update.to})…`, action: () => actions.restart(a) }, { separator: true as const }] : []),
     { id: `agent:float:${a.id}`, text: "Open in New Window", action: () => actions.float(a) },
@@ -234,6 +250,10 @@ export function useLifecycle(agents: Agent[]) {
     },
     rename: requestRename,
     close: async (a) => {
+      if (a.codex) {
+        await invoke("codex_stop", { id: a.id }).catch((e) => notify(String(e), "error"));
+        return notify(`${a.name} stopped. Open its terminal to resume it.`);
+      }
       markClosed(a.id);
       try {
         const how = await invoke<string>("agent_close", { sessionId: a.id });
@@ -260,7 +280,7 @@ export function useLifecycle(agents: Agent[]) {
           }
         },
       }),
-    remove: (a) => removeNow(a),
+    remove: (a) => (a.codex ? void invoke("codex_remove", { id: a.id }).then(() => notify(`${a.name} removed.`), (e) => notify(String(e), "error")) : removeNow(a)),
     closeAndRemove: async (a) => {
       try {
         const how = await invoke<string>("agent_close", { sessionId: a.id });

@@ -82,6 +82,8 @@ export type Agent = {
   unplugged?: { via: string };
   /** Running, but its OpenAdmiral plugin has not written since the process started (it did not load): what the file says is stale. */
   pluginDown?: boolean;
+  /** A Codex agent (lib/codex.ts): its terminal runs `argv` in the app; `running` while it does. */
+  codex?: { argv: string[]; running: boolean };
   /** It runs an older Claude Code than the one installed; restarting moves it over. */
   update?: { from: string; to: string };
 };

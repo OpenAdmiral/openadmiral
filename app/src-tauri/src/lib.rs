@@ -1,5 +1,6 @@
 mod artifacts;
 mod changes;
+mod codex;
 mod discover;
 mod favicon;
 mod float;
@@ -1492,6 +1493,11 @@ pub fn run() {
             folder_trusted,
             git_root,
             changes::agent_changes,
+            codex::codex_list,
+            codex::codex_available,
+            codex::codex_new,
+            codex::codex_stop,
+            codex::codex_remove,
             float::window_list,
             float::grid_new,
             float::float_to_grid,

@@ -5,6 +5,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, AgentStatus, CliAgent, AdmiralSession, DiscoveredSession } from "./types";
 import { basename } from "./utils";
+import { codexAgent, type CodexRow } from "./codex";
 import type { QueueEntry } from "./queue";
 import { formatElapsed } from "./progress";
 import type { Artifact } from "./artifacts";
@@ -283,9 +284,24 @@ export function useAdmiral({ quiet = false } = {}) {
     const t = setInterval(read, 60_000);
     return () => clearInterval(t);
   }, []);
+  // Codex agents (src-tauri codex.rs): read every 2 s and whenever a terminal starts or ends.
+  const [codex, setCodex] = useState<CodexRow[]>([]);
+  useEffect(() => {
+    const read = () => !document.hidden && invoke<CodexRow[]>("codex_list").then(setCodex, () => {});
+    read();
+    const t = setInterval(read, 2000);
+    const offs = [listen("pty://exit", read), listen("openadmiral://codex", read)];
+    return () => {
+      clearInterval(t);
+      offs.forEach((o) => void o.then((f) => f()));
+    };
+  }, []);
   const agents = useMemo(
-    () => withUpdates(mergeAgents(snapshot.sessions, cli, now, names.current, cliReady ? misses.current : new Map(), discovery.sessions), installed),
-    [snapshot.sessions, cli, now, cliReady, discovery.sessions, installed],
+    () => [
+      ...withUpdates(mergeAgents(snapshot.sessions, cli, now, names.current, cliReady ? misses.current : new Map(), discovery.sessions), installed),
+      ...codex.map((r) => codexAgent(r, now)),
+    ],
+    [snapshot.sessions, cli, now, cliReady, discovery.sessions, installed, codex],
   );
   const superseded = useMemo(() => supersededMap(snapshot.sessions, cli), [snapshot.sessions, cli]);
   // Each plan window from the freshest session that has a reading of it.

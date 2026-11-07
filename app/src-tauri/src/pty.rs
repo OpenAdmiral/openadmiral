@@ -47,6 +47,11 @@ pub fn refresh_attached(app: &AppHandle) {
     write_attached(&sessions);
 }
 
+/// The keys with a terminal open (a Codex agent's id is its key: open means running).
+pub fn open_keys(app: &AppHandle) -> Vec<String> {
+    app.state::<Ptys>().0.lock().unwrap().keys().cloned().collect()
+}
+
 /// Ends the terminal for `key`, if any; the session it attached to keeps running.
 pub fn close(app: &AppHandle, key: &str) {
     if let Some(mut pty) = app.state::<Ptys>().0.lock().unwrap().remove(key) {

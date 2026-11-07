@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CloseCircleLinearIcon, FolderOpenLinearIcon, Rocket2LinearIcon } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -19,6 +20,12 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trust, setTrust] = useState(false);
+  // Claude Code, or Codex when its CLI is installed (src-tauri codex.rs).
+  const [kind, setKind] = useState<"claude" | "codex">("claude");
+  const [codexReady, setCodexReady] = useState(false);
+  useEffect(() => {
+    if (isOpen) void invoke<boolean>("codex_available").then(setCodexReady, () => setCodexReady(false));
+  }, [isOpen]);
   // Its own git worktree, so agents in one repo don't step on each other (a Conductor-style workspace).
   const [repo, setRepo] = useState<string | null>(null);
   const [worktree, setWorktree] = useState(false);
@@ -81,7 +88,16 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
     setBusy(true);
     setError(null);
     try {
-      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug && !from ? slug : null, from });
+      if (kind === "codex") {
+        const id = await invoke<string>("codex_new", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug ? slug : null });
+        void emit("openadmiral://codex");
+        onCreated(id);
+        onClose();
+        setPrompt("");
+        setName("");
+        return;
+      }
+      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug && !from ? slug : null, from: kind === "claude" ? from : null });
       onCreated(shortId);
       onClose();
       setPrompt("");
@@ -142,6 +158,29 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
               />
             ) : (
               <>
+            {codexReady && (
+              <div className="mb-3 flex gap-1 rounded-lg bg-line/60 p-0.5 text-xs">
+                {(
+                  [
+                    ["claude", "Claude Code"],
+                    ["codex", "Codex"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setKind(k)}
+                    className={cn("flex-1 rounded-md px-2 py-1 transition-colors", kind === k ? "bg-canvas font-semibold text-ink shadow-sm" : "text-ink-3 hover:text-ink")}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {kind === "codex" && (
+              <p className="mb-3 text-[11px] leading-relaxed text-ink-3">
+                Codex runs in its terminal here while OpenAdmiral is open; opening it again after a restart resumes the same conversation.
+              </p>
+            )}
             <label className="mb-1.5 block text-xs font-semibold text-ink-2">Folder</label>
             <div className="mb-2 flex gap-2">
               <input className={cn(input, "font-mono text-xs")} value={cwd} placeholder="/Users/you/dev/project" onChange={(e) => setCwd(e.target.value)} />
@@ -173,7 +212,7 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
             <label className="mb-1.5 block text-xs font-semibold text-ink-2">Name</label>
             <input className={cn(input, "mb-4")} value={name} placeholder="mcp-auth-scopes" onChange={(e) => setName(e.target.value)} />
 
-            {repo && (
+            {repo && kind === "claude" && (
               <div className="mb-3">
                 <label className="mb-1.5 block text-xs font-semibold text-ink-2">Start from</label>
                 <div className="flex gap-1 rounded-lg bg-line/60 p-0.5 text-xs">
@@ -214,7 +253,7 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
                 )}
               </div>
             )}
-            {repo && fromKind === "none" && (
+            {repo && (fromKind === "none" || kind === "codex") && (
               <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5">
                 <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} className="mt-0.5 accent-brand-600" />
                 <span className="min-w-0 text-sm">

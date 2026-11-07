@@ -1233,7 +1233,7 @@ function AgentRow({
         </span>
       )}
       <span className="relative flex items-center gap-2 pl-[18px] text-xs text-ink-3">
-        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.session?.branch ?? (a.unplugged || runsElsewhere(a) ? `in ${whereLabel(a) ?? "Terminal"}` : a.cli ? KIND.openadmiral.label : "ended")}</span>
+        <span className={cn("truncate font-mono text-[11px]", branchTone(a.session?.branch))}>{a.codex ? (a.codex.running ? "Codex" : "Codex · stopped") : (a.session?.branch ?? (a.unplugged || runsElsewhere(a) ? `in ${whereLabel(a) ?? "Terminal"}` : a.cli ? KIND.openadmiral.label : "ended"))}</span>
         {!!a.session?.dirty && <span className="text-amber-600 dark:text-amber-400 tabular">±{a.session.dirty}</span>}
         <span className="flex-1" />
         {recent ? (

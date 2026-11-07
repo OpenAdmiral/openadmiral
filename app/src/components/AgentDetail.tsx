@@ -133,7 +133,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
     window.addEventListener("openadmiral:tip", on);
     return () => window.removeEventListener("openadmiral:tip", on);
   }, []);
-  const hasRepo = !!(agent.session?.repo || agent.session?.branch) && !agent.unplugged;
+  const hasRepo = (!!(agent.session?.repo || agent.session?.branch) || !!agent.codex) && !agent.unplugged;
   // Mission Control: the name large over the whole view, so its thumbnail says who it is.
   const mission = useMissionControl();
   // Index → Conversation: the turn to bring to the top, and the one being read.
@@ -393,7 +393,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
             <AgentTerminal
               key={agent.id}
               agentKey={agent.id}
-              argv={["claude", "attach", agent.cli?.id ?? agent.id.slice(0, 8)]}
+              argv={agent.codex ? agent.codex.argv : ["claude", "attach", agent.cli?.id ?? agent.id.slice(0, 8)]}
               onCloseSession={() => actions.close(agent)}
               instance={agent.cli?.startedAt}
               cwd={agent.cwd}
