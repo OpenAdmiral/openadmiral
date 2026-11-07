@@ -65,6 +65,22 @@ export function agentHome(order: SidebarOrder | null, folder: string, agent: str
   return groupHome(order, folder);
 }
 
+/**
+ * Agents seen for the first time in a folder left at the top level whose hand-placed
+ * agents all sit in one project: placed there too, so a new session does not land far
+ * from its siblings. Agents already known keep where they are.
+ */
+export function placeNewcomers(o: SidebarOrder, folder: string, newcomers: string[]): SidebarOrder {
+  if (newcomers.length === 0 || groupHome(o, folder)) return o;
+  const prefix = placedKey(folder, "");
+  const homes = new Set(Object.entries(o.placed ?? {}).filter(([k]) => k.startsWith(prefix)).map(([, v]) => v));
+  const [only] = homes;
+  if (homes.size !== 1 || !only || !o.spaces?.some((s) => s.id === only)) return o;
+  const placed = { ...o.placed };
+  for (const k of newcomers) placed[placedKey(folder, k)] ??= only;
+  return { ...o, placed };
+}
+
 /** `groups` (sorted, whole folders) placed into the person's projects; a project shows even when empty. */
 export function layout(groups: Group[], order: SidebarOrder | null): Node[] {
   const spaces = order?.spaces ?? [];
@@ -281,6 +297,7 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly =
     const projects = appendMissing(order.projects, groups.map((g) => g.key));
     if (projects.length !== order.projects.length) changed = true;
     const agentsOrder = { ...order.agents };
+    let next: SidebarOrder = order;
     for (const g of groups) {
       const before = agentsOrder[g.key] ?? [];
       // An agent first seen by id and now known by name keeps its place under the name.
@@ -292,9 +309,11 @@ export function useSidebarOrder(agents: Agent[], cliReady: boolean, { readOnly =
       if (after.length !== before.length || after.some((k, i) => k !== before[i])) {
         agentsOrder[g.key] = after;
         changed = true;
+        // A folder seen before: its newcomers may join their siblings' project.
+        if (before.length) next = placeNewcomers(next, g.key, after.filter((k) => !renamed.includes(k)));
       }
     }
-    if (changed) save({ ...order, projects, agents: agentsOrder });
+    if (changed) save({ ...next, projects, agents: agentsOrder });
   }, [groups, order, save, cliReady]);
 
   /** Moves a top-level item (a folder on its own or a project) onto another's place. */

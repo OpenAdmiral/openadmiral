@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSpace, arrangeSpace, flatten, layout, placeAgents, placeFolder, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
+import { addSpace, arrangeSpace, flatten, layout, placeAgents, placeFolder, placeNewcomers, prefixName, removeSpace, spaceKey, suggestSpaces, type Group, type SidebarOrder } from "./order";
 
 const agent = (name: string) => ({ id: name, name, project: "x", cwd: "/x", status: "idle", cli: { name } }) as never;
 // A folder's group as the sidebar has it: with an agent (a group never shows empty).
@@ -71,5 +71,23 @@ describe("projects in the sidebar", () => {
     expect(space()).toMatchObject({ groups: [{ key: "blog" }, { key: "docs" }, { key: "applivery-api" }] });
     o = arrangeSpace(o, "s", ["applivery-api", "blog", "docs"]);
     expect(space()).toMatchObject({ groups: [{ key: "applivery-api" }, { key: "blog" }, { key: "docs" }] });
+  });
+});
+
+describe("a newcomer to a folder whose agents were placed by hand", () => {
+  const space = { id: "vv", name: "VentureVoid", color: "blue", members: [] };
+  const base: SidebarOrder = { projects: [], agents: {}, spaces: [space], placed: { "/oa\u0000OpenAdmiral App": "vv" } };
+  it("joins its siblings' project", () => expect(placeNewcomers(base, "/oa", ["openadmiral"]).placed).toMatchObject({ "/oa\u0000openadmiral": "vv" }));
+  it("stays at the top level when its siblings are split up", () => {
+    const split = { ...base, placed: { ...base.placed, "/oa\u0000other": "" } };
+    expect(placeNewcomers(split, "/oa", ["openadmiral"])).toBe(split);
+  });
+  it("ignores a project that no longer exists", () => {
+    const gone = { ...base, spaces: [] };
+    expect(placeNewcomers(gone, "/oa", ["openadmiral"])).toBe(gone);
+  });
+  it("leaves a whole folder's project to its group", () => {
+    const whole = { ...base, spaces: [{ ...space, members: ["/oa"] }] };
+    expect(placeNewcomers(whole, "/oa", ["openadmiral"])).toBe(whole);
   });
 });
