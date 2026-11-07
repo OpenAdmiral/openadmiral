@@ -32,6 +32,10 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
   const crowded = !!repo && agents.some((a) => a.live && a.status !== "ended" && (a.session?.repo?.root ?? a.cwd) === repo);
   useEffect(() => setWorktree(crowded), [crowded]);
   const slug = worktreeSlug(name || basename(cwd));
+  // Start from a branch, a pull request or an issue: a checkout of its own (src-tauri workspace.rs).
+  const [fromKind, setFromKind] = useState<"none" | "branch" | "pr" | "issue">("none");
+  const [fromValue, setFromValue] = useState("");
+  const from = repo && fromKind !== "none" && fromValue.trim() ? { kind: fromKind, value: fromValue.trim() } : null;
 
   // Folders already in the fleet are one click away.
   const recent = [...new Map(agents.map((a) => [a.cwd, a])).values()].slice(0, 6);
@@ -77,7 +81,7 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
     setBusy(true);
     setError(null);
     try {
-      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug ? slug : null });
+      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug && !from ? slug : null, from });
       onCreated(shortId);
       onClose();
       setPrompt("");
@@ -170,6 +174,47 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
             <input className={cn(input, "mb-4")} value={name} placeholder="mcp-auth-scopes" onChange={(e) => setName(e.target.value)} />
 
             {repo && (
+              <div className="mb-3">
+                <label className="mb-1.5 block text-xs font-semibold text-ink-2">Start from</label>
+                <div className="flex gap-1 rounded-lg bg-line/60 p-0.5 text-xs">
+                  {(
+                    [
+                      ["none", "Current checkout"],
+                      ["branch", "Branch"],
+                      ["pr", "Pull request"],
+                      ["issue", "Issue"],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      onClick={() => setFromKind(k)}
+                      className={cn("flex-1 rounded-md px-2 py-1 transition-colors", fromKind === k ? "bg-canvas font-semibold text-ink shadow-sm" : "text-ink-3 hover:text-ink")}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {fromKind !== "none" && (
+                  <>
+                    <input
+                      autoFocus
+                      className={cn(input, "mt-2 font-mono text-xs")}
+                      value={fromValue}
+                      onChange={(e) => setFromValue(e.target.value)}
+                      placeholder={fromKind === "branch" ? "feature/checkout-v2" : fromKind === "pr" ? "123 or a pull request link" : "42 or an issue link"}
+                    />
+                    <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
+                      {fromKind === "branch"
+                        ? "A checkout of its own on that branch (fetched from origin if it is not here yet)."
+                        : fromKind === "pr"
+                          ? "A checkout of its own on the pull request's branch, with gh. It reads the PR before it starts."
+                          : "A checkout of its own on a new branch, with the issue as its first instruction (gh)."}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+            {repo && fromKind === "none" && (
               <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5">
                 <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} className="mt-0.5 accent-brand-600" />
                 <span className="min-w-0 text-sm">

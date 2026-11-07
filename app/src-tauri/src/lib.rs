@@ -4,6 +4,7 @@ mod discover;
 mod favicon;
 mod float;
 mod windows;
+mod workspace;
 mod handoff;
 mod jobs;
 mod lifecycle;
@@ -330,17 +331,32 @@ pub fn run_cli(mut cmd: Command) -> Result<String, String> {
 
 /// Starts a background session in `cwd`; `claude --bg` returns once it is up.
 #[tauri::command]
-async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: Option<String>) -> Result<String, String> {
+async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: Option<String>, from: Option<workspace::StartFrom>) -> Result<String, String> {
+    // Started from a branch, a pull request or an issue (workspace.rs): its checkout and brief.
+    let prepared = match &from {
+        Some(f) => {
+            let (cwd, f) = (cwd.clone(), f.clone());
+            tauri::async_runtime::spawn_blocking(move || workspace::prepare(&cwd, &f)).await.map_err(|e| e.to_string())??
+        }
+        None => workspace::Prepared::default(),
+    };
     let mut cmd = claude_cmd();
-    cmd.current_dir(&cwd).arg("--bg");
+    cmd.current_dir(prepared.cwd.as_deref().unwrap_or(Path::new(&cwd))).arg("--bg");
+    let name = if name.trim().is_empty() { prepared.name.clone().unwrap_or_default() } else { name };
     if !name.trim().is_empty() {
         cmd.args(["-n", name.trim()]);
     }
     // Its own git worktree (.claude/worktrees/<name>, on branch worktree-<name>), like a Conductor workspace.
+    let worktree = if prepared.cwd.is_some() { None } else { prepared.worktree.clone().or(worktree) };
     if let Some(w) = worktree.map(|w| worktree_slug(&w)).filter(|w| !w.is_empty()) {
         cmd.args(["-w", &w]);
     }
-    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
+    let prompt = match (prepared.brief.as_deref(), prompt.as_deref().map(str::trim).filter(|p| !p.is_empty())) {
+        (Some(b), Some(p)) => Some(format!("{b}\n\n{p}")),
+        (Some(b), None) => Some(b.to_string()),
+        (None, p) => p.map(str::to_string),
+    };
+    if let Some(p) = prompt {
         cmd.args(["--", p.trim()]);
     }
     // The new job's short id, so the app can open it once it is listed ("" if claude did not say).
@@ -348,7 +364,7 @@ async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: 
 }
 
 /// A worktree name git and Claude Code accept: lowercase letters, digits and dashes.
-fn worktree_slug(name: &str) -> String {
+pub fn worktree_slug(name: &str) -> String {
     let mut out = String::new();
     for c in name.trim().to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {
