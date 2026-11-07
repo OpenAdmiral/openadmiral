@@ -94,15 +94,30 @@ let exiting = false
 let idleSince: number | undefined
 const todoIds = new Map<string, Task>()
 
+// Windows has no /bin/sh, open or cp: those calls take Windows' own (cmd, start, explorer, copy).
+let windows = false
+
 async function admiralRoot($: EngineInterface) {
-  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
+  windows = (await $.env.get('OS').catch(() => undefined)) === 'Windows_NT'
+  const home = (await $.env.get('HOME').catch(() => undefined)) ?? (await $.env.get('USERPROFILE').catch(() => undefined))
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`
   const root = `${configDir}/openadmiral`
   // Data from when this was called Fleet moves over once; if the new folder already
-  // exists, the app merges what is left on its next start.
-  await $.process
-    .run(['/bin/sh', '-c', '[ -d "$1" ] && [ ! -e "$2" ] && mv "$1" "$2"; true', 'sh', `${configDir}/fleet`, root], { timeoutMs: 3000 })
-    .catch(() => undefined)
+  // exists, the app merges what is left on its next start. (Fleet never ran on Windows.)
+  if (!windows)
+    await $.process
+      .run(['/bin/sh', '-c', '[ -d "$1" ] && [ ! -e "$2" ] && mv "$1" "$2"; true', 'sh', `${configDir}/fleet`, root], { timeoutMs: 3000 })
+      .catch(() => undefined)
   return root
+}
+
+/** A path for cmd.exe: backslashes. */
+const winPath = (p: string) => p.replace(/\//g, '\\')
+
+/** Opens a file or folder with its default app, or shows it selected (Finder, Explorer). */
+async function openPath($: EngineInterface, path: string, reveal: boolean) {
+  if (windows) await $.process.run(reveal ? ['explorer', `/select,${winPath(path)}`] : ['cmd', '/C', 'start', '', winPath(path)])
+  else await $.process.run(reveal ? ['open', '-R', path] : ['open', path])
 }
 
 function touch($: EngineInterface, patch: Partial<AdmiralSession> = {}) {
@@ -152,12 +167,20 @@ async function followSessionId($: EngineInterface) {
   todoIds.clear()
   // A queued /clear must not strand the rest of Up next under the old id: move the
   // queue files along (only when the new id has none; the app merges any stragglers).
-  await $.process
-    .run(
-      ['/bin/sh', '-c', 'cd "$1" 2>/dev/null || exit 0; for x in json sent.json; do [ -e "$3.$x" ] && [ ! -e "$2.$x" ] && mv "$3.$x" "$2.$x"; done; exit 0', 'sh', `${root}/queue`, id, old.sessionId],
-      { timeoutMs: 3_000 },
-    )
-    .catch(() => undefined)
+  if (windows) {
+    // No mv: copy each file over (the app merges and cleans the old one).
+    for (const x of ['json', 'sent.json']) {
+      const text = await $.fs.read(`${root}/queue/${old.sessionId}.${x}`).catch(() => undefined)
+      const there = await $.fs.read(`${root}/queue/${id}.${x}`).catch(() => undefined)
+      if (text !== undefined && there === undefined) await $.fs.write(`${root}/queue/${id}.${x}`, text)
+    }
+  } else
+    await $.process
+      .run(
+        ['/bin/sh', '-c', 'cd "$1" 2>/dev/null || exit 0; for x in json sent.json; do [ -e "$3.$x" ] && [ ! -e "$2.$x" ] && mv "$3.$x" "$2.$x"; done; exit 0', 'sh', `${root}/queue`, id, old.sessionId],
+        { timeoutMs: 3_000 },
+      )
+      .catch(() => undefined)
   idleSince = now
   await flush($)
   await refreshUsage($).catch(() => undefined)
@@ -551,6 +574,8 @@ async function serveFill($: EngineInterface) {
 
 async function remoteFromTranscript($: EngineInterface): Promise<boolean | undefined> {
   if (!me) return undefined
+  // No grep on Windows: Remote Control's state is left to the engine's own notices there.
+  if (windows) return undefined
   const projects = `${root.replace(/\/openadmiral$/, '')}/projects`
   // Unescaped "subtype":"…" only appears on the row itself, never inside quoted content.
   const ran = await $.process
@@ -900,19 +925,19 @@ export const register: Register = on => {
               // The app watches ~/.claude/openadmiral: focus.json asks it to show this artifact.
               const at = await $.clock.now()
               await $.fs.write(`${root}/focus.json`, JSON.stringify({ kind: 'artifact', sessionId, artifactId: id, version: answered.version, at }))
-              await $.process.run(['open', '-b', 'com.openadmiral.desktop'])
+              if (!windows) await $.process.run(['open', '-b', 'com.openadmiral.desktop'])
             }}
           />
           <Button
             key="file"
             // Pages and pictures have a good default app (browser, Preview); text kinds
             // would land in whatever editor owns .md, so those are revealed instead.
-            label={OPENS_IN_APP.has(kind) ? 'Open file' : 'Reveal in Finder'}
+            label={OPENS_IN_APP.has(kind) ? 'Open file' : windows ? 'Show in Explorer' : 'Reveal in Finder'}
             onPress={async () => {
               const manifest = await readJson<AdmiralArtifact>($, `${dir}/manifest.json`)
               const v = manifest?.versions.find(x => x.n === answered.version) ?? manifest?.versions.at(-1)
               if (!v) return $.ui.toast('OpenAdmiral: that artifact is no longer on disk.')
-              await $.process.run(OPENS_IN_APP.has(kind) ? ['open', `${dir}/${v.file}`] : ['open', '-R', `${dir}/${v.file}`])
+              await openPath($, `${dir}/${v.file}`, !OPENS_IN_APP.has(kind))
             }}
           />
         </Box>
@@ -968,8 +993,10 @@ export const register: Register = on => {
     const ext = source ? extOf(source) || EXT_BY_KIND[kind] : EXT_BY_KIND[kind]
     const file = `v${n}.${ext}`
     if (source) {
-      await $.process.run(['mkdir', '-p', dir])
-      const copied = await $.process.run(['cp', source, `${dir}/${file}`], { timeoutMs: 15_000 })
+      // A binary can't go through $.fs.write (text only): the system's own copy.
+      if (windows) await $.process.run(['cmd', '/C', 'if', 'not', 'exist', winPath(dir), 'mkdir', winPath(dir)])
+      else await $.process.run(['mkdir', '-p', dir])
+      const copied = await $.process.run(windows ? ['cmd', '/C', 'copy', '/Y', winPath(source), winPath(`${dir}/${file}`)] : ['cp', source, `${dir}/${file}`], { timeoutMs: 15_000 })
       if (copied.exitCode !== 0) return answer(`Could not read ${source}: ${copied.stderr.trim()}`)
     } else {
       await $.fs.write(`${dir}/${file}`, args.content!)
