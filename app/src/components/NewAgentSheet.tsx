@@ -19,6 +19,19 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trust, setTrust] = useState(false);
+  // Its own git worktree, so agents in one repo don't step on each other (a Conductor-style workspace).
+  const [repo, setRepo] = useState<string | null>(null);
+  const [worktree, setWorktree] = useState(false);
+  useEffect(() => {
+    setRepo(null);
+    if (!cwd) return;
+    const t = setTimeout(() => void invoke<string | null>("git_root", { cwd }).then(setRepo, () => setRepo(null)), 250);
+    return () => clearTimeout(t);
+  }, [cwd]);
+  // Another agent already works in this repo: a worktree is the safer default.
+  const crowded = !!repo && agents.some((a) => a.live && a.status !== "ended" && (a.session?.repo?.root ?? a.cwd) === repo);
+  useEffect(() => setWorktree(crowded), [crowded]);
+  const slug = worktreeSlug(name || basename(cwd));
 
   // Folders already in the fleet are one click away.
   const recent = [...new Map(agents.map((a) => [a.cwd, a])).values()].slice(0, 6);
@@ -64,7 +77,7 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
     setBusy(true);
     setError(null);
     try {
-      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null });
+      const shortId = await invoke<string>("new_agent", { cwd, name, prompt: prompt || null, worktree: repo && worktree && slug ? slug : null });
       onCreated(shortId);
       onClose();
       setPrompt("");
@@ -156,6 +169,26 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
             <label className="mb-1.5 block text-xs font-semibold text-ink-2">Name</label>
             <input className={cn(input, "mb-4")} value={name} placeholder="mcp-auth-scopes" onChange={(e) => setName(e.target.value)} />
 
+            {repo && (
+              <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5">
+                <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} className="mt-0.5 accent-brand-600" />
+                <span className="min-w-0 text-sm">
+                  <span className="font-semibold text-ink">In its own worktree</span>
+                  <span className="block text-xs leading-relaxed text-ink-3">
+                    {worktree && slug ? (
+                      <>
+                        A separate checkout on branch <code className="font-mono text-[11px] text-ink-2">worktree-{slug}</code>, so it can't step on other agents in this repo.
+                      </>
+                    ) : crowded ? (
+                      "Another agent already works in this repo: a separate checkout keeps their changes apart."
+                    ) : (
+                      "A separate checkout on its own branch, so it can't step on other agents in this repo."
+                    )}
+                  </span>
+                </span>
+              </label>
+            )}
+
             <label className="mb-1.5 block text-xs font-semibold text-ink-2">
               First instruction <span className="font-normal text-ink-3">(optional)</span>
             </label>
@@ -196,4 +229,15 @@ export function NewAgentSheet({ open: isOpen, initialCwd, onClose, agents, onCre
       )}
     </AnimatePresence>
   );
+}
+
+/** The worktree name Claude Code will use (src-tauri new_agent does the same). */
+export function worktreeSlug(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/, "");
 }

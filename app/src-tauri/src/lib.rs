@@ -1,4 +1,5 @@
 mod artifacts;
+mod changes;
 mod discover;
 mod favicon;
 mod float;
@@ -328,17 +329,42 @@ pub fn run_cli(mut cmd: Command) -> Result<String, String> {
 
 /// Starts a background session in `cwd`; `claude --bg` returns once it is up.
 #[tauri::command]
-async fn new_agent(cwd: String, name: String, prompt: Option<String>) -> Result<String, String> {
+async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: Option<String>) -> Result<String, String> {
     let mut cmd = claude_cmd();
     cmd.current_dir(&cwd).arg("--bg");
     if !name.trim().is_empty() {
         cmd.args(["-n", name.trim()]);
+    }
+    // Its own git worktree (.claude/worktrees/<name>, on branch worktree-<name>), like a Conductor workspace.
+    if let Some(w) = worktree.map(|w| worktree_slug(&w)).filter(|w| !w.is_empty()) {
+        cmd.args(["-w", &w]);
     }
     if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
         cmd.args(["--", p.trim()]);
     }
     // The new job's short id, so the app can open it once it is listed ("" if claude did not say).
     run_cli(cmd).map(|out| backgrounded_id(&out).unwrap_or_default())
+}
+
+/// A worktree name git and Claude Code accept: lowercase letters, digits and dashes.
+fn worktree_slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.trim().to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let cut: String = out.chars().take(48).collect();
+    cut.trim_end_matches('-').to_string()
+}
+
+/// The git repository a folder belongs to (its root), if any.
+#[tauri::command]
+fn git_root(cwd: String) -> Option<String> {
+    let out = Command::new("git").env("PATH", login_path()).args(["-C", &cwd, "rev-parse", "--show-toplevel"]).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 pub fn is_listed(agents: &Value, session_id: &str) -> bool {
@@ -1443,6 +1469,8 @@ pub fn run() {
             transcript::transcript_close,
             open_issue,
             folder_trusted,
+            git_root,
+            changes::agent_changes,
             star::star_event,
             star::star_now,
             star::star_dismiss,
@@ -1577,6 +1605,13 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn worktree_names_are_slugs() {
+        assert_eq!(super::worktree_slug("Checkout redesign!"), "checkout-redesign");
+        assert_eq!(super::worktree_slug("  API v2 / auth  "), "api-v2-auth");
+        assert_eq!(super::worktree_slug("—"), "");
+    }
+
     #[test]
     fn a_git_repo_needs_its_own_trust() {
         use std::path::Path;

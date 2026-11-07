@@ -8,6 +8,7 @@ import {
   DollarLinearIcon,
   FolderLinearIcon,
   GalleryLinearIcon,
+  CodeSquareLinearIcon,
   ListArrowDownLinearIcon,
   MaximizeSquare3LinearIcon,
   MenuDotsLinearIcon,
@@ -23,6 +24,7 @@ import type { Agent, AdmiralSession } from "@/lib/types";
 import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, modelLabel, usd } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
+import { ChangesView } from "@/components/ChangesView";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { HandoffSheet } from "./HandoffSheet";
 import { NameEditor } from "./NameEditor";
@@ -35,7 +37,7 @@ import { Info } from "./Info";
 import { AgentTerminal, focusTerminal, repaintTerminal, screenOf, typeIntoTerminal } from "./Terminal";
 import { ConversationView } from "./ConversationView";
 
-type Tab = "main" | "conversation" | "artifacts";
+type Tab = "main" | "conversation" | "artifacts" | "changes";
 import { UpNext } from "./UpNext";
 import { pending, type QueueEntry } from "@/lib/queue";
 import { BlockStack } from "./Blocks";
@@ -122,6 +124,13 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   const openedClosed = useRef(!agent.cli);
   const tasks = pickTasks(s, transcript);
   const [tab, setTab] = useState<Tab>("main");
+  // Preview: OPENADMIRAL_TIP=changes opens the Changes tab, for a screenshot.
+  useEffect(() => {
+    const on = (e: Event) => (e as CustomEvent).detail === "changes" && setTab("changes");
+    window.addEventListener("openadmiral:tip", on);
+    return () => window.removeEventListener("openadmiral:tip", on);
+  }, []);
+  const hasRepo = !!(agent.session?.repo || agent.session?.branch) && !agent.unplugged;
   // Index → Conversation: the turn to bring to the top, and the one being read.
   const [jump, setJump] = useState<{ index: number; at: number } | undefined>();
   const [reading, setReading] = useState<number | null>(null);
@@ -162,7 +171,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
     const onKey = (e: KeyboardEvent) => {
       if (!active) return;
       const id = matchShortcut(e);
-      const t = id === "tab-terminal" ? "main" : id === "tab-conversation" ? "conversation" : id === "tab-artifacts" ? "artifacts" : undefined;
+      const t = id === "tab-terminal" ? "main" : id === "tab-conversation" ? "conversation" : id === "tab-artifacts" ? "artifacts" : id === "tab-changes" && hasRepo ? "changes" : undefined;
       if (!t) return;
       e.preventDefault();
       e.stopPropagation();
@@ -271,11 +280,13 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   if (part === "inspector") return <div className="flex h-full pr-3 pb-3">{inspectorSlot}</div>;
   const compact = !!pane;
   const dense = compact && !!denseOption;
-  const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts" } as const;
+  // Changes: what the agent changed in its git checkout (components/ChangesView.tsx).
+  const tabs = hasRepo ? (["main", "conversation", "artifacts", "changes"] as const) : (["main", "conversation", "artifacts"] as const);
+  const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts", changes: "Changes" } as const;
   const tabIcons = (
     <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-line/70 p-0.5">
-      {(["main", "conversation", "artifacts"] as const).map((t, i) => {
-        const Icon = t === "main" ? MonitorLinearIcon : t === "conversation" ? ChatLineLinearIcon : GalleryLinearIcon;
+      {tabs.map((t, i) => {
+        const Icon = t === "main" ? MonitorLinearIcon : t === "conversation" ? ChatLineLinearIcon : t === "changes" ? CodeSquareLinearIcon : GalleryLinearIcon;
         return (
           <Tip key={t} side="bottom" content={<TipLabel label={`${TAB_LABEL[t]}${t === "artifacts" && artifacts.length ? ` (${artifacts.length})` : ""}`} kbd={`⌃${i + 1}`} />}>
             <button
@@ -337,7 +348,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
           )}
         >
           <div data-tauri-drag-region className={cn("@container flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
-            {(["main", "conversation", "artifacts"] as const).map((t, i) => (
+            {tabs.map((t, i) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -346,7 +357,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
                   tab === t ? "border-brand-500 font-semibold text-ink" : "border-transparent text-ink-3 hover:text-ink",
                 )}
               >
-                {t === "main" ? (agent.attachable && agent.live ? "Terminal" : "Session") : t === "conversation" ? "Conversation" : "Artifacts"}
+                {t === "main" ? (agent.attachable && agent.live ? "Terminal" : "Session") : TAB_LABEL[t]}
                 <span className="text-[10px] font-normal text-ink-3 @max-[340px]:hidden">⌃{i + 1}</span>
                 {t === "artifacts" && artifacts.length > 0 && (
                   <span className={cn("rounded-full px-1.5 text-[10px] leading-4 tabular", unseenHere ? "bg-brand-600 font-semibold text-white" : "bg-line text-ink-3")}>{artifacts.length}</span>
@@ -407,6 +418,11 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
                 }
                 onClaudeLink={onClaudeLink}
               />
+            </div>
+          )}
+          {tab === "changes" && hasRepo && (
+            <div className="min-h-0 flex-1" style={textScale !== 1 ? { zoom: textScale } : undefined}>
+              <ChangesView agent={agent} queue={queue} active={tab === "changes"} onError={onError} onNotice={onNotice} />
             </div>
           )}
           {tab === "artifacts" && (
