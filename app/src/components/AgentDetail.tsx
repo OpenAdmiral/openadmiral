@@ -9,6 +9,7 @@ import {
   FolderLinearIcon,
   GalleryLinearIcon,
   CodeSquareLinearIcon,
+  PlayLinearIcon,
   ListArrowDownLinearIcon,
   MaximizeSquare3LinearIcon,
   MenuDotsLinearIcon,
@@ -25,6 +26,7 @@ import { ago, branchTone, cn, compact as shortNumber, contextUsed, fillText, mod
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
 import { ChangesView } from "@/components/ChangesView";
+import { RunView } from "@/components/RunView";
 import { useMissionControl } from "@/lib/mission";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { HandoffSheet } from "./HandoffSheet";
@@ -38,7 +40,7 @@ import { Info } from "./Info";
 import { AgentTerminal, focusTerminal, repaintTerminal, screenOf, typeIntoTerminal } from "./Terminal";
 import { ConversationView } from "./ConversationView";
 
-type Tab = "main" | "conversation" | "artifacts" | "changes";
+type Tab = "main" | "conversation" | "artifacts" | "changes" | "run";
 import { UpNext } from "./UpNext";
 import { pending, type QueueEntry } from "@/lib/queue";
 import { BlockStack } from "./Blocks";
@@ -129,7 +131,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   const [tab, setTab] = useState<Tab>("main");
   // Preview: OPENADMIRAL_TIP=changes opens the Changes tab, for a screenshot.
   useEffect(() => {
-    const on = (e: Event) => (e as CustomEvent).detail === "changes" && setTab("changes");
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d === "changes" || d === "run") setTab(d); };
     window.addEventListener("openadmiral:tip", on);
     return () => window.removeEventListener("openadmiral:tip", on);
   }, []);
@@ -176,7 +178,7 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
     const onKey = (e: KeyboardEvent) => {
       if (!active) return;
       const id = matchShortcut(e);
-      const t = id === "tab-terminal" ? "main" : id === "tab-conversation" ? "conversation" : id === "tab-artifacts" ? "artifacts" : id === "tab-changes" && hasRepo ? "changes" : undefined;
+      const t = id === "tab-terminal" ? "main" : id === "tab-conversation" ? "conversation" : id === "tab-artifacts" ? "artifacts" : id === "tab-changes" && hasRepo ? "changes" : id === "tab-run" && hasRepo ? "run" : undefined;
       if (!t) return;
       e.preventDefault();
       e.stopPropagation();
@@ -286,12 +288,12 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
   const compact = !!pane;
   const dense = compact && !!denseOption;
   // Changes: what the agent changed in its git checkout (components/ChangesView.tsx).
-  const tabs = hasRepo ? (["main", "conversation", "artifacts", "changes"] as const) : (["main", "conversation", "artifacts"] as const);
-  const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts", changes: "Changes" } as const;
+  const tabs = hasRepo ? (["main", "conversation", "artifacts", "changes", "run"] as const) : (["main", "conversation", "artifacts"] as const);
+  const TAB_LABEL = { main: attached || (agent.attachable && agent.live) ? "Terminal" : "Session", conversation: "Conversation", artifacts: "Artifacts", changes: "Changes", run: "Run" } as const;
   const tabIcons = (
     <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-line/70 p-0.5">
       {tabs.map((t, i) => {
-        const Icon = t === "main" ? MonitorLinearIcon : t === "conversation" ? ChatLineLinearIcon : t === "changes" ? CodeSquareLinearIcon : GalleryLinearIcon;
+        const Icon = t === "main" ? MonitorLinearIcon : t === "conversation" ? ChatLineLinearIcon : t === "changes" ? CodeSquareLinearIcon : t === "run" ? PlayLinearIcon : GalleryLinearIcon;
         return (
           <Tip key={t} side="bottom" content={<TipLabel label={`${TAB_LABEL[t]}${t === "artifacts" && artifacts.length ? ` (${artifacts.length})` : ""}`} kbd={`⌃${i + 1}`} />}>
             <button
@@ -425,6 +427,11 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
                 }
                 onClaudeLink={onClaudeLink}
               />
+            </div>
+          )}
+          {tab === "run" && hasRepo && (
+            <div className="min-h-0 flex-1" style={textScale !== 1 ? { zoom: textScale } : undefined}>
+              <RunView agent={agent} active={tab === "run"} onError={onError} onNotice={onNotice} onConfirm={onConfirm} onArchived={() => actions.remove(agent)} />
             </div>
           )}
           {tab === "changes" && hasRepo && (

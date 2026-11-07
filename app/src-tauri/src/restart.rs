@@ -152,7 +152,8 @@ mod tests {
     #[test]
     fn notices_a_folder_that_is_gone() {
         assert_eq!(folder_gone(&json!({ "cwd": "/no/such/folder" })).as_deref(), Some("/no/such/folder"));
-        assert_eq!(folder_gone(&json!({ "cwd": "/tmp" })), None);
+        let here = std::env::temp_dir().to_string_lossy().to_string();
+        assert_eq!(folder_gone(&json!({ "cwd": here })), None);
         assert_eq!(folder_gone(&json!({})), None);
     }
 

@@ -165,7 +165,9 @@ pub async fn codex_new(app: AppHandle, cwd: String, name: String, prompt: Option
     let dir = match worktree.filter(|w| !w.trim().is_empty()) {
         Some(w) => {
             let cwd = cwd.clone();
-            tauri::async_runtime::spawn_blocking(move || crate::workspace::new_worktree(&cwd, &w)).await.map_err(|e| e.to_string())??.to_string_lossy().to_string()
+            let path = tauri::async_runtime::spawn_blocking(move || crate::workspace::new_worktree(&cwd, &w)).await.map_err(|e| e.to_string())??;
+            crate::scripts::setup_in_background(&app, path.clone());
+            path.to_string_lossy().to_string()
         }
         None => cwd,
     };

@@ -38,10 +38,30 @@ fn allowed_by_env() -> bool {
 }
 
 /// A random version-4 UUID, from the system's random source.
+/// Random bytes from the system: /dev/urandom, or on Windows the hasher seeds std keeps
+/// from the OS (SipHash keys from BCryptGenRandom), mixed with the clock.
+fn random_bytes(b: &mut [u8; 16]) -> Option<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        std::fs::File::open("/dev/urandom").ok()?.read_exact(b).ok()
+    }
+    #[cfg(not(unix))]
+    {
+        use std::hash::{BuildHasher, Hasher};
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        for (i, chunk) in b.chunks_mut(8).enumerate() {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u128(nanos ^ i as u128);
+            chunk.copy_from_slice(&h.finish().to_le_bytes()[..chunk.len()]);
+        }
+        Some(())
+    }
+}
+
 fn new_id() -> Option<String> {
     let mut b = [0u8; 16];
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut b).ok()?;
+    random_bytes(&mut b)?;
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();

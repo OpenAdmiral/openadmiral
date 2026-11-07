@@ -259,13 +259,13 @@ export function disposeTerminal(key: string) {
   t.el.remove();
 }
 
-async function spawn(key: string, t: Live, argv: string[], cwd: string, instance?: string | number) {
+async function spawn(key: string, t: Live, argv: string[], cwd: string, instance?: string | number, env?: [string, string][]) {
   t.spawned = true;
   t.instance = instance;
   t.exited = false;
   t.left = false;
   t.detect = agentViewDetector();
-  await invoke("pty_open", { key, argv, cwd, cols: t.term.cols, rows: t.term.rows });
+  await invoke("pty_open", { key, argv, cwd, cols: t.term.cols, rows: t.term.rows, env: env ?? null });
   // Attaching to a session mid-turn, Claude Code only sends what changes next, so the
   // screen can stay empty until something new arrives. Ask for a full redraw once the
   // attach has settled, and again a little later for a slow one.
@@ -278,7 +278,24 @@ async function spawn(key: string, t: Live, argv: string[], cwd: string, instance
  * restarts, every attach ends with "Session … has exited" while the daemon brings the
  * job back as a new process. A detached terminal whose session came back reattaches itself.
  */
-export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, instance }: { agentKey: string; argv: string[]; cwd: string; className?: string; onCloseSession?: () => void; instance?: string | number }) {
+export function AgentTerminal({
+  agentKey,
+  argv,
+  cwd,
+  className,
+  onCloseSession,
+  instance,
+  env,
+}: {
+  agentKey: string;
+  argv: string[];
+  cwd: string;
+  className?: string;
+  onCloseSession?: () => void;
+  instance?: string | number;
+  /** Extra variables for the process (a Run tab's workspace variables). */
+  env?: [string, string][];
+}) {
   const host = useRef<HTMLDivElement>(null);
   const [exited, setExited] = useState(false);
   const [left, setLeft] = useState(false);
@@ -295,7 +312,7 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, 
     const frame = requestAnimationFrame(() => {
       try { t.fit.fit(); } catch { /* host not laid out yet */ }
       if (visible(t)) drawOnGpu(t);
-      if (!t.spawned) spawn(agentKey, t, argv, cwd, instance).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
+      if (!t.spawned) spawn(agentKey, t, argv, cwd, instance, env).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
       t.term.focus();
     });
     // Refit and repaint once the size settles (a panel's animation ends, the tab shows
@@ -348,7 +365,7 @@ export function AgentTerminal({ agentKey, argv, cwd, className, onCloseSession, 
     setExited(false);
     setLeft(false);
     // spawn asks for the full redraws itself.
-    spawn(agentKey, t, argv, cwd, instance).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
+    spawn(agentKey, t, argv, cwd, instance, env).catch((err) => t.term.writeln(`\r\n\x1b[31m${err}\x1b[0m`));
     t.term.focus();
   };
 

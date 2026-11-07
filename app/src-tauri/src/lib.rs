@@ -20,6 +20,7 @@ mod pty;
 mod restart;
 mod resume;
 mod scheduler;
+mod scripts;
 mod session_files;
 mod shot;
 mod star;
@@ -379,7 +380,7 @@ pub fn run_cli(mut cmd: Command) -> Result<String, String> {
 
 /// Starts a background session in `cwd`; `claude --bg` returns once it is up.
 #[tauri::command]
-async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: Option<String>, from: Option<workspace::StartFrom>) -> Result<String, String> {
+async fn new_agent(app: AppHandle, cwd: String, name: String, prompt: Option<String>, worktree: Option<String>, from: Option<workspace::StartFrom>) -> Result<String, String> {
     // Started from a branch, a pull request or an issue (workspace.rs): its checkout and brief.
     let prepared = match &from {
         Some(f) => {
@@ -396,8 +397,9 @@ async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: 
     }
     // Its own git worktree (.claude/worktrees/<name>, on branch worktree-<name>), like a Conductor workspace.
     let worktree = if prepared.cwd.is_some() { None } else { prepared.worktree.clone().or(worktree) };
-    if let Some(w) = worktree.map(|w| worktree_slug(&w)).filter(|w| !w.is_empty()) {
-        cmd.args(["-w", &w]);
+    let slug = worktree.map(|w| worktree_slug(&w)).filter(|w| !w.is_empty());
+    if let Some(w) = &slug {
+        cmd.args(["-w", w]);
     }
     let prompt = match (prepared.brief.as_deref(), prompt.as_deref().map(str::trim).filter(|p| !p.is_empty())) {
         (Some(b), Some(p)) => Some(format!("{b}\n\n{p}")),
@@ -408,7 +410,17 @@ async fn new_agent(cwd: String, name: String, prompt: Option<String>, worktree: 
         cmd.args(["--", p.trim()]);
     }
     // The new job's short id, so the app can open it once it is listed ("" if claude did not say).
-    run_cli(cmd).map(|out| backgrounded_id(&out).unwrap_or_default())
+    let id = run_cli(cmd).map(|out| backgrounded_id(&out).unwrap_or_default())?;
+    // A new workspace: the repo's setup script runs in it (scripts.rs), as in Conductor.
+    let made = prepared.cwd.clone().or_else(|| {
+        let w = slug?;
+        let (top, _) = scripts::roots(Path::new(&cwd))?;
+        Some(top.join(".claude").join("worktrees").join(w)).filter(|p| p.is_dir())
+    });
+    if let Some(dir) = made {
+        scripts::setup_in_background(&app, dir);
+    }
+    Ok(id)
 }
 
 /// A worktree name git and Claude Code accept: lowercase letters, digits and dashes.
@@ -1548,6 +1560,10 @@ pub fn run() {
             folder_trusted,
             git_root,
             changes::agent_changes,
+            scripts::workspace_info,
+            scripts::workspace_scripts_save,
+            scripts::workspace_setup,
+            scripts::workspace_archive,
             codex::codex_list,
             codex::codex_available,
             codex::codex_new,

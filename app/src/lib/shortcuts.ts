@@ -21,6 +21,7 @@ export type ShortcutId =
   | "tab-conversation"
   | "tab-artifacts"
   | "tab-changes"
+  | "tab-run"
   | "toggle-sidebar"
   | "toggle-inspector"
   | "focus-mode"
@@ -68,6 +69,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { id: "tab-conversation", keys: [["⌃", "2"]], description: "Conversation", match: (e) => e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit2" },
       { id: "tab-artifacts", keys: [["⌃", "3"]], description: "Artifacts", match: (e) => e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit3" },
       { id: "tab-changes", keys: [["⌃", "4"]], description: "Changes (the agent's diff)", match: (e) => e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit4" },
+      { id: "tab-run", keys: [["⌃", "5"]], description: "Run (the workspace's scripts)", match: (e) => e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit5" },
     ],
   },
   {

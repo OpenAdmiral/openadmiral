@@ -252,6 +252,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A workspace's setup or archive script (src-tauri scripts.rs): say how it went.
+  useEffect(() => {
+    const off = listen<{ kind: string; workspace: string; state: string; log: string }>("openadmiral://script", (e) => {
+      const { kind, workspace, state, log } = e.payload;
+      const name = workspace.split(/[\\/]/).pop();
+      const show = { label: "Show log", run: () => void invoke("reveal_path", { path: log }) };
+      if (state === "running") life.notify(`Running the ${kind} script in ${name}…`);
+      else if (state === "done") life.notify(`The ${kind} script finished in ${name}.`, "info", show);
+      else life.notify(`The ${kind} script failed in ${name}.`, "error", show);
+    });
+    return () => void off.then((u) => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The scheduler (Rust) resumed a closed agent for a due item, or could not.
   useEffect(() => {
     const off = listen<SchedulerEvent>("openadmiral://scheduler", (e) => {

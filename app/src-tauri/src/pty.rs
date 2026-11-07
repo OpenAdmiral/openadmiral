@@ -82,6 +82,7 @@ pub fn pty_open(
     cwd: String,
     cols: u16,
     rows: u16,
+    env: Option<Vec<(String, String)>>,
 ) -> Result<bool, String> {
     let mut map = ptys.0.lock().unwrap();
     if map.contains_key(&key) {
@@ -106,6 +107,10 @@ pub fn pty_open(
     cmd.env("PATH", crate::login_path());
     for k in crate::inherited_claude_vars() {
         cmd.env_remove(k);
+    }
+    // A Run tab's script: the workspace's variables (scripts.rs).
+    for (k, v) in env.unwrap_or_default() {
+        cmd.env(k, v);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
