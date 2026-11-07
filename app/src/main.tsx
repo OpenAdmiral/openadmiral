@@ -18,6 +18,9 @@ window.addEventListener("unhandledrejection", (e) => {
 
 // With the window hidden, endless animations (working spinners, breathing dots) stop: a
 // hidden page would still drive frames for them (index.css, [data-hidden]).
+// Windows draws no vibrancy behind the window: the page paints its own (index.css).
+if (/Windows/.test(navigator.userAgent)) document.documentElement.toggleAttribute("data-opaque", true);
+
 const markHidden = () => document.documentElement.toggleAttribute("data-hidden", document.hidden);
 document.addEventListener("visibilitychange", markHidden);
 markHidden();

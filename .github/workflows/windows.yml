@@ -1,0 +1,54 @@
+# Builds OpenAdmiral for Windows (x64) and keeps the installer as a workflow artifact.
+# A first step toward Windows releases: run it from the Actions tab (or `gh workflow run
+# windows.yml`), download "OpenAdmiral-windows" and try the setup .exe. Unsigned: Windows
+# SmartScreen asks to confirm the first run ("More info" → "Run anyway").
+name: Windows build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+
+      - name: Tests (frontend and backend)
+        working-directory: app
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+          cd src-tauri
+          cargo test
+
+      - name: Build the installer
+        working-directory: app
+        run: pnpm tauri build --bundles nsis
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenAdmiral-windows
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

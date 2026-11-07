@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBundleCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "OpenAdmiral",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 980,
+        "minHeight": 600
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    }
+  }
+}

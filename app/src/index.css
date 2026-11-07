@@ -100,11 +100,11 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Preview snapshots (OPENADMIRAL_SHOT) do not capture the window's vibrancy:
-   a solid stand-in so the sidebar reads as it does on screen. */
-html[data-shot] { background: #e9e8e6; }
+/* Preview snapshots (OPENADMIRAL_SHOT) do not capture the window's vibrancy, and
+   Windows has none: a solid stand-in so the sidebar reads as it does on a Mac. */
+html[data-shot], html[data-opaque] { background: #e9e8e6; }
 @media (prefers-color-scheme: dark) {
-  html[data-shot] { background: #24252a; }
+  html[data-shot], html[data-opaque] { background: #24252a; }
 }
 
 body {
