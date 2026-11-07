@@ -12,6 +12,7 @@ import { AgentsMap } from "./AgentsMap";
 import { ArtifactsGallery } from "./ArtifactsPane";
 import { CostsView } from "./CostsView";
 import { Notices } from "./Overlays";
+import { WindowPalette } from "./CommandPalette";
 import { QueueView } from "./QueueView";
 import { Tip, TipLabel, TooltipProvider } from "./Tooltip";
 import { useLifecycle } from "@/lib/lifecycle";
@@ -82,6 +83,7 @@ export function FloatingView({ view }: { view: FloatableView }) {
           </div>
         </div>
         <Notices notices={life.notices} />
+        <WindowPalette agents={agents} artifacts={artifacts} queues={queues} />
       </TooltipProvider>
     </UnderwayContext.Provider>
   );

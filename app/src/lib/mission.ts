@@ -1,4 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 
 /** A safety net, should the end of Mission Control ever go unseen. */
@@ -7,41 +9,61 @@ const MAX_MS = 5 * 60_000;
 const SETTLE_MS = 350;
 
 /**
- * Mission Control or App Exposé is open (src-tauri/src/mission.rs tells when it comes
- * and goes): each agent view shows its name large for exactly that long.
+ * Mission Control or App Exposé is open (src-tauri/src/mission.rs tells when it comes and
+ * goes): each agent view shows its card for exactly that long. One listener per window,
+ * shared by its views. Picking one of our windows (focus, a click, a key) tells the backend,
+ * which takes the cards down in every window at once.
  * Preview: OPENADMIRAL_TIP=mission shows it.
  */
+let on = false;
+let since = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
+const subscribers = new Set<(v: boolean) => void>();
+let started = false;
+
+function set(v: boolean) {
+  clearTimeout(timer);
+  on = v;
+  if (v) timer = setTimeout(() => set(false), MAX_MS);
+  for (const s of subscribers) s(v);
+}
+
+function start() {
+  if (started) return;
+  started = true;
+  let label = "?";
+  try {
+    label = getCurrentWindow().label;
+  } catch {
+    // Outside Tauri (tests): no label.
+  }
+  void listen<boolean>("openadmiral://mission-control", (e) => {
+    const v = e.payload !== false;
+    if (v) since = Date.now();
+    set(v);
+    // Which windows heard it, and whether WebKit counted them hidden (mission.log).
+    void invoke("mission_log", { message: `${label} heard ${v} (hidden ${document.hidden}, views ${subscribers.size})` }).catch(() => {});
+  });
+  window.addEventListener("openadmiral:tip", (e) => {
+    if ((e as CustomEvent).detail !== "mission") return;
+    since = Date.now() + MAX_MS;
+    set(true);
+  });
+  const back = () => {
+    if (!on || Date.now() - since < SETTLE_MS) return;
+    set(false);
+    void invoke("mission_dismiss").catch(() => {});
+  };
+  for (const e of ["focus", "pointerdown", "keydown"]) window.addEventListener(e, back, true);
+}
+
 export function useMissionControl() {
-  const [on, setOn] = useState(false);
+  const [value, setValue] = useState(on);
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const set = (v: boolean) => {
-      clearTimeout(timer);
-      setOn(v);
-      if (v) timer = setTimeout(() => setOn(false), MAX_MS);
-    };
-    let since = 0;
-    const off = listen<boolean>("openadmiral://mission-control", (e) => {
-      if (e.payload !== false) since = Date.now();
-      set(e.payload !== false);
-    });
-    const onTip = (e: Event) => {
-      if ((e as CustomEvent).detail !== "mission") return;
-      since = Date.now() + MAX_MS;
-      set(true);
-    };
-    // Picking a window ends Mission Control with an animation the Dock's window outlives:
-    // the first sign of the person back here (focus, a click, a key) hides it at once.
-    const back = () => Date.now() - since > SETTLE_MS && set(false);
-    const events = ["focus", "pointerdown", "keydown"] as const;
-    window.addEventListener("openadmiral:tip", onTip);
-    for (const e of events) window.addEventListener(e, back, true);
-    return () => {
-      void off.then((f) => f());
-      clearTimeout(timer);
-      window.removeEventListener("openadmiral:tip", onTip);
-      for (const e of events) window.removeEventListener(e, back, true);
-    };
+    start();
+    subscribers.add(setValue);
+    setValue(on);
+    return () => void subscribers.delete(setValue);
   }, []);
-  return on;
+  return value;
 }

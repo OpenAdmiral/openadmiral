@@ -51,6 +51,46 @@ pub fn open_windows() -> Vec<(String, String)> {
     with(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
+/// A window for ⌘K's Windows row: the main one, then each floating one.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowInfo {
+    pub label: String,
+    /// The agent's session, or "view-<name>" for a floating view; none for the main window.
+    pub id: Option<String>,
+    pub focused: bool,
+}
+
+#[tauri::command]
+pub fn window_list(app: AppHandle) -> Vec<WindowInfo> {
+    let focused = |label: &str| app.get_webview_window(label).and_then(|w| w.is_focused().ok()).unwrap_or(false);
+    let mut out = vec![WindowInfo { label: "main".into(), id: None, focused: focused("main") }];
+    let mut floats = open_windows();
+    floats.sort();
+    out.extend(floats.into_iter().map(|(label, id)| WindowInfo { focused: focused(&label), label, id: Some(id) }));
+    out
+}
+
+/// Brings a window forward, to its desktop.
+#[tauri::command]
+pub fn window_focus(app: AppHandle, label: String) -> Result<(), String> {
+    if label == "main" {
+        crate::show_main(&app);
+        return Ok(());
+    }
+    let w = app.get_webview_window(&label).ok_or("That window is closed.")?;
+    let _ = w.show();
+    let _ = w.unminimize();
+    w.set_focus().map_err(|e| e.to_string())
+}
+
+/// ⌘K in a floating window picked something the main window shows: bring it forward with it.
+#[tauri::command]
+pub fn palette_pick(app: AppHandle, target: serde_json::Value) {
+    crate::show_main(&app);
+    let _ = app.emit_to("main", "openadmiral://palette-pick", target);
+}
+
 /// Opens the agent's window, or brings it forward (to its desktop) if it has one.
 #[tauri::command]
 pub fn float_open(app: AppHandle, session_id: String, title: String) -> Result<(), String> {

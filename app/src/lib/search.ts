@@ -11,11 +11,39 @@ export type Target =
   | { kind: "view"; view: "agents" | "costs" | "artifacts" | "queue" }
   | { kind: "new-agent"; cwd?: string }
   | { kind: "artifact"; sessionId: string; artifactId: string }
-  | { kind: "shortcuts" };
+  | { kind: "shortcuts" }
+  | { kind: "window"; label: string };
 
-export type Section = "Actions" | "Agents" | "Prompts" | "Artifacts" | "Up next";
+export type Section = "Windows" | "Actions" | "Agents" | "Prompts" | "Artifacts" | "Up next";
 
-export type Hit = { key: string; section: Section; title: string; detail?: string; at?: number; target: Target; haystack: string };
+export type Hit = { key: string; section: Section; title: string; detail?: string; at?: number; target: Target; haystack: string; win?: WindowCard };
+
+/** A window as ⌘K draws it: a card with its project's color and what its agent is doing. */
+export type WindowCard = { project?: string; status?: Agent["status"]; here: boolean; main: boolean };
+
+/** An open window (src-tauri float.rs window_list). */
+export type OpenWindow = { label: string; id: string | null; focused: boolean };
+
+const VIEW_TITLES: Record<string, string> = { agents: "Agents map", queue: "Up next", costs: "Costs", artifacts: "Artifacts" };
+
+/** ⌘K's Windows row: the main window and each floating one, in a fixed order. `here`: this window's label. */
+export function windowHits(windows: OpenWindow[], agents: Agent[], here: string): Hit[] {
+  if (windows.length < 2) return [];
+  return windows.map((w) => {
+    const agent = w.id && !w.id.startsWith("view-") ? agents.find((a) => a.id === w.id) : undefined;
+    const title = !w.id ? "Main window" : agent ? agent.name : (VIEW_TITLES[w.id.slice(5)] ?? "Window");
+    const detail = !w.id ? "OpenAdmiral" : agent ? agent.project : "View";
+    return {
+      key: `window:${w.label}`,
+      section: "Windows" as const,
+      title,
+      detail,
+      target: { kind: "window" as const, label: w.label },
+      haystack: fold(`${title} ${detail} window ventana`),
+      win: { project: agent?.project, status: agent?.status, here: w.label === here, main: !w.id },
+    };
+  });
+}
 
 /** Lower case, without accents: "Sesión" finds "sesion". */
 export const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -63,7 +91,7 @@ export function collect(agents: Agent[], artifacts: Artifact[], queues: Record<s
 }
 
 // What is already running comes first: actions (a new agent, a view) are what you reach for least.
-const ORDER: Section[] = ["Agents", "Prompts", "Artifacts", "Up next", "Actions"];
+const ORDER: Section[] = ["Windows", "Agents", "Prompts", "Artifacts", "Up next", "Actions"];
 /** Hits shown per section, so one busy section does not push the others out. */
 const PER_SECTION = 6;
 
@@ -75,19 +103,20 @@ export function search(hits: Hit[], query: string): Hit[] {
   const q = fold(query.trim());
   const words = q.split(/\s+/).filter(Boolean);
   const scored = hits
-    .filter((h) => (words.length ? words.every((w) => h.haystack.includes(w)) : h.section === "Agents" || h.section === "Actions"))
+    .filter((h) => (words.length ? words.every((w) => h.haystack.includes(w)) : h.section === "Windows" || h.section === "Agents" || h.section === "Actions"))
     .map((h) => {
       const t = fold(h.title);
       const score = !q ? 0 : t.startsWith(q) ? 3 : t.split(/[^a-z0-9]+/).some((w) => w.startsWith(words[0])) ? 2 : t.includes(q) ? 1 : 0;
       return { h, score };
     })
-    .sort((a, b) => ORDER.indexOf(a.h.section) - ORDER.indexOf(b.h.section) || b.score - a.score || (b.h.at ?? 0) - (a.h.at ?? 0));
+    // Windows keep their own order (a row of cards that does not shuffle).
+    .sort((a, b) => ORDER.indexOf(a.h.section) - ORDER.indexOf(b.h.section) || (a.h.section === "Windows" ? 0 : b.score - a.score || (b.h.at ?? 0) - (a.h.at ?? 0)));
   const count = new Map<Section, number>();
   return scored
     .filter(({ h }) => {
       const n = count.get(h.section) ?? 0;
       count.set(h.section, n + 1);
-      return n < (q ? PER_SECTION : h.section === "Actions" ? 3 : 9);
+      return h.section === "Windows" || n < (q ? PER_SECTION : h.section === "Actions" ? 3 : 9);
     })
     .map(({ h }) => h);
 }

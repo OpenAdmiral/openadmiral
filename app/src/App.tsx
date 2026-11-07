@@ -155,10 +155,16 @@ export default function App() {
     else if (t.kind === "view") setView({ kind: t.view });
     else if (t.kind === "new-agent") setSheet({ cwd: t.cwd });
     else if (t.kind === "shortcuts") setShortcuts(true);
-    else {
-      showArtifact(t.sessionId, t.artifactId);
-    }
+    else if (t.kind === "window") void invoke("window_focus", { label: t.label });
+    else showArtifact(t.sessionId, t.artifactId);
   };
+  // ⌘K in a floating window picked something this window shows (float.rs palette_pick).
+  const openTargetRef = useRef(openTarget);
+  openTargetRef.current = openTarget;
+  useEffect(() => {
+    const off = listen<Target>("openadmiral://palette-pick", (e) => openTargetRef.current(e.payload));
+    return () => void off.then((f) => f());
+  }, []);
   // Clicking a "needs you" notification brings OpenAdmiral forward: open that agent (its terminal shows the prompt).
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
@@ -755,7 +761,7 @@ export default function App() {
       </AnimatePresence>
       <Notices notices={life.notices} star={star} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
-      <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} onClose={() => setPalette(false)} onPick={openTarget} />
+      <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} agents={agents} here="main" onClose={() => setPalette(false)} onPick={openTarget} />
       <AboutSheet open={about} onClose={() => setAbout(false)} />
       <NewAgentSheet open={!!sheet} initialCwd={sheet ? sheet.cwd : undefined} onClose={() => setSheet(false)} agents={agents} onCreated={(shortId) => shortId && setOpenWhenListed({ shortId, at: Date.now() })} />
     </div>

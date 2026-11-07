@@ -14,6 +14,7 @@ import { ConfirmDialog, Notices } from "./Overlays";
 import { RestartTrustDialog } from "./TrustPanel";
 import { setTerminalScale } from "./Terminal";
 import { TooltipProvider } from "./Tooltip";
+import { WindowPalette } from "./CommandPalette";
 
 /** How long an agent may be missing before its window closes (a list can blink while it refreshes). */
 const GONE_AFTER_MS = 5000;
@@ -117,6 +118,7 @@ export function FloatingAgent({ id }: { id: string }) {
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
       <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
       <Notices notices={life.notices} />
+      <WindowPalette agents={agents} artifacts={artifacts} queues={queues} />
     </TooltipProvider>
   );
 }

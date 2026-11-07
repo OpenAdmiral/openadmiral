@@ -1074,10 +1074,11 @@ function NameCard({ agent }: { agent: Agent }) {
   const color = projectColor(agent.project);
   const busy = agent.status === "working" || agent.status === "waiting";
   return (
-    <div data-name-card className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center p-3" style={{ containerType: "size" }}>
+    // Near the top, not the middle: Mission Control puts its own title in the middle on hover.
+    <div data-name-card className="pointer-events-none absolute inset-0 z-40 flex items-start justify-center p-3 pt-[12cqh]" style={{ containerType: "size" }}>
       <div
-        className="flex max-w-[86cqw] flex-col items-center rounded-2xl border border-line-strong bg-canvas/92 px-[1.1em] py-[0.75em] text-center shadow-2xl"
-        style={{ fontSize: "clamp(12px, 3.4cqw, 18px)" }}
+        className="flex max-w-[88cqw] flex-col items-center rounded-2xl border border-line-strong bg-canvas/94 px-[1.2em] py-[0.8em] text-center shadow-2xl"
+        style={{ fontSize: "clamp(14px, 4.6cqw, 26px)" }}
       >
         <span className="flex max-w-full items-center gap-[0.45em] text-[0.72em] font-semibold tracking-[0.08em] text-ink-3 uppercase">
           <span className="size-[0.7em] shrink-0 rounded-full" style={{ background: color }} />
