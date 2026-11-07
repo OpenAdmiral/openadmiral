@@ -1,10 +1,11 @@
-import { CloseCircleLinearIcon } from "@solar-icons/react";
+import { CloseCircleLinearIcon, StarLinearIcon } from "@solar-icons/react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
 import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { starNow } from "@/lib/star";
 
 const SITE = "https://openadmiral.com";
 
@@ -88,6 +89,12 @@ export function AboutSheet({ open, onClose }: { open: boolean; onClose: () => vo
                 className="rounded-lg border border-line-strong px-3.5 py-1.5 text-sm font-semibold text-ink-2 transition-colors hover:bg-line hover:text-ink"
               >
                 Check for Updates
+              </button>
+              <button
+                onClick={() => void starNow()}
+                className="flex items-center gap-1.5 rounded-lg border border-line-strong px-3.5 py-1.5 text-sm font-semibold text-ink-2 transition-colors hover:bg-line hover:text-ink"
+              >
+                <StarLinearIcon size={14} /> Star
               </button>
             </div>
             <div className="mt-6 border-t border-line pt-4">

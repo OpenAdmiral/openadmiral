@@ -17,7 +17,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AddFolderLinearIcon, AddLinearIcon, MaximizeSquare3LinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon } from "@solar-icons/react";
+import { AddFolderLinearIcon, AddLinearIcon, MaximizeSquare3LinearIcon, AltArrowDownLinearIcon, StarsMinimalisticLinearIcon, BugMinimalisticLinearIcon, ChatLineLinearIcon, DollarLinearIcon, KeyboardLinearIcon, SidebarMinimalisticLinearIcon, GalleryLinearIcon, StructureLinearIcon, PlaylistMinimalisticLinearIcon, StarLinearIcon } from "@solar-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "framer-motion";
@@ -33,6 +33,7 @@ import type { AdmiralRequest } from "@/lib/admiral";
 import type { Agent, AdmiralSession } from "@/lib/types";
 import { ago, branchTone, cn, contextUsed, fillText, projectColor, projectLabel, sharedPrefix, until } from "@/lib/utils";
 import { isReset, PlanMeters } from "./PlanMeters";
+import { starNow, useStarred } from "@/lib/star";
 import { Tip, TipLabel } from "./Tooltip";
 import { Info } from "./Info";
 import { KIND, Kbd, Meter } from "./primitives";
@@ -544,6 +545,7 @@ function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCos
     window.addEventListener("openadmiral:tip", onTip);
     return () => window.removeEventListener("openadmiral:tip", onTip);
   }, []);
+  const starred = useStarred();
   const live = rateLimits.filter((r) => !isReset(r.resetsAt));
   const hot = (r: (typeof live)[number]) => r.percentUsed >= 80;
   const links = (
@@ -552,6 +554,11 @@ function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCos
         <Kbd>⌘/</Kbd> Shortcuts
       </button>
       <span className="flex-1" />
+      {!starred.done && (
+        <button onClick={() => void starNow()} title="Star OpenAdmiral on GitHub" className="flex items-center gap-1 transition-colors hover:text-ink">
+          <StarLinearIcon size={12} /> Star
+        </button>
+      )}
       {/* A new GitHub issue from the repo's form, type preset, versions filled in. */}
       <button onClick={() => void invoke("open_issue", { kind: "feedback" })} title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
         Feedback
@@ -587,6 +594,11 @@ function FooterStats({ todayCost, rateLimits, onCosts, onShortcuts }: { todayCos
         <button onClick={onShortcuts} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (⌘/)" className="transition-colors hover:text-ink">
           <KeyboardLinearIcon size={14} />
         </button>
+        {!starred.done && (
+          <button onClick={() => void starNow()} aria-label="Star on GitHub" title="Star OpenAdmiral on GitHub" className="transition-colors hover:text-ink">
+            <StarLinearIcon size={14} />
+          </button>
+        )}
         <button onClick={() => void invoke("open_issue", { kind: "feedback" })} aria-label="Send feedback" title="Share an idea or feedback (opens GitHub)" className="transition-colors hover:text-ink">
           <ChatLineLinearIcon size={14} />
         </button>

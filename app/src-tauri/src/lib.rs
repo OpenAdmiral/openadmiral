@@ -18,6 +18,7 @@ mod resume;
 mod scheduler;
 mod session_files;
 mod shot;
+mod star;
 mod staged;
 mod telemetry;
 mod transcript;
@@ -1214,6 +1215,11 @@ fn handle_menu(app: &AppHandle, id: &str) {
         let _ = app.emit("openadmiral://shortcuts", ());
     } else if let Some(kind) = id.strip_prefix("help:").filter(|k| *k == "bug" || *k == "feedback") {
         let _ = open_issue(app.clone(), kind.to_string());
+    } else if id == "help:star" {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = star::star_now(app).await;
+        });
     } else if id == "help:updates" {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -1304,6 +1310,7 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "help:feedback", "Send Feedback…", true, None::<&str>)?,
         &MenuItem::with_id(app, "help:bug", "Report a Bug…", true, None::<&str>)?,
+        &MenuItem::with_id(app, "help:star", "Star OpenAdmiral on GitHub…", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "help:updates", "Check for Updates…", true, None::<&str>)?,
         &CheckMenuItem::with_id(app, "help:telemetry", "Share Anonymous Usage Stats", true, telemetry::enabled(app.handle()), None::<&str>)?,
@@ -1406,6 +1413,10 @@ pub fn run() {
             transcript::transcript_open,
             transcript::transcript_close,
             open_issue,
+            star::star_event,
+            star::star_now,
+            star::star_dismiss,
+            star::star_done,
             updater::update_check,
             updater::update_install,
             underway::underway_state,

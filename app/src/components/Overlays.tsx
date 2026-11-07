@@ -1,7 +1,8 @@
-import { DangerTriangleLinearIcon } from "@solar-icons/react";
+import { CloseCircleLinearIcon, DangerTriangleLinearIcon, StarBoldIcon } from "@solar-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import type { Notice } from "@/lib/lifecycle";
+import { starBody, starDismiss, starNow, starTitle, type StarPrompt } from "@/lib/star";
 import { cn } from "@/lib/utils";
 
 type Confirm = { title: string; body: string; action: string; run: () => Promise<void> };
@@ -60,10 +61,11 @@ export function ConfirmDialog({ confirm, onClose }: { confirm: Confirm | null; o
   );
 }
 
-export function Notices({ notices }: { notices: Notice[] }) {
+export function Notices({ notices, star }: { notices: Notice[]; star?: { prompt: StarPrompt | null; close: () => void } }) {
   return (
     <div className="pointer-events-none fixed right-5 bottom-5 z-[100] flex w-[360px] flex-col gap-2">
       <AnimatePresence>
+        {star?.prompt && <StarCard key="star" prompt={star.prompt} onClose={star.close} />}
         {notices.map((n) => (
           <motion.div
             key={n.id}
@@ -88,5 +90,65 @@ export function Notices({ notices }: { notices: Notice[] }) {
         ))}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Asking for a GitHub star at a good moment (src/lib/star.ts, src-tauri/src/star.rs). */
+function StarCard({ prompt, onClose }: { prompt: StarPrompt; onClose: () => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "starred" | "opened">("idle");
+  const later = () => {
+    if (state === "busy") return;
+    if (state === "idle") void starDismiss();
+    onClose();
+  };
+  const star = async () => {
+    setState("busy");
+    const how = await starNow().catch(() => null);
+    setState(how ?? "idle");
+    if (how) setTimeout(onClose, how === "starred" ? 2200 : 800);
+  };
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 8, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 4 }}
+      role="complementary"
+      aria-labelledby="star-title"
+      className="pointer-events-auto rounded-xl border border-line-strong bg-canvas/95 p-4 text-sm shadow-lg backdrop-blur"
+      onKeyDown={(e) => e.key === "Escape" && later()}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-400/15 text-amber-500">
+          <StarBoldIcon size={17} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 id="star-title" className="font-semibold text-ink">{starTitle(prompt)}</h3>
+          <p className="mt-1 leading-relaxed text-ink-2">{starBody(prompt)}</p>
+        </div>
+        <button onClick={later} aria-label="Dismiss" className="-mt-1 -mr-1 shrink-0 rounded-md p-1 text-ink-3 transition-colors hover:text-ink">
+          <CloseCircleLinearIcon size={16} />
+        </button>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button
+          autoFocus
+          disabled={state !== "idle"}
+          onClick={() => void star()}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-amber-400/60 bg-amber-400/15 px-3 py-1.5 font-semibold text-amber-800 transition-colors hover:bg-amber-400/25 disabled:opacity-80 dark:text-amber-100"
+        >
+          <StarBoldIcon size={14} />
+          {state === "starred" ? "Starred, thank you!" : state === "opened" ? "GitHub opened" : state === "busy" ? "Starring…" : "Star on GitHub"}
+        </button>
+        {state === "idle" && (
+          <button onClick={later} className="rounded-lg px-3 py-1.5 text-ink-2 transition-colors hover:bg-line">
+            Not now
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-[11.5px] text-ink-3">
+        {prompt.mode === "gh" ? `Stars with your GitHub CLI account${prompt.login ? ` (@${prompt.login})` : ""}. Nothing else is shared.` : "Opens OpenAdmiral on GitHub in your browser."}
+      </p>
+    </motion.div>
   );
 }

@@ -39,6 +39,7 @@ import { QueueView } from "@/components/QueueView";
 import { pending, useQueueJanitor, type SchedulerEvent } from "@/lib/queue";
 import { isTimed } from "@/lib/schedule";
 import { UnderwayContext, useUnderway } from "@/lib/underway";
+import { useStarPrompt } from "@/lib/star";
 import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
@@ -269,6 +270,7 @@ export default function App() {
   }, []);
 
   const [preview, setPreview] = useState(false);
+  const star = useStarPrompt(agents, underway.state, preview);
   const [previewChecks, setPreviewChecks] = useState({ attach: false, probe: false });
   useEffect(() => {
     devEnv.then((d) => {
@@ -700,7 +702,7 @@ export default function App() {
       </main>
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
       <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
-      <Notices notices={life.notices} />
+      <Notices notices={life.notices} star={star} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
       <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} onClose={() => setPalette(false)} onPick={openTarget} />
       <AboutSheet open={about} onClose={() => setAbout(false)} />
