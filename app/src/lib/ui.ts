@@ -18,6 +18,8 @@ export type UiState = {
   textScale?: number;
   /** Split panes in compact mode: one header line each, tabs as icons. */
   densePanes?: boolean;
+  /** The welcome tour was finished or skipped (or never needed). */
+  onboarded?: boolean;
 };
 
 const DEFAULTS: UiState = { leftCollapsed: false, rightCollapsed: false };
@@ -27,11 +29,13 @@ export function useUiState({ readOnly = false } = {}) {
   const [state, setState] = useState<UiState>(DEFAULTS);
   // A change made before the saved state arrives wins over it.
   const touched = useRef(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     invoke<Partial<UiState> | null>("ui_state_load")
       .then((s) => !touched.current && setState({ ...DEFAULTS, ...(s ?? {}) }))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -55,7 +59,9 @@ export function useUiState({ readOnly = false } = {}) {
 
   return {
     ...state,
+    loaded,
     focused: !!state.focusRestore,
+    setOnboarded: () => update(() => ({ onboarded: true })),
     toggleLeft: () => update((s) => ({ leftCollapsed: !s.leftCollapsed, focusRestore: undefined })),
     toggleRight: () => update((s) => ({ rightCollapsed: !s.rightCollapsed, focusRestore: undefined })),
     setBlockCollapsed: (id: string, collapsed: boolean) => update((s) => ({ blockCollapsed: { ...s.blockCollapsed, [id]: collapsed } })),

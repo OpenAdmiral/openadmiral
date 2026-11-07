@@ -1215,6 +1215,9 @@ fn handle_menu(app: &AppHandle, id: &str) {
         let _ = app.emit("openadmiral://shortcuts", ());
     } else if let Some(kind) = id.strip_prefix("help:").filter(|k| *k == "bug" || *k == "feedback") {
         let _ = open_issue(app.clone(), kind.to_string());
+    } else if id == "help:welcome" {
+        show_main(app);
+        let _ = app.emit("openadmiral://welcome", ());
     } else if id == "help:star" {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -1306,6 +1309,7 @@ fn app_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
         &PredefinedMenuItem::fullscreen(app, None)?,
     ])?;
     let help = Submenu::with_items(app, "Help", true, &[
+        &MenuItem::with_id(app, "help:welcome", "Welcome Tour", true, None::<&str>)?,
         &MenuItem::with_id(app, "help:shortcuts", "Keyboard Shortcuts", true, Some("CmdOrCtrl+/"))?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "help:feedback", "Send Feedback…", true, None::<&str>)?,

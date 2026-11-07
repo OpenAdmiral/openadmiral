@@ -40,6 +40,8 @@ import { pending, useQueueJanitor, type SchedulerEvent } from "@/lib/queue";
 import { isTimed } from "@/lib/schedule";
 import { UnderwayContext, useUnderway } from "@/lib/underway";
 import { useStarPrompt } from "@/lib/star";
+import { welcomeDecision } from "@/lib/onboarding";
+import { Onboarding } from "@/components/Onboarding";
 import { pluginBehind, reloadPlugin, usePluginChangedAt } from "@/lib/plugin";
 import { recentOrder, useSortMode } from "@/lib/recent";
 import { UnderwayPill } from "@/components/UnderwayPill";
@@ -270,7 +272,32 @@ export default function App() {
   }, []);
 
   const [preview, setPreview] = useState(false);
-  const star = useStarPrompt(agents, underway.state, preview);
+  // The welcome tour: once, on a first run; again from Help → Welcome Tour.
+  const [welcome, setWelcome] = useState<number | null>(null);
+  const decision = welcomeDecision({ uiLoaded: ui.loaded, agentsLoaded: loaded && cliReady, onboarded: ui.onboarded, agents });
+  useEffect(() => {
+    if (preview) return;
+    if (decision === "show") setWelcome((w) => w ?? 0);
+    else if (decision === "done") ui.setOnboarded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision, preview]);
+  useEffect(() => {
+    const off = listen("openadmiral://welcome", () => setWelcome(0));
+    // Preview: OPENADMIRAL_TIP=welcome[:1-4|:done] opens it on that step.
+    const onTip = (e: Event) => {
+      const d = String((e as CustomEvent).detail ?? "");
+      if (!d.startsWith("welcome") || d === "welcome:done-ready") return;
+      const arg = d.split(":")[1];
+      setWelcome(arg === "done" ? 3 : Math.max(0, Number(arg || 1) - 1));
+      if (arg === "done") setTimeout(() => window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: "welcome:done" })), 400);
+    };
+    window.addEventListener("openadmiral:tip", onTip);
+    return () => {
+      off.then((u) => u());
+      window.removeEventListener("openadmiral:tip", onTip);
+    };
+  }, []);
+  const star = useStarPrompt(agents, underway.state, preview || welcome !== null);
   const [previewChecks, setPreviewChecks] = useState({ attach: false, probe: false });
   useEffect(() => {
     devEnv.then((d) => {
@@ -702,6 +729,22 @@ export default function App() {
       </main>
       <ConfirmDialog confirm={life.confirm} onClose={() => life.setConfirm(null)} />
       <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
+      <AnimatePresence>
+        {welcome !== null && (
+          <Onboarding
+            step={welcome}
+            agents={agents}
+            pluginInstalled={pluginInstalled}
+            onNewAgent={() => setSheet({})}
+            onClose={({ agentId, underway: openUnderway }) => {
+              ui.setOnboarded();
+              setWelcome(null);
+              if (agentId) setView({ kind: "agent", id: agentId });
+              if (openUnderway) setTimeout(() => window.dispatchEvent(new CustomEvent("openadmiral:tip", { detail: "underway" })), 400);
+            }}
+          />
+        )}
+      </AnimatePresence>
       <Notices notices={life.notices} star={star} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
       <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} onClose={() => setPalette(false)} onPick={openTarget} />
