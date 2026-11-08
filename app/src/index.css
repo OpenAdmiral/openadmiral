@@ -214,12 +214,17 @@ main[data-rail] > div > div > header:first-child { padding-left: 64px; }
   box-shadow: inset 0 -1.5px 0 rgb(110 168 255 / 0.95);
   border-radius: 2px;
 }
-.term-link-mark {
+.term-link-chip {
   position: absolute;
   display: flex;
   align-items: center;
-  justify-content: center;
-  /* Hides the cell's own character: the terminal's background. */
-  background: var(--color-term, #0f1115);
-  color: rgb(110 168 255);
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font: 600 11px/1.4 var(--font-sans);
+  white-space: nowrap;
+  color: #fff;
+  background: rgb(18 88 255);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
+.term-link-chip svg { width: 11px; height: 11px; }

@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { findLinks } from "@/lib/links";
-import { requestOpen } from "@/lib/linkGate";
+import { hostOf, requestOpen } from "@/lib/linkGate";
 import { useEffect, useRef, useState } from "react";
 import { RefreshLinearIcon } from "@solar-icons/react";
 import { cn } from "@/lib/utils";
@@ -121,9 +121,9 @@ export function setTerminalScale(scale: number) {
 
 /**
  * Links in the terminal, including the long ones Claude Code wraps over several rows
- * (lib/links.ts). Each shows in the link colour, underlined on every row, with an
- * external-link mark before it: drawn in a layer over the terminal (xterm keeps the
- * text's own colours). A click opens it, asking first for a site not trusted yet
+ * (lib/links.ts). Each shows in the link colour, underlined on every row, and the
+ * hovered one shows its site with an external-link mark above it: drawn in a layer over
+ * the terminal (xterm keeps the text's own colours, and its spacing is Claude Code's). A click opens it, asking first for a site not trusted yet
  * (lib/linkGate.ts); OSC 8 hyperlinks too.
  */
 function addLinks(term: XTerm, host: HTMLElement) {
@@ -151,13 +151,22 @@ function addLinks(term: XTerm, host: HTMLElement) {
             range: { start: { x: first.start + 1, y: first.row + from + 1 }, end: { x: last.end, y: last.row + from + 1 } },
             decorations: { underline: false, pointerCursor: true },
             activate: () => requestOpen(l.url),
+            hover: () => {
+              hovered = l.url;
+              schedule();
+            },
+            leave: () => {
+              if (hovered === l.url) hovered = null;
+              schedule();
+            },
           };
         });
       callback(found.length ? found : undefined);
     },
   });
 
-  // The layer: an underline, a tint and the mark, over each visible piece.
+  // The layer: an underline and a tint over each visible piece; the hovered link's site.
+  let hovered: string | null = null;
   const layer = document.createElement("div");
   layer.className = "term-links";
   host.appendChild(layer);
@@ -183,8 +192,14 @@ function addLinks(term: XTerm, host: HTMLElement) {
         const x = left + p.start * cw;
         const y = top + row * ch;
         parts.push(`<span class="term-link" style="left:${x}px;top:${y}px;width:${(p.end - p.start) * cw}px;height:${ch}px"></span>`);
-        // The mark takes the one cell before the link (a space, or the "(" it opens with).
-        if (i === 0) parts.push(`<span class="term-link-mark" style="left:${x - cw}px;top:${y}px;width:${cw}px;height:${ch}px"><svg style="width:${Math.min(cw, ch) * 0.82}px;height:${Math.min(cw, ch) * 0.82}px" viewBox="0 0 24 24"${MARK}</span>`);
+        // Hovered: its site above the first piece (below it on the top row), never over the text.
+        if (i === 0 && hovered === l.url) {
+          const above = row > 0;
+          const host = hostOf(l.url).replace(/^www\./, "");
+          parts.push(
+            `<span class="term-link-chip" style="left:${x}px;top:${above ? y - 2 : y + ch + 2}px;transform:translateY(${above ? "-100%" : "0"})"><svg viewBox="0 0 24 24"${MARK}${escapeHtml(host)}</span>`,
+          );
+        }
       });
     }
     layer.innerHTML = parts.join("");
@@ -196,6 +211,8 @@ function addLinks(term: XTerm, host: HTMLElement) {
   term.onScroll(schedule);
   term.onResize(schedule);
 }
+
+const escapeHtml = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 /** The external-link mark (Solar's "square share line"). */
 const MARK = ` fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3h8v8"/><path d="M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>`;
