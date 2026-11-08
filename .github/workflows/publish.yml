@@ -35,7 +35,7 @@ jobs:
       - name: Download the release
         run: |
           mkdir -p out
-          gh release download "$TAG" --dir out --pattern '*.dmg' --pattern '*.app.tar.gz' --pattern '*.app.tar.gz.sig'
+          gh release download "$TAG" --dir out --pattern '*.dmg' --pattern '*.app.tar.gz' --pattern '*.app.tar.gz.sig' --pattern '*-setup.exe' --pattern '*-setup.exe.sig'
           gh release view "$TAG" --json body,publishedAt > out/release.json
           ls -la out
 
@@ -51,6 +51,9 @@ jobs:
           for f in out/*.dmg; do put "downloads/$V/$(basename "$f")" "$f" application/x-apple-diskimage "public, max-age=31536000, immutable"; done
           for f in out/*.app.tar.gz; do put "downloads/$V/$(basename "$f")" "$f" application/gzip "public, max-age=31536000, immutable"; done
           for f in out/*.app.tar.gz.sig; do put "downloads/$V/$(basename "$f")" "$f" text/plain "public, max-age=31536000, immutable"; done
+          # Windows, when the release has it: the installer is also its update package.
+          for f in out/*-setup.exe; do [ -e "$f" ] && put "downloads/$V/$(basename "$f")" "$f" application/vnd.microsoft.portable-executable "public, max-age=31536000, immutable"; done
+          for f in out/*-setup.exe.sig; do [ -e "$f" ] && put "downloads/$V/$(basename "$f")" "$f" text/plain "public, max-age=31536000, immutable"; done
           # Last, so no app is pointed at files that are not there yet.
           put downloads/releases.json out/releases.json application/json "no-cache"
           put updates/latest.json out/latest.json application/json "no-cache"

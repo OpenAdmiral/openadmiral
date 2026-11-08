@@ -88,3 +88,67 @@ jobs:
           # Ours lives on openadmiral.com (publish.yml), with links users can reach.
           includeUpdaterJson: false
           args: --target universal-apple-darwin --bundles app,dmg
+
+  # The same release for Windows (x64): an NSIS installer and its signed update
+  # package (.exe + .exe.sig), uploaded to the same draft.
+  #
+  # Code signing (optional, SmartScreen stops warning once it is set): Azure Trusted
+  # Signing. Add the secrets AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and
+  # the repository variables AZURE_SIGNING_ENDPOINT (e.g. https://weu.codesigning.azure.net),
+  # AZURE_SIGNING_ACCOUNT and AZURE_SIGNING_PROFILE; the step below signs every binary
+  # the bundler makes with trusted-signing-cli. Without them the installer is unsigned.
+  windows:
+    # After macOS, so both upload to the one draft it made.
+    needs: macos
+    runs-on: windows-latest
+    env:
+      HAS_SIGNING: ${{ secrets.AZURE_CLIENT_SECRET != '' && vars.AZURE_SIGNING_ACCOUNT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+
+      - name: Sign with Azure Trusted Signing when it is set up
+        if: ${{ env.HAS_SIGNING == 'true' }}
+        shell: bash
+        run: |
+          cargo install trusted-signing-cli --locked
+          cat > app/src-tauri/tauri.sign.conf.json <<JSON
+          { "bundle": { "windows": { "signCommand": "trusted-signing-cli -e ${{ vars.AZURE_SIGNING_ENDPOINT }} -a ${{ vars.AZURE_SIGNING_ACCOUNT }} -c ${{ vars.AZURE_SIGNING_PROFILE }} -d OpenAdmiral %1" } } }
+          JSON
+          {
+            echo "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}"
+            echo "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}"
+            echo "AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}"
+            echo "SIGN_ARGS=--config src-tauri/tauri.sign.conf.json"
+          } >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: v__VERSION__
+          releaseName: OpenAdmiral v__VERSION__
+          releaseDraft: true
+          includeUpdaterJson: false
+          args: --bundles nsis ${{ env.SIGN_ARGS }}

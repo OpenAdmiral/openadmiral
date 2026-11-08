@@ -20,7 +20,12 @@ const url = (f) => `${site}/downloads/${version}/${f}`;
 
 // One universal build serves both architectures.
 const platform = { signature: fs.readFileSync(path.join(dir, sig), "utf8").trim(), url: url(update) };
-const latest = { version, notes, pub_date: date, platforms: { "darwin-aarch64": platform, "darwin-x86_64": platform } };
+const platforms = { "darwin-aarch64": platform, "darwin-x86_64": platform };
+// Windows, when the release has it: the NSIS installer is its update package.
+const exe = one("-setup.exe");
+const exeSig = one("-setup.exe.sig");
+if (exe && exeSig) platforms["windows-x86_64"] = { signature: fs.readFileSync(path.join(dir, exeSig), "utf8").trim(), url: url(exe) };
+const latest = { version, notes, pub_date: date, platforms };
 fs.writeFileSync(path.join(dir, "latest.json"), JSON.stringify(latest, null, 2));
 
 const previous = JSON.parse(fs.readFileSync(path.join(dir, "previous.json"), "utf8"));
@@ -28,8 +33,8 @@ const entry = {
   version,
   date,
   notes,
-  files: { dmg: url(dmg), update: url(update) },
-  size: { dmg: fs.statSync(path.join(dir, dmg)).size },
+  files: { dmg: url(dmg), update: url(update), ...(exe ? { exe: url(exe) } : {}) },
+  size: { dmg: fs.statSync(path.join(dir, dmg)).size, ...(exe ? { exe: fs.statSync(path.join(dir, exe)).size } : {}) },
 };
 const releases = [entry, ...(previous.releases ?? []).filter((r) => r.version !== version)];
 const semver = (v) => v.split(/[.-]/).map((x) => (/^\d+$/.test(x) ? Number(x) : x));

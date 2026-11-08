@@ -17,9 +17,20 @@
     ]
   },
   "bundle": {
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
