@@ -356,7 +356,15 @@ export function AgentDetail({ agent, now, handoff, request, actions, closing, pr
             compact && active ? "border-brand-500/70 ring-[3px] ring-brand-500/15" : "border-line",
           )}
         >
-          <div data-tauri-drag-region className={cn("@container flex shrink-0 items-center gap-1 border-b border-line px-2 pt-1.5", dense && "hidden")}>
+          <div
+            data-tauri-drag-region
+            // More tabs than room (a narrow pane): one line that scrolls sideways (trackpad or wheel).
+            onWheel={(e) => e.deltaY && !e.deltaX && (e.currentTarget.scrollLeft += e.deltaY)}
+            className={cn(
+              "@container flex shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b border-line px-2 pt-1.5 whitespace-nowrap [scrollbar-width:none] [&>*]:shrink-0",
+              dense && "hidden",
+            )}
+          >
             {tabs.map((t, i) => (
               <button
                 key={t}
