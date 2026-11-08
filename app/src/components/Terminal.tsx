@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { findLinks } from "@/lib/links";
 import { useEffect, useRef, useState } from "react";
 import { RefreshLinearIcon } from "@solar-icons/react";
 import { cn } from "@/lib/utils";
@@ -117,6 +119,43 @@ export function setTerminalScale(scale: number) {
   }
 }
 
+/**
+ * Links in the terminal, one ⌘-click (or click) away, including the long ones Claude Code
+ * wraps over several rows (lib/links.ts); OSC 8 hyperlinks too. claude.ai pages open in
+ * the app's own window, the rest in the browser.
+ */
+function addLinks(term: XTerm) {
+  const open = (url: string) => {
+    if (/^https:\/\/claude\.ai\//.test(url)) void invoke("browser_open", { url }).catch(() => openUrl(url));
+    else void openUrl(url).catch(() => {});
+  };
+  term.options.linkHandler = { activate: (_e, url) => open(url), allowNonHttpProtocols: false };
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      // The rows around this one: a wrapped link can start a few rows up.
+      const buf = term.buffer.active;
+      const from = Math.max(0, y - 1 - 6);
+      const to = Math.min(buf.length - 1, y - 1 + 6);
+      const rows: string[] = [];
+      for (let r = from; r <= to; r++) rows.push(buf.getLine(r)?.translateToString(true) ?? "");
+      const here = y - 1 - from;
+      const links = findLinks(rows)
+        .filter((l) => l.pieces.some((p) => p.row === here))
+        .flatMap((l) =>
+          l.pieces
+            .filter((p) => p.row === here)
+            .map((p) => ({
+              text: l.url,
+              range: { start: { x: p.start + 1, y }, end: { x: p.end, y } },
+              decorations: { underline: true, pointerCursor: true },
+              activate: () => open(l.url),
+            })),
+        );
+      callback(links.length ? links : undefined);
+    },
+  });
+}
+
 function create(key: string): Live {
   const el = document.createElement("div");
   el.style.height = "100%";
@@ -134,6 +173,7 @@ function create(key: string): Live {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
+  addLinks(term);
   term.onData((data) => invoke("pty_write", { key, data }).catch(() => {}));
   // ⌥ stays Meta for word moves, but a symbol ⌥ composes (Spanish ⌥2 "@") is typed as is.
   term.attachCustomKeyEventHandler((e) => {
