@@ -1,4 +1,5 @@
 import { MinimizeSquare3LinearIcon } from "@solar-icons/react";
+import { LinkGate } from "@/components/LinkGate";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
@@ -84,6 +85,7 @@ export function FloatingView({ view }: { view: FloatableView }) {
         </div>
         <Notices notices={life.notices} />
         <WindowPalette agents={agents} artifacts={artifacts} queues={queues} />
+        <LinkGate />
       </TooltipProvider>
     </UnderwayContext.Provider>
   );

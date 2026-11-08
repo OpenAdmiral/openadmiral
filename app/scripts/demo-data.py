@@ -316,6 +316,14 @@ def draw(session_id):
     line(f"  {g}☐ Saved addresses picker")
     line(f"  {g}☐ Update e2e tests")
     line()
+    # OPENADMIRAL_DEMO_LINKS=1: links as Claude Code wraps them, to check the terminal's link layer.
+    if os.environ.get("OPENADMIRAL_DEMO_LINKS"):
+        line(f"{w}⏺{rs} Two drafts are ready in Gmail:")
+        line("  1. To Isabelle (open (https://mail.google.com/mail/?authuser=")
+        line("     cesar@example.com#all?compose=thread-f:1881326785956497790")
+        line("     %2Bmsg-a:r6472592142666245874)), in English, in a new thread.")
+        line("  2. The deck: https://claude.ai/artifact/9f2c1e7a-demo")
+        line()
     line(f"{o}✻ Adding Apple Pay button… {g}(4m 12s · ↓ 6.4k tokens · esc to interrupt)")
     line()
     line(f"{g}{'─' * (cols - 1)}")

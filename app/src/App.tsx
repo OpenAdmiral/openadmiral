@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LinkGate } from "@/components/LinkGate";
 import { AnimatePresence, MotionGlobalConfig, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Agent } from "@/lib/types";
@@ -788,6 +789,7 @@ export default function App() {
         )}
       </AnimatePresence>
       <Notices notices={life.notices} star={star} />
+      <LinkGate />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
       <CommandPalette open={palette !== false} initialQuery={palette || ""} hits={paletteHits} agents={agents} here="main" onClose={() => setPalette(false)} onPick={openTarget} />
       <AboutSheet open={about} onClose={() => setAbout(false)} />

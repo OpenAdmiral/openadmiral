@@ -3,8 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { findLinks } from "@/lib/links";
+import { requestOpen } from "@/lib/linkGate";
 import { useEffect, useRef, useState } from "react";
 import { RefreshLinearIcon } from "@solar-icons/react";
 import { cn } from "@/lib/utils";
@@ -120,41 +120,85 @@ export function setTerminalScale(scale: number) {
 }
 
 /**
- * Links in the terminal, one ⌘-click (or click) away, including the long ones Claude Code
- * wraps over several rows (lib/links.ts); OSC 8 hyperlinks too. claude.ai pages open in
- * the app's own window, the rest in the browser.
+ * Links in the terminal, including the long ones Claude Code wraps over several rows
+ * (lib/links.ts). Each shows in the link colour, underlined on every row, with an
+ * external-link mark before it: drawn in a layer over the terminal (xterm keeps the
+ * text's own colours). A click opens it, asking first for a site not trusted yet
+ * (lib/linkGate.ts); OSC 8 hyperlinks too.
  */
-function addLinks(term: XTerm) {
-  const open = (url: string) => {
-    if (/^https:\/\/claude\.ai\//.test(url)) void invoke("browser_open", { url }).catch(() => openUrl(url));
-    else void openUrl(url).catch(() => {});
+function addLinks(term: XTerm, host: HTMLElement) {
+  term.options.linkHandler = { activate: (_e, url) => requestOpen(url), allowNonHttpProtocols: false };
+  const visible = () => {
+    const buf = term.buffer.active;
+    const from = Math.max(0, buf.viewportY - 6);
+    const to = Math.min(buf.length - 1, buf.viewportY + term.rows + 6);
+    const rows: string[] = [];
+    for (let r = from; r <= to; r++) rows.push(buf.getLine(r)?.translateToString(true) ?? "");
+    return { from, links: findLinks(rows) };
   };
-  term.options.linkHandler = { activate: (_e, url) => open(url), allowNonHttpProtocols: false };
+  // Hover and click: the whole link, across its rows, is one target.
   term.registerLinkProvider({
     provideLinks(y, callback) {
-      // The rows around this one: a wrapped link can start a few rows up.
-      const buf = term.buffer.active;
-      const from = Math.max(0, y - 1 - 6);
-      const to = Math.min(buf.length - 1, y - 1 + 6);
-      const rows: string[] = [];
-      for (let r = from; r <= to; r++) rows.push(buf.getLine(r)?.translateToString(true) ?? "");
+      const { from, links } = visible();
       const here = y - 1 - from;
-      const links = findLinks(rows)
+      const found = links
         .filter((l) => l.pieces.some((p) => p.row === here))
-        .flatMap((l) =>
-          l.pieces
-            .filter((p) => p.row === here)
-            .map((p) => ({
-              text: l.url,
-              range: { start: { x: p.start + 1, y }, end: { x: p.end, y } },
-              decorations: { underline: true, pointerCursor: true },
-              activate: () => open(l.url),
-            })),
-        );
-      callback(links.length ? links : undefined);
+        .map((l) => {
+          const first = l.pieces[0];
+          const last = l.pieces[l.pieces.length - 1];
+          return {
+            text: l.url,
+            range: { start: { x: first.start + 1, y: first.row + from + 1 }, end: { x: last.end, y: last.row + from + 1 } },
+            decorations: { underline: false, pointerCursor: true },
+            activate: () => requestOpen(l.url),
+          };
+        });
+      callback(found.length ? found : undefined);
     },
   });
+
+  // The layer: an underline, a tint and the mark, over each visible piece.
+  const layer = document.createElement("div");
+  layer.className = "term-links";
+  host.appendChild(layer);
+  let frame = 0;
+  const draw = () => {
+    frame = 0;
+    const screen = host.querySelector(".xterm-screen") as HTMLElement | null;
+    if (!screen || !term.cols || !term.rows) return;
+    const cw = screen.clientWidth / term.cols;
+    const ch = screen.clientHeight / term.rows;
+    // Where the cells start inside the host (the terminal has padding around them).
+    const a = screen.getBoundingClientRect();
+    const b = host.getBoundingClientRect();
+    const left = a.left - b.left;
+    const top = a.top - b.top;
+    const { from, links } = visible();
+    const top0 = term.buffer.active.viewportY;
+    const parts: string[] = [];
+    for (const l of links) {
+      l.pieces.forEach((p, i) => {
+        const row = p.row + from - top0;
+        if (row < 0 || row >= term.rows) return;
+        const x = left + p.start * cw;
+        const y = top + row * ch;
+        parts.push(`<span class="term-link" style="left:${x}px;top:${y}px;width:${(p.end - p.start) * cw}px;height:${ch}px"></span>`);
+        // The mark takes the one cell before the link (a space, or the "(" it opens with).
+        if (i === 0) parts.push(`<span class="term-link-mark" style="left:${x - cw}px;top:${y}px;width:${cw}px;height:${ch}px"><svg style="width:${Math.min(cw, ch) * 0.82}px;height:${Math.min(cw, ch) * 0.82}px" viewBox="0 0 24 24"${MARK}</span>`);
+      });
+    }
+    layer.innerHTML = parts.join("");
+  };
+  const schedule = () => {
+    if (!frame) frame = requestAnimationFrame(draw);
+  };
+  term.onRender(schedule);
+  term.onScroll(schedule);
+  term.onResize(schedule);
 }
+
+/** The external-link mark (Solar's "square share line"). */
+const MARK = ` fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3h8v8"/><path d="M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>`;
 
 function create(key: string): Live {
   const el = document.createElement("div");
@@ -173,7 +217,8 @@ function create(key: string): Live {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(el);
-  addLinks(term);
+  el.style.position = "relative";
+  addLinks(term, el);
   term.onData((data) => invoke("pty_write", { key, data }).catch(() => {}));
   // ⌥ stays Meta for word moves, but a symbol ⌥ composes (Spanish ⌥2 "@") is typed as is.
   term.attachCustomKeyEventHandler((e) => {

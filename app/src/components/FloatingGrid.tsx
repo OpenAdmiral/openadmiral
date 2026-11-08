@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { LinkGate } from "@/components/LinkGate";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
@@ -186,6 +187,7 @@ export function FloatingGrid({ id }: { id: string }) {
       <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
       <Notices notices={life.notices} />
       <WindowPalette agents={agents} artifacts={artifacts} queues={queues} />
+      <LinkGate />
     </TooltipProvider>
   );
 }

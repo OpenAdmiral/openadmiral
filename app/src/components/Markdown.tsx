@@ -1,17 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import { requestOpen } from "@/lib/linkGate";
 import { cn } from "@/lib/utils";
 
 /** claude.ai pages (artifacts, docs) open inside OpenAdmiral; anything else in the default browser. */
 export const isClaudeLink = (href: string) => /^https:\/\/claude\.ai\//.test(href);
 
 export function openLink(href: string) {
-  if (isClaudeLink(href)) invoke("browser_open", { url: href }).catch(() => openUrl(href));
-  else if (/^https?:\/\//.test(href)) openUrl(href).catch(() => {});
+  // Asks first for a site not trusted yet (lib/linkGate.ts).
+  if (/^https?:\/\//.test(href)) requestOpen(href);
 }
 
 const dark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;

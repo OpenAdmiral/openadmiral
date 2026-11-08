@@ -205,3 +205,21 @@ main[data-rail] > div > div > header:first-child { padding-left: 64px; }
 @media (prefers-reduced-motion: reduce) {
   .fleet-beam { animation: none; }
 }
+
+/* Links in a terminal (components/Terminal.tsx addLinks): drawn over the text. */
+.term-links { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.term-link {
+  position: absolute;
+  background: rgb(18 88 255 / 0.16);
+  box-shadow: inset 0 -1.5px 0 rgb(110 168 255 / 0.95);
+  border-radius: 2px;
+}
+.term-link-mark {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Hides the cell's own character: the terminal's background. */
+  background: var(--color-term, #0f1115);
+  color: rgb(110 168 255);
+}

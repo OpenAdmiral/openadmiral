@@ -69,8 +69,14 @@ describe("windowHits", () => {
 });
 
 describe("a grid window in the Windows row", () => {
-  it("is named after the agents its title lists", () => {
-    const h = windowHits([{ label: "main", id: null, focused: false }, { label: "float-grid-1", id: "grid-1", focused: false, title: "api · docs" }], [], "main");
-    expect(h[1]).toMatchObject({ title: "api · docs", detail: "Grid window" });
+  const a = (id: string, name: string, project: string, status = "idle") => ({ id, name, project, status }) as unknown as Agent;
+  const main = { label: "main", id: null, focused: false };
+  it("is named after the project its agents share", () => {
+    const h = windowHits([main, { label: "float-grid-1", id: "grid-1", focused: false, sessions: ["1", "2"] }], [a("1", "tmv-dd", "tmv-dd"), a("2", "tmv-dd-ppts", "tmv-dd", "working")], "main");
+    expect(h[1]).toMatchObject({ title: "tmv-dd", detail: "tmv-dd · tmv-dd-ppts", win: { project: "tmv-dd", status: "working" } });
+  });
+  it("lists its agents when they come from several projects", () => {
+    const h = windowHits([main, { label: "float-grid-1", id: "grid-1", focused: false, sessions: ["1", "2"] }], [a("1", "api", "api"), a("2", "docs", "docs")], "main");
+    expect(h[1]).toMatchObject({ title: "api · docs", detail: "2 agents" });
   });
 });

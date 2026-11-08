@@ -23,7 +23,7 @@ export type Hit = { key: string; section: Section; title: string; detail?: strin
 export type WindowCard = { project?: string; status?: Agent["status"]; here: boolean; main: boolean };
 
 /** An open window (src-tauri float.rs window_list). */
-export type OpenWindow = { label: string; id: string | null; focused: boolean; title?: string | null };
+export type OpenWindow = { label: string; id: string | null; focused: boolean; title?: string | null; sessions?: string[] };
 
 const VIEW_TITLES: Record<string, string> = { agents: "Agents map", queue: "Up next", costs: "Costs", artifacts: "Artifacts" };
 
@@ -33,8 +33,13 @@ export function windowHits(windows: OpenWindow[], agents: Agent[], here: string)
   return windows.map((w) => {
     const agent = w.id && !w.id.startsWith("view-") ? agents.find((a) => a.id === w.id) : undefined;
     const grid = !!w.id?.startsWith("grid-");
-    const title = !w.id ? "Main window" : agent ? agent.name : grid ? w.title || "Empty grid" : (VIEW_TITLES[w.id.slice(5)] ?? "Window");
-    const detail = !w.id ? "OpenAdmiral" : agent ? agent.project : grid ? "Grid window" : "View";
+    // A grid window is named after what its agents share (their project), else their names.
+    const inGrid = (w.sessions ?? []).map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
+    const projects = [...new Set(inGrid.map((a) => a.project))];
+    const gridTitle = !inGrid.length ? "Empty grid" : projects.length === 1 ? projects[0] : inGrid.map((a) => a.name).join(" · ");
+    const gridDetail = inGrid.length ? (projects.length === 1 ? inGrid.map((a) => a.name).join(" · ") : `${inGrid.length} agents`) : "Grid window";
+    const title = !w.id ? "Main window" : agent ? agent.name : grid ? gridTitle : (VIEW_TITLES[w.id.slice(5)] ?? "Window");
+    const detail = !w.id ? "OpenAdmiral" : agent ? agent.project : grid ? gridDetail : "View";
     return {
       key: `window:${w.label}`,
       section: "Windows" as const,
@@ -42,7 +47,12 @@ export function windowHits(windows: OpenWindow[], agents: Agent[], here: string)
       detail,
       target: { kind: "window" as const, label: w.label },
       haystack: fold(`${title} ${detail} window ventana`),
-      win: { project: agent?.project, status: agent?.status, here: w.label === here, main: !w.id },
+      win: {
+        project: agent?.project ?? (projects.length === 1 ? projects[0] : undefined),
+        status: agent?.status ?? (inGrid.some((a) => a.status === "waiting") ? "waiting" : inGrid.some((a) => a.status === "working") ? "working" : undefined),
+        here: w.label === here,
+        main: !w.id,
+      },
     };
   });
 }

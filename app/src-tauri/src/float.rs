@@ -77,16 +77,24 @@ pub struct WindowInfo {
     pub id: Option<String>,
     pub focused: bool,
     pub title: Option<String>,
+    /// A grid window's agents, in pane order.
+    pub sessions: Vec<String>,
 }
 
 #[tauri::command]
 pub fn window_list(app: AppHandle) -> Vec<WindowInfo> {
     let focused = |label: &str| app.get_webview_window(label).and_then(|w| w.is_focused().ok()).unwrap_or(false);
     let title = |label: &str| app.get_webview_window(label).and_then(|w| w.title().ok());
-    let mut out = vec![WindowInfo { label: "main".into(), id: None, focused: focused("main"), title: None }];
+    let mut out = vec![WindowInfo { label: "main".into(), id: None, focused: focused("main"), title: None, sessions: vec![] }];
     let mut floats = open_windows();
     floats.sort();
-    out.extend(floats.into_iter().map(|(label, id)| WindowInfo { focused: focused(&label), title: title(&label), label, id: Some(id) }));
+    out.extend(floats.into_iter().map(|(label, id)| WindowInfo {
+        focused: focused(&label),
+        title: title(&label),
+        sessions: with_grids(|g| g.get(&label).cloned()).unwrap_or_default(),
+        label,
+        id: Some(id),
+    }));
     out
 }
 

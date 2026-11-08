@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { LinkGate } from "@/components/LinkGate";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef, useState } from "react";
 import { useAdmiral } from "@/lib/admiral";
@@ -138,6 +139,7 @@ export function FloatingAgent({ id, onGrid }: { id: string; /** It took a grid l
       <RestartTrustDialog ask={life.trustAsk} onRetry={life.trustRetry} onCancel={life.trustCancel} />
       <Notices notices={life.notices} />
       <WindowPalette agents={agents} artifacts={artifacts} queues={queues} />
+      <LinkGate />
     </TooltipProvider>
   );
 }
